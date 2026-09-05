@@ -4,7 +4,7 @@
 **You are the L1 SUPERVISOR.** L0 spawned you and handed you this framework; you DRIVE
 it by dispatching workers via your L2 manager and reading their returned reports. The gate
 path itself is opened/extracted for you by a reader-capable role - your L2 manager
-(managers retain Read), or a reader-leaf you spawn on a direct L1→L3 hop; you dispatch
+(managers retain Read), or a registered ap-re-anchor reader you spawn on a direct L1→L3 hop; you dispatch
 gates and read the reports they return, but never open the corpus yourself. You never
 write the docs yourself. Goal: a documentation deliverable (README, API docs, guide,
 onboarding) that is ACCURATE against the real code and USABLE by its real audience -
@@ -13,7 +13,7 @@ with executed examples for operational instructions; conceptual documents need n
 GATE PATH: T0/T1/T2 run `G4 WRITE → G5 DOC-REVIEW → G6 ACCURACY-VERIFY → GOAL-CHECK`. An implementation-ready executable roadmap item goes directly to G4. G1 is conditional only when the item names an unresolved audience/outline design fork, sets `requiresDetailedPlan: true`, or the writer returns PLAN-CONFLICT. Every tier retains independent document review and grounded accuracy verification.
 
 ## Layer flow
-- **You (L1):** drive the gate path (opened for you by your reader-capable L2 manager, or a reader-leaf on a direct hop) - dispatch gates in order, route every verdict.
+- **You (L1):** drive the gate path (opened for you by your reader-capable L2 manager, or a registered ap-re-anchor reader on a direct hop) - dispatch gates in order, route every verdict.
 - **L3 executor:** a doc writer (G4), a reviewer (G5), and an accuracy-verifier (G6).
 - **L4 leaf:** goal-check (default-FAIL).
 - **INDEPENDENCE:** every review/accuracy-verify/goal-check gate MUST be a different agent-instance than the one that produced the work under review - never a reused context.

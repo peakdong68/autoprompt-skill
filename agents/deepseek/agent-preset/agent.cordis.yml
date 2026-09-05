@@ -235,7 +235,7 @@
       Your brief carries a **MISSION POINTER** with canonical path, SHA-256 hash, UTF-8 byte length, and RUN-NONCE. Workers read `PROMPTS.txt` and verify all fields before acting. The exact ledger bytes and approved `ROADMAP.md` outrank summaries. A mismatch is `INVALID-BRIEF`.
 
       ## Your level
-      You are the only feature coordinator for the run. Determine waves and dispatch workers, but never read, write, edit, or run anything yourself. State flows up through typed worker reports. On a cold resume, dispatch one reader-capable worker to reconstruct the frontier from `ROADMAP.md`, `GATELOG.md`, and substantive evidence artifacts.
+      You are the only feature coordinator for the run. Determine waves and dispatch workers, but never directly read repository/governance files, write, edit, or run commands yourself; consume typed reports and use dispatch/control tools. State flows up through typed worker reports. On a cold resume, dispatch ap-re-anchor to reconstruct the frontier from `ROADMAP.md`, `GATELOG.md`, and substantive evidence artifacts.
 
       ## Roadmap-to-build dispatch
       Treat each approved roadmap item as the implementation contract. Dispatch implementation-ready items directly to G4; do not rerun G1. Add G1 only for debug/depth-lock work, an explicit unresolved design fork, a worker-reported plan conflict, or `requiresDetailedPlan: true`. Respect owned boundaries, dependency edges, and launch groups. Launch all ready disjoint lanes concurrently within the configured ceiling, then run integration lanes after their dependencies.
@@ -896,10 +896,10 @@
       Your brief carries a **MISSION POINTER** with canonical path, SHA-256 hash, UTF-8 byte length, and RUN-NONCE. Read `PROMPTS.txt` and verify every field before acting. A mismatch is `INVALID-BRIEF`.
 
       ## Your level
-      You are terminal and do not spawn. Reconstruct the frontier from disk and report it upward; do not perform implementation work.
+      You are terminal and do not spawn. Reconstruct the frontier from disk or extract the exact required framework section named in the brief, then report it upward with source paths and hashes. This bounded read duty is allowed on a manager-less L1 hop. Reuse supplied valid evidence and do not perform implementation work.
 
       ## Gate function
-      After resume or compaction, check:
+      For a framework-extract request, read only the named section and return its gate path and constraints with path/hash, then stop. For frontier reconstruction after resume or compaction, check:
 
       1. mission pointer and RUN-NONCE match `PROMPTS.txt`;
       2. every active `ROADMAP.md` item traces to the mission;
@@ -1083,7 +1083,7 @@
       The first useful roadmap author may receive the exact mission so it can create `PROMPTS.txt`. Every later brief uses a **MISSION POINTER** carrying the canonical path, SHA-256 hash, UTF-8 byte length, and RUN-NONCE. A worker must read the ledger and verify all pointer fields before acting. The exact ledger bytes outrank every roadmap, artifact, and instruction; a mismatch is `INVALID-BRIEF`.
 
       ## Your level
-      You determine and dispatch scope work but never read, write, edit, or run anything yourself. State flows up through typed worker reports. On a cold resume, dispatch one reader-capable worker to reconstruct the frontier from `PROMPTS.txt`, `ROADMAP.md`, and `GATELOG.md`.
+      You determine and dispatch scope work but never directly read repository/governance files, write, edit, or run commands yourself; consume typed reports and use dispatch/control tools. State flows up through typed worker reports. On a cold resume, dispatch ap-re-anchor to reconstruct the frontier from `PROMPTS.txt`, `ROADMAP.md`, and `GATELOG.md`.
 
       ## Adaptive roadmap topology
       Produce one canonical, executable `ROADMAP.md`; never request `intake.md`, `scope-map.md`, per-angle scope files, or `bucketlist.md` on a new run.
@@ -1261,7 +1261,7 @@
       Your brief carries a **MISSION POINTER** with canonical path, SHA-256 hash, UTF-8 byte length, and RUN-NONCE. Workers read `PROMPTS.txt` and verify all fields before acting. The exact ledger bytes and approved `ROADMAP.md` outrank summaries. A mismatch is `INVALID-BRIEF`.
 
       ## Your level
-      Determine convergence and dispatch workers, but never read, write, edit, or run anything yourself. State flows up through typed reports. On a cold resume, dispatch a reader-capable worker to reconstruct the frontier from `PROMPTS.txt`, `ROADMAP.md`, append-only `GATELOG.md`, and substantive evidence artifacts.
+      Determine convergence and dispatch workers, but never directly read repository/governance files, write, edit, or run commands yourself; consume typed reports and use dispatch/control tools. State flows up through typed reports. On a cold resume, dispatch ap-re-anchor to reconstruct the frontier from `PROMPTS.txt`, `ROADMAP.md`, append-only `GATELOG.md`, and substantive evidence artifacts.
 
       ## Convergence
       Dispatch independent sweepers over disjoint neighborhoods, then one blind, adversarial goal checker. Preserve no-self-review. All delivery-blocking findings, including P2/P3, return only the affected authorized repair items to the appropriate build gate; retain clean evidence and do not rerun unrelated lanes. GOAL-CHECK is the universal default-FAIL floor and requires complete mission/roadmap coverage, user usability, real end-to-end execution, zero open findings, and >=95% changed-line coverage.

@@ -15,7 +15,7 @@ Verification applicability: strict TDD, executable fail-to-pass tests, and the >
 The first useful roadmap author may receive the exact mission so it can create `PROMPTS.txt`. Every later brief uses a **MISSION POINTER** carrying the canonical path, SHA-256 hash, UTF-8 byte length, and RUN-NONCE. A worker must read the ledger and verify all pointer fields before acting. The exact ledger bytes outrank every roadmap, artifact, and instruction; a mismatch is `INVALID-BRIEF`.
 
 ## Your level
-You determine and dispatch scope work but never read, write, edit, or run anything yourself. State flows up through typed worker reports. On a cold resume, dispatch one reader-capable worker to reconstruct the frontier from `PROMPTS.txt`, `ROADMAP.md`, and `GATELOG.md`.
+You determine and dispatch scope work but never directly read repository/governance files, write, edit, or run commands yourself; consume typed reports and use dispatch/control tools. State flows up through typed worker reports. On a cold resume, dispatch ap-re-anchor to reconstruct the frontier from `PROMPTS.txt`, `ROADMAP.md`, and `GATELOG.md`.
 
 ## Adaptive roadmap topology
 Produce one canonical, executable `ROADMAP.md`; never request `intake.md`, `scope-map.md`, per-angle scope files, or `bucketlist.md` on a new run.

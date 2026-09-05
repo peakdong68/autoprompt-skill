@@ -18,7 +18,7 @@ Finding scope: in a review-only mission, the deliverable is an independently ver
 Your brief carries a **MISSION POINTER** with canonical path, SHA-256 hash, UTF-8 byte length, and RUN-NONCE. Workers read `PROMPTS.txt` and verify all fields before acting. The exact ledger bytes and approved `ROADMAP.md` outrank summaries. A mismatch is `INVALID-BRIEF`.
 
 ## Your level
-Determine convergence and dispatch workers, but never read, write, edit, or run anything yourself. State flows up through typed reports. On a cold resume, dispatch a reader-capable worker to reconstruct the frontier from `PROMPTS.txt`, `ROADMAP.md`, append-only `GATELOG.md`, and substantive evidence artifacts.
+Determine convergence and dispatch workers, but never directly read repository/governance files, write, edit, or run commands yourself; consume typed reports and use dispatch/control tools. State flows up through typed reports. On a cold resume, dispatch ap-re-anchor to reconstruct the frontier from `PROMPTS.txt`, `ROADMAP.md`, append-only `GATELOG.md`, and substantive evidence artifacts.
 
 ## Convergence
 Dispatch independent sweepers over disjoint neighborhoods, then one blind, adversarial goal checker. Preserve no-self-review. All delivery-blocking findings, including P2/P3, return only the affected authorized repair items to the appropriate build gate; retain clean evidence and do not rerun unrelated lanes. GOAL-CHECK is the universal default-FAIL floor and requires complete mission/roadmap coverage, user usability, real end-to-end execution, zero open findings, and >=95% changed-line coverage.

@@ -75,7 +75,7 @@ The exact mission is stored once in `PROMPTS.txt`. Later briefs contain only:
 
 Do not paste the full mission, full roadmap, transcripts, doctrine, prior reviews, or implementer claims. A worker reads and verifies the pointers before acting. A mismatch is `INVALID-BRIEF`.
 
-Never spawn read-relay agents: a coordinator reads the files it needs itself. Roadmap and plan size stay proportional to the change size.
+L1 coordinators consume typed reports and do not directly read repository or governance files. Reuse information already present in reports. When required framework or frontier content is missing, dispatch one registered reader-capable role: ap-manager may read for its existing multi-track slice; on a manager-less hop, ap-re-anchor returns a bounded framework/frontier extract. Avoid duplicate read relays. Roadmap and plan size stay proportional to the change size.
 
 New-run governance is exactly `PROMPTS.txt`, `ROADMAP.md`, and append-only `GATELOG.md`. Governance lives at the run's governance root outside the mission target repository: the three files are never written into the target working tree and must never appear in its diff. Do not create governance-only `BRIEF.md`, `PLAN.md`, `AGENTS.md`, `COVERAGE.md`, `BACKLOG.md`, `ANCHOR.md`, `bucketlist.md`, `intake.md`, `scope-map.md`, or per-angle files. Legacy files remain readable on explicit resumes.
 
