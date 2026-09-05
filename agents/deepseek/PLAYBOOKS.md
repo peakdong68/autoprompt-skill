@@ -68,7 +68,7 @@ The exact mission is stored once in `PROMPTS.txt`. Later briefs contain the acti
 - role and objective;
 - owned boundary and dependencies;
 - positive acceptance criteria;
-- mission pointer with canonical path, SHA-256 hash, UTF-8 byte length, and RUN-NONCE;
+- versioned mission pointer with canonical path, PROMPT version, SHA-256 prefix hash, UTF-8 prefix byte length, and RUN-NONCE;
 - roadmap section and evidence pointers with hashes;
 - output schema;
 - truthful model and effort status.
@@ -112,3 +112,9 @@ Finding scope: in a review-only mission, the deliverable is an independently ver
 ## Activation envelope
 
 Activation envelope: L0 creates the literal line AUTOPROMPT-RUN-MARKER: active only after an explicit mission invocation (or verified explicit/supervisor resume), binds a unique RUN-NONCE and the governance root outside the target repository, and passes them on every dispatch. The initial L1 scope coordinator and first ap-scoper author receive the exact mission bytes as the bootstrap binding; the author stores them atomically and returns the mission pointer. Every later dispatch carries that pointer. All dispatchers forward the same activation envelope; workers verify its marker, nonce, root and mission binding before mission work. A worker never invents missing activation or starts a run. On missing fields, return INVALID-DISPATCH to the parent, which repairs the brief from its established active-run binding and retries; ask the user only when actual mission authority is absent. This marker adds no git, publication, spending, or destructive authority.
+
+## Versioned mission pointers
+
+Versioned mission pointer: path=<PROMPTS.txt> version=<last complete PROMPT block number> bytes=<UTF-8 prefix byte count> hash=sha256:<hash of exactly the first bytes bytes> nonce=<RUN-NONCE>. Verify the canonical path, nonce, complete block boundary, prefix length and prefix hash; the file may be longer due to later append-only blocks. Read only the bound prefix as this dispatch's mission version. A shorter file, changed bound prefix, wrong nonce, or invalid block boundary is INVALID-BRIEF/INTEGRITY-MISMATCH, not an absent artifact. Preserve evidence and ask the parent to reconcile; never silently restart or accept changed bytes. Record version, bytes, hash and nonce in every dispatch/frontier row. Legacy pointers without version retain their original whole-file hash/length validation and must be explicitly reconciled before conversion.
+
+Append steering atomically as a complete next PROMPT block and publish a new versioned frontier. Non-urgent steering may leave unaffected workers on their bound version; the parent checks each result against the latest accepted user requirements at join, preserves compatible evidence, and reopens only affected items. For urgent steering, checkpoint and cancel affected work before redispatch with the new version. User steering cannot be replaced by inferred prose. Authorized append-only growth alone never invalidates an earlier bound prefix.

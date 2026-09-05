@@ -67,11 +67,11 @@ Governance lives at the run's governance root outside the mission target reposit
 The first roadmap author stores the exact mission in `PROMPTS.txt`. Later briefs carry:
 
 ```text
-MISSION POINTER: read the exact prompt ledger before acting; stop if its hash or byte length differs.
-path=<PROMPTS.txt> hash=sha256:<64 hex> bytes=<UTF-8 byte length> nonce=<RUN-NONCE>
+MISSION POINTER: read the exact prompt ledger before acting; stop if the bound prefix hash/length or version boundary fails verification.
+path=<PROMPTS.txt> version=<N> bytes=<UTF-8 prefix byte count> hash=sha256:<64 hex prefix hash> nonce=<RUN-NONCE>
 ```
 
-Workers verify path, hash, byte length, and nonce before acting. Send the activation envelope plus role, objective, boundary, dependencies, acceptance criteria, roadmap/evidence pointers with hashes, output schema/path, and model/effort status. Do not paste the mission, transcript, full roadmap, doctrine, or prior adversarial reasoning. Preserve blind review.
+Workers verify path, version, bound-prefix hash, prefix byte length, and nonce before acting. Send the activation envelope plus role, objective, boundary, dependencies, acceptance criteria, roadmap/evidence pointers with hashes, output schema/path, and model/effort status. Do not paste the mission, transcript, full roadmap, doctrine, or prior adversarial reasoning. Preserve blind review.
 
 ## 7. Hierarchy and dispatch
 
@@ -107,7 +107,7 @@ DONE requires full mission/roadmap coverage, zero open findings, usability, no p
 
 ## 10. Resume, steering, arbitration, and git
 
-Resume is explicit: only an explicit `resume` instruction or a supervisor relaunch resumes a run; skill load, bare invocation, or leftover artifacts never do. The only startup read is the `GATELOG.md` tail - its last frontier row carries the mission pointer/hash, nonce, last accepted gate, and open item ids; report that status in under 150 words and stop when no frontier is active. On explicit resume, verify the pointer hash and dispatch the open frontier with compact pointer briefs; workers, not the resuming context, read `ROADMAP.md`, `PROMPTS.txt`, and substantive evidence. Treat temporary, empty, or unparsable artifacts as absent. Append later self-written steering to the next `PROMPTS.txt` block without rewriting history.
+Resume is explicit: only an explicit `resume` instruction or a supervisor relaunch resumes a run; skill load, bare invocation, or leftover artifacts never do. The only startup read is the `GATELOG.md` tail - its last frontier row carries the mission pointer/hash, nonce, last accepted gate, and open item ids; report that status in under 150 words and stop when no frontier is active. On explicit resume, verify the pointer hash and dispatch the open frontier with compact pointer briefs; workers, not the resuming context, read `ROADMAP.md`, `PROMPTS.txt`, and substantive evidence. Treat temporary or empty artifacts as absent only when no accepted frontier references them; unparsable or hash-mismatched referenced artifacts require integrity reconciliation. Append exact later user steering as the next complete `PROMPTS.txt` block and publish its new versioned pointer without rewriting history.
 
 The arbiter decides technical forks. Ask the user mid-run only for genuinely user-owned irreversible/destructive actions, unapproved spending or quota increases, unavailable credentials, or product direction. Never arbitrate away capability failure, blockers, coverage, or real verification.
 
@@ -138,3 +138,9 @@ Completion ownership: GOAL-CHECK returns PASS or NOT-DONE for delivery acceptanc
 ## Activation envelope
 
 Activation envelope: L0 creates the literal line AUTOPROMPT-RUN-MARKER: active only after an explicit mission invocation (or verified explicit/supervisor resume), binds a unique RUN-NONCE and the governance root outside the target repository, and passes them on every dispatch. The initial L1 scope coordinator and first ap-scoper author receive the exact mission bytes as the bootstrap binding; the author stores them atomically and returns the mission pointer. Every later dispatch carries that pointer. All dispatchers forward the same activation envelope; workers verify its marker, nonce, root and mission binding before mission work. A worker never invents missing activation or starts a run. On missing fields, return INVALID-DISPATCH to the parent, which repairs the brief from its established active-run binding and retries; ask the user only when actual mission authority is absent. This marker adds no git, publication, spending, or destructive authority.
+
+## Versioned mission pointers
+
+Versioned mission pointer: path=<PROMPTS.txt> version=<last complete PROMPT block number> bytes=<UTF-8 prefix byte count> hash=sha256:<hash of exactly the first bytes bytes> nonce=<RUN-NONCE>. Verify the canonical path, nonce, complete block boundary, prefix length and prefix hash; the file may be longer due to later append-only blocks. Read only the bound prefix as this dispatch's mission version. A shorter file, changed bound prefix, wrong nonce, or invalid block boundary is INVALID-BRIEF/INTEGRITY-MISMATCH, not an absent artifact. Preserve evidence and ask the parent to reconcile; never silently restart or accept changed bytes. Record version, bytes, hash and nonce in every dispatch/frontier row. Legacy pointers without version retain their original whole-file hash/length validation and must be explicitly reconciled before conversion.
+
+Append steering atomically as a complete next PROMPT block and publish a new versioned frontier. Non-urgent steering may leave unaffected workers on their bound version; the parent checks each result against the latest accepted user requirements at join, preserves compatible evidence, and reopens only affected items. For urgent steering, checkpoint and cancel affected work before redispatch with the new version. User steering cannot be replaced by inferred prose. Authorized append-only growth alone never invalidates an earlier bound prefix.

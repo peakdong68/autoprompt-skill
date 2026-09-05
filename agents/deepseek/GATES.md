@@ -21,11 +21,11 @@ Governance lives at the run's governance root outside the mission target reposit
 The first roadmap author stores the exact mission in `PROMPTS.txt`. Every later brief starts with this verified mission pointer:
 
 ```text
-MISSION POINTER: read the exact prompt ledger before acting; stop if its hash or byte length differs.
-path=<PROMPTS.txt> hash=sha256:<64 hex> bytes=<UTF-8 byte length> nonce=<RUN-NONCE>
+MISSION POINTER: read the exact prompt ledger before acting; stop if the bound prefix hash/length or version boundary fails verification.
+path=<PROMPTS.txt> version=<N> bytes=<UTF-8 prefix byte count> hash=sha256:<64 hex prefix hash> nonce=<RUN-NONCE>
 ```
 
-The worker verifies path, hash, byte length, and nonce before acting. Then provide the activation envelope plus role, objective, owned boundary, dependencies, acceptance criteria, hashed roadmap/evidence pointers, output contract/path, and truthful model/effort status. Do not paste the mission, transcript, full roadmap, doctrine, or prior adversarial reasoning. A missing or mismatched pointer is `INVALID-BRIEF`; do not guess or proceed.
+The worker verifies path, version, bound-prefix hash, prefix byte length, and nonce before acting. Then provide the activation envelope plus role, objective, owned boundary, dependencies, acceptance criteria, hashed roadmap/evidence pointers, output contract/path, and truthful model/effort status. Do not paste the mission, transcript, full roadmap, doctrine, or prior adversarial reasoning. A missing or mismatched pointer is `INVALID-BRIEF`; do not guess or proceed.
 
 Every gate uses a fresh context and writes substantive evidence before reporting. Negative verdicts also write evidence. No gate author reviews or verifies its own work.
 
@@ -220,7 +220,7 @@ Preserve the G3.5 and FEATURE-META forms exactly as defined above. Legacy rows r
 
 ## 5. Resume, DeepSeek Harness configuration, and authority
 
-Resume is explicit: only an explicit `resume` instruction or a supervisor relaunch resumes a run. The resuming context reads only the `GATELOG.md` tail - the last frontier row with its mission pointer/hash, nonce, last accepted gate, and open item ids - verifies the pointer hash, and dispatches the open frontier with compact pointer briefs. Workers, not the resuming context, read `ROADMAP.md`, `PROMPTS.txt`, and substantive evidence. Treat temporary, empty, malformed, or hash-mismatched artifacts as absent. Re-verify the last accepted frontier and continue idempotently. Legacy ledgers may supply a frontier, but are read-only compatibility inputs.
+Resume is explicit: only an explicit `resume` instruction or a supervisor relaunch resumes a run. The resuming context reads only the `GATELOG.md` tail - the last frontier row with its mission pointer/hash, nonce, last accepted gate, and open item ids - verifies the pointer hash, and dispatches the open frontier with compact pointer briefs. Workers, not the resuming context, read `ROADMAP.md`, `PROMPTS.txt`, and substantive evidence. Treat temporary or empty artifacts as absent only when no accepted frontier references them. Malformed or hash-mismatched referenced artifacts are integrity errors to reconcile, not absent files. Re-verify the last accepted frontier and continue idempotently. Legacy ledgers may supply a frontier, but are read-only compatibility inputs.
 
 DeepSeek Harness agent selection is `inherited-only`: generated roles omit model overrides and inherit the selected parent model. Model and effort never change gates or concurrency.
 
@@ -245,3 +245,9 @@ Completion ownership: GOAL-CHECK returns PASS or NOT-DONE for delivery acceptanc
 ## Activation envelope
 
 Activation envelope: L0 creates the literal line AUTOPROMPT-RUN-MARKER: active only after an explicit mission invocation (or verified explicit/supervisor resume), binds a unique RUN-NONCE and the governance root outside the target repository, and passes them on every dispatch. The initial L1 scope coordinator and first ap-scoper author receive the exact mission bytes as the bootstrap binding; the author stores them atomically and returns the mission pointer. Every later dispatch carries that pointer. All dispatchers forward the same activation envelope; workers verify its marker, nonce, root and mission binding before mission work. A worker never invents missing activation or starts a run. On missing fields, return INVALID-DISPATCH to the parent, which repairs the brief from its established active-run binding and retries; ask the user only when actual mission authority is absent. This marker adds no git, publication, spending, or destructive authority.
+
+## Versioned mission pointers
+
+Versioned mission pointer: path=<PROMPTS.txt> version=<last complete PROMPT block number> bytes=<UTF-8 prefix byte count> hash=sha256:<hash of exactly the first bytes bytes> nonce=<RUN-NONCE>. Verify the canonical path, nonce, complete block boundary, prefix length and prefix hash; the file may be longer due to later append-only blocks. Read only the bound prefix as this dispatch's mission version. A shorter file, changed bound prefix, wrong nonce, or invalid block boundary is INVALID-BRIEF/INTEGRITY-MISMATCH, not an absent artifact. Preserve evidence and ask the parent to reconcile; never silently restart or accept changed bytes. Record version, bytes, hash and nonce in every dispatch/frontier row. Legacy pointers without version retain their original whole-file hash/length validation and must be explicitly reconciled before conversion.
+
+Append steering atomically as a complete next PROMPT block and publish a new versioned frontier. Non-urgent steering may leave unaffected workers on their bound version; the parent checks each result against the latest accepted user requirements at join, preserves compatible evidence, and reopens only affected items. For urgent steering, checkpoint and cancel affected work before redispatch with the new version. User steering cannot be replaced by inferred prose. Authorized append-only growth alone never invalidates an earlier bound prefix.
