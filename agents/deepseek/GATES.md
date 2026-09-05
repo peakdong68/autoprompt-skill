@@ -62,6 +62,8 @@ Record each approved item before dispatch using the mechanically readable gramma
 
 ## 3. Gate routing
 
+Verification applicability: strict TDD, executable fail-to-pass tests, and the >=95% changed-line/touched-module coverage floor apply to executable code changes. For documentation, research, design, or review-only deliverables with no executable code change, record those code-only metrics as N/A with evidence and independent reviewer approval; validate the actual artifact against its acceptance criteria instead. N/A never waives an applicable failing check, a runnable claim, or a user-required execution/demo. Mixed missions retain the code gates on every code-changing item. Usability means the requested artifact is accessible and usable by its audience; an onboarding artifact is required only when the mission or actual entry flow needs one.
+
 The approved roadmap is the default implementation contract. Dispatch ready items directly to G4. Add G1 only when an item is debug/depth-lock work, has a named unresolved design fork, sets `requiresDetailedPlan: true`, or returns `PLAN-CONFLICT` from implementation.
 
 | Route | Gate path |
@@ -70,7 +72,7 @@ The approved roadmap is the default implementation contract. Dispatch ready item
 | conditional detailed plan | G1 → {G2 ‖ G3} → G4 → {G5 ‖ G6} → optional G7 → G8 → GOAL-CHECK |
 | **T1** debug/depth-lock | G1 → {G2 ‖ G3} → G3.5 → G4 → {G5 ‖ G6} → G8 → GOAL-CHECK |
 
-Tiers describe depth ceilings and risk, not a mandatory full pipeline. A framework may omit unnecessary gates but may not remove strict TDD, independent implementation review, runtime verification, the coverage floor, depth-lock for debug work, or GOAL-CHECK.
+Tiers describe depth ceilings and risk, not a mandatory full pipeline. A framework may omit unnecessary gates. Code changes retain strict TDD, independent implementation review, runtime verification, the coverage floor, and debug depth-lock. Non-code items use the applicability rule above with independent artifact review and verification. Every item retains GOAL-CHECK.
 
 Ready disjoint items launch together within the selected concurrency and the runtime task ceilings, spawn-all-then-collect: issue every spawn of a ready group before collecting any report - parallel background dispatch is the default shape, and serialization is allowed only for declared real dependencies. Do not spawn agents merely to fill capacity, duplicate ownership, or recursively split a single analytical job.
 

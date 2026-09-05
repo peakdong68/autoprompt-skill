@@ -55,3 +55,7 @@ pause affected work without bypassing authorization or claiming the mission is c
 ONE L3 track (its parallelism is YOU dispatching sibling researchers per theme). A
 mission needing research THEN build is split in ROADMAP.md - research feeds the build
 framework - `frameworks/composition.md`.
+
+## Verification applicability
+
+Verification applicability: strict TDD, executable fail-to-pass tests, and the >=95% changed-line/touched-module coverage floor apply to executable code changes. For documentation, research, design, or review-only deliverables with no executable code change, record those code-only metrics as N/A with evidence and independent reviewer approval; validate the actual artifact against its acceptance criteria instead. N/A never waives an applicable failing check, a runnable claim, or a user-required execution/demo. Mixed missions retain the code gates on every code-changing item. Usability means the requested artifact is accessible and usable by its audience; an onboarding artifact is required only when the mission or actual entry flow needs one.

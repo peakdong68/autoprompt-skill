@@ -63,3 +63,7 @@ pause affected work without bypassing authorization or claiming the mission is c
 ## Stacking
 ONE L3 track. Typical flow: `plan-design` produces the blueprint, then a build
 framework consumes it as a sequenced track - `frameworks/composition.md`.
+
+## Verification applicability
+
+Verification applicability: strict TDD, executable fail-to-pass tests, and the >=95% changed-line/touched-module coverage floor apply to executable code changes. For documentation, research, design, or review-only deliverables with no executable code change, record those code-only metrics as N/A with evidence and independent reviewer approval; validate the actual artifact against its acceptance criteria instead. N/A never waives an applicable failing check, a runnable claim, or a user-required execution/demo. Mixed missions retain the code gates on every code-changing item. Usability means the requested artifact is accessible and usable by its audience; an onboarding artifact is required only when the mission or actual entry flow needs one.

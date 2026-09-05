@@ -5,6 +5,8 @@ reintroduce legacy workflow governance.
 
 ## Roadmap-first invariant
 
+Verification applicability: strict TDD, executable fail-to-pass tests, and the >=95% changed-line/touched-module coverage floor apply to executable code changes. For documentation, research, design, or review-only deliverables with no executable code change, record those code-only metrics as N/A with evidence and independent reviewer approval; validate the actual artifact against its acceptance criteria instead. N/A never waives an applicable failing check, a runnable claim, or a user-required execution/demo. Mixed missions retain the code gates on every code-changing item. Usability means the requested artifact is accessible and usable by its audience; an onboarding artifact is required only when the mission or actual entry flow needs one.
+
 New runs start useful-first work after the chooser. There is no separate intake round
 trip, mandatory preflight agent, scope-map, or separate plan bureaucracy. A
 trusted launch attestation with complete bindings may skip probing; otherwise the

@@ -8,7 +8,7 @@ path itself is opened/extracted for you by a reader-capable role - your L2 manag
 gates and read the reports they return, but never open the corpus yourself. You never
 write the docs yourself. Goal: a documentation deliverable (README, API docs, guide,
 onboarding) that is ACCURATE against the real code and USABLE by its real audience -
-with at least one example that actually runs. Owns no production code.
+with executed examples for operational instructions; conceptual documents need no invented runnable example. Owns no production code.
 
 GATE PATH: T0/T1/T2 run `G4 WRITE → G5 DOC-REVIEW → G6 ACCURACY-VERIFY → GOAL-CHECK`. An implementation-ready executable roadmap item goes directly to G4. G1 is conditional only when the item names an unresolved audience/outline design fork, sets `requiresDetailedPlan: true`, or the writer returns PLAN-CONFLICT. Every tier retains independent document review and grounded accuracy verification.
 
@@ -32,8 +32,9 @@ If the thing to document is UNKNOWN/undiscovered → **S1** hand to `plan-resear
 Write to the outline against the REAL code - read the actual signatures, flags,
 routes, config, and behaviors as you write; do not paraphrase from memory. Every
 runnable claim (install step, API call, CLI command) is written as a concrete example
-a reader can copy. At least ONE end-to-end example must be included that genuinely
-runs against the real artifact.
+a reader can copy. For operational instructions, include at least ONE end-to-end example that genuinely
+runs against the real artifact. Conceptual documents are verified against their sources
+and acceptance criteria without adding unrelated executable examples.
 
 ### Phase 3 - DOC-REVIEW (G5, fresh worker, every tier)
 A fresh reviewer checks: audience fit (does it answer the reader's real questions),
@@ -50,7 +51,7 @@ re-verify. Never ship a doc claim you did not check against code.
 
 ### Phase 5 - GOAL-CHECK → **S5** DONE
 A fresh default-FAIL goal-check confirms the audience's needs are met, every claim was
-verified against the real code, and at least one example ran → DONE.
+verified against the real code, and any required operational example ran → DONE.
 
 ## THE BLOCKED INVARIANT (non-negotiable)
 Run required verification in the real environment; never fabricate evidence or claim
@@ -69,8 +70,12 @@ pause affected work without bypassing authorization or claiming the mission is c
   doc) until it runs, then re-verify. Never ship an example you did not execute.
 - **S4 - the "docs" task is really scoping a whole deliverable's roadmap** → hand to
   `plan-scope`; docs covers the documentation artifact itself.
-- **S5 - audience needs met + every claim verified against code + example ran** → DONE.
+- **S5 - audience needs met + every claim verified against code + required examples ran (or evidenced N/A for conceptual docs)** → DONE.
 
 ## Stacking
 ONE L3 track. Docs for a multi-surface deliverable are split in ROADMAP.md into
 disjoint-ownership doc features - `frameworks/composition.md`.
+
+## Verification applicability
+
+Verification applicability: strict TDD, executable fail-to-pass tests, and the >=95% changed-line/touched-module coverage floor apply to executable code changes. For documentation, research, design, or review-only deliverables with no executable code change, record those code-only metrics as N/A with evidence and independent reviewer approval; validate the actual artifact against its acceptance criteria instead. N/A never waives an applicable failing check, a runnable claim, or a user-required execution/demo. Mixed missions retain the code gates on every code-changing item. Usability means the requested artifact is accessible and usable by its audience; an onboarding artifact is required only when the mission or actual entry flow needs one.
