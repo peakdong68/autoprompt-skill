@@ -1181,9 +1181,23 @@ function renderOutputs(root = ROOT) {
     }
     outputs.set(`agents/${provider}/README.md`, renderInheritedProviderReadme(provider))
   }
+  // DeepSeek-only policy edits preserve the shared contracts for other providers.
+  // Exact match counts fail closed when an upstream change needs reconciliation.
+  const deepSeekEdits = JSON.parse(read('agents/contracts/deepseek-edits.json', root))
+  for (const batch of deepSeekEdits) {
+    for (const edit of batch.edits) {
+      const target = `agents/deepseek/${edit.file}`
+      const source = outputs.get(target)
+      if (!source || !edit.before || source.split(edit.before).length - 1 !== edit.count) {
+        throw new Error(`DeepSeek edit ${batch.id} no longer matches ${target}`)
+      }
+      outputs.set(target, source.split(edit.before).join(edit.after))
+    }
+  }
+  const deepSeekSources = contract.personas.map(persona => outputs.get(`agents/deepseek/agents/${persona.id}.md`))
   outputs.set(
     'agents/deepseek/agent-preset/agent.cordis.yml',
-    renderDeepSeekPreset(contract.personas, personaSources),
+    renderDeepSeekPreset(contract.personas, deepSeekSources),
   )
   outputs.set('agents/deepseek/agent-preset/preset.yml', [
     'name: Autoprompt',
@@ -1192,7 +1206,7 @@ function renderOutputs(root = ROOT) {
   ].join('\n'))
   outputs.set(
     'agents/deepseek/headless.patch.yml',
-    renderDeepSeekHeadlessPatch(contract.personas, personaSources),
+    renderDeepSeekHeadlessPatch(contract.personas, deepSeekSources),
   )
 
   const packageVersion = JSON.parse(read('package.json', root)).version
