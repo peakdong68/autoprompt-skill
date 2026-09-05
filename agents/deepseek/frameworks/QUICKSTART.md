@@ -53,10 +53,7 @@ red, root-cause it, fix it, prove green. Done when its workflow says done.
 1. **FOLLOW LITERALLY.** Do the chosen framework's numbered steps and its if/else
    scenarios exactly as written. Do not improvise, reorder, or skip. The framework
    is the contract - no more, no less.
-2. **THE BLOCKED INVARIANT.** On ANY blocker, STOP: report the attempt + the concrete
-   unblock path and loop the verdict UP to your dispatcher - never fake a pass, never
-   fabricate evidence, never declare DONE over a red or un-runnable check, and NEVER
-   yield to the user. Each leaf carries this ~5-line invariant verbatim; obey it.
+2. **THE BLOCKED INVARIANT.** Pause the affected step, report evidence upward, and continue independent authorized work. Use the recovery block in the selected leaf. Only L0 requests user-owned input; unattended runs record the dependency and resume condition. Required failed or un-runnable checks never count as passed.
 
 ---
 

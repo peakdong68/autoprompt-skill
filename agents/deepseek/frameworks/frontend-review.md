@@ -79,11 +79,13 @@ seen that was not. The artifact states up front that it ran degraded and which
 findings are unverified.
 
 ## THE BLOCKED INVARIANT (non-negotiable)
-Verification runs the REAL check in its REAL environment - NEVER fake a pass, NEVER
-fabricate evidence, NEVER declare DONE over a red or un-runnable check. On ANY blocker,
-STOP and report the attempt + the concrete unblock path, then loop that verdict UP to
-your dispatcher (never sideways) - stay in the closed loop and resolve every open
-question through a subagent, NEVER yielding to the user.
+Run required verification in the real environment; never fabricate evidence or claim
+success over a failed or un-runnable required check. A worker pauses only the affected
+step and reports evidence and a recovery path to its dispatcher. The dispatcher continues
+independent work and performs reversible recovery within existing authorization.
+Only L0 asks for missing credentials, user-owned product decisions, or required approval.
+Unattended runs record userRequired=true and a resume condition for those dependencies;
+pause affected work without bypassing authorization or claiming the mission is complete.
 
 ## Closed decision scenarios (each ends at ONE verdict)
 - **S1 - no running surface can be stood up at all** → BLOCKED (report attempt + unblock path).

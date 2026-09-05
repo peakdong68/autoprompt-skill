@@ -120,3 +120,7 @@ Use DeepSeek Harness 0.1.0-rc.7 or later and explicitly invoke:
 ```
 
 Select the Autoprompt agent preset for Web sessions. For headless runs, pass the installed `headless.patch.yml` with `--patch`. Each role tool denies non-allowlisted role tools and uses a depth ceiling of four.
+
+## Recovery ownership
+
+Run required verification in the real environment; never fabricate evidence or claim success over a failed or un-runnable required check. A worker pauses only the affected step and reports evidence and a recovery path to its dispatcher. The dispatcher continues independent work and performs reversible recovery within existing authorization. Only L0 asks for missing credentials, user-owned product decisions, or required approval. Unattended runs record userRequired=true and a resume condition for those dependencies; pause affected work without bypassing authorization or claiming the mission is complete. Capability and integrity failures still prohibit dependent implementation; an authorized diagnostic/recovery attempt may restore the precondition before retry. An invalid brief or failed worker report is not itself a request for renewed mission approval.
