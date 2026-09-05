@@ -20,7 +20,7 @@ Before spawning, resolve only undefined operator knobs:
 - **Concurrency:** `tokensaver` (default, up to six live), `wide`/`billionaire` (all ready disjoint work up to the global ceiling), or `custom max_subs=N`.
 - **Agent selection:** `off`/inherit. DeepSeek Harness subagents inherit the runtime model, so effort capability is exactly `inherited-only`; never claim a selectable effort.
 
-In an attended session, ask for undefined concurrency before repository/tool work; retain any concurrency already chosen in this session. Set agents=off and report inherited-only without asking about these fixed capabilities. In an unattended supervisor run, do not ask: default to `tokensaver` and `agents=off` and record the assumptions. A permission-bypass flag is not unattendedness.
+In an attended session, ask all undefined knobs in one question before repository/tool work. In an unattended supervisor run, do not ask: default to `tokensaver` and `agents=off` and record the assumptions. A permission-bypass flag is not unattendedness.
 
 After the chooser, dispatch the L1 scope coordinator `ap-scope-coordinator`; it dispatches the useful-first roadmap author. There is no separate intake round trip and no mandatory preflight agent.
 

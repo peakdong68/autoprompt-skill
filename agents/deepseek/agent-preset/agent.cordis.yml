@@ -73,8 +73,6 @@
       The compact brief must carry the verified mission pointer, decision objective, competing options, evidence pointers, output schema, and truthful model/effort status. Do not require pasted doctrine or a repeated mission transcript. If required evidence is absent or mismatched, report INVALID-BRIEF; never invent a missing option.
     toolFilter:
       deny:
-        - subagent
-        - subagent_fork
         - ap_arbiter
         - ap_depth_prober
         - ap_execharness_resolver
@@ -130,8 +128,6 @@
       The compact brief must carry the verified mission pointer, gate objective, owned boundary, required roadmap and raw-evidence pointers, output schema, and truthful model/effort status. Do not require pasted doctrine, a repeated mission transcript, or a fenced gate-corpus extract. If a required pointer is absent or mismatched, report INVALID-BRIEF; never guess or reconstruct it.
     toolFilter:
       deny:
-        - subagent
-        - subagent_fork
         - ap_arbiter
         - ap_depth_prober
         - ap_execharness_resolver
@@ -187,8 +183,6 @@
       The compact brief must carry the verified mission pointer, gate objective, owned boundary, required roadmap and raw-evidence pointers, output schema, and truthful model/effort status. Do not require pasted doctrine, a repeated mission transcript, or a fenced gate-corpus extract. If a required pointer is absent or mismatched, report INVALID-BRIEF; never guess or reconstruct it.
     toolFilter:
       deny:
-        - subagent
-        - subagent_fork
         - ap_arbiter
         - ap_depth_prober
         - ap_execharness_resolver
@@ -248,8 +242,6 @@
       Never end a turn idle with ready work. Reconcile reported liveness with the task system before waiting or redispatching. Stop each worker explicitly once its final report is collected; a parked resumable worker is still a live worker and counts against the ceiling. Report in <=150 words: dispatched wave, per-feature gate/frontier status, blockers, arbitration, and `ALL CONVERGED` or the next wave. A final report means zero live subagents: every worker you dispatched is collected and stopped. Echo the RUN-NONCE.
     toolFilter:
       deny:
-        - subagent
-        - subagent_fork
         - ap_feature_coordinator
         - ap_scope_coordinator
         - ap_sweep_coordinator
@@ -283,8 +275,6 @@
       The compact brief must carry the verified mission pointer, gate objective, owned boundary, required roadmap and raw-evidence pointers, output schema, and truthful model/effort status. Do not require pasted doctrine, a repeated mission transcript, or a fenced gate-corpus extract. If a required pointer is absent or mismatched, report INVALID-BRIEF; never guess or reconstruct it.
     toolFilter:
       deny:
-        - subagent
-        - subagent_fork
         - ap_arbiter
         - ap_depth_prober
         - ap_execharness_resolver
@@ -340,8 +330,6 @@
       The compact brief must carry the verified mission pointer, gate objective, owned boundary, required roadmap and raw-evidence pointers, output schema, and truthful model/effort status. Do not require pasted doctrine, a repeated mission transcript, or a fenced gate-corpus extract. If a required pointer is absent or mismatched, report INVALID-BRIEF; never guess or reconstruct it.
     toolFilter:
       deny:
-        - subagent
-        - subagent_fork
         - ap_arbiter
         - ap_depth_prober
         - ap_execharness_resolver
@@ -394,8 +382,6 @@
       Report in <=150 words: APPROVE or REJECT, numbered reasons on REJECT, affected item ids, and artifact path. Echo the RUN-NONCE.
     toolFilter:
       deny:
-        - subagent
-        - subagent_fork
         - ap_arbiter
         - ap_depth_prober
         - ap_execharness_resolver
@@ -456,8 +442,6 @@
       The compact brief must carry the verified mission pointer, gate objective, owned boundary, required roadmap and raw-evidence pointers, output schema, and truthful model/effort status. Do not require pasted doctrine, a repeated mission transcript, or a fenced gate-corpus extract. If a required pointer is absent or mismatched, report INVALID-BRIEF; never guess or reconstruct it.
     toolFilter:
       deny:
-        - subagent
-        - subagent_fork
         - ap_arbiter
         - ap_depth_prober
         - ap_execharness_resolver
@@ -516,8 +500,6 @@
       The compact brief must carry the verified mission pointer, objective, owned boundary, dependencies, acceptance criteria, roadmap/optional plan and evidence pointers, output schema, and truthful model/effort status. Do not require pasted doctrine or a repeated mission transcript. If a required pointer is absent or mismatched, report INVALID-BRIEF; never reconstruct missing authority from prior discussion.
     toolFilter:
       deny:
-        - subagent
-        - subagent_fork
         - ap_execharness_resolver
         - ap_feature_coordinator
         - ap_framework_generator
@@ -559,8 +541,6 @@
       Report in <=150 words: legacy paths read, facts retained or rejected, canonical roadmap item ids affected, contradictions found, and output paths. Echo the RUN-NONCE.
     toolFilter:
       deny:
-        - subagent
-        - subagent_fork
         - ap_execharness_resolver
         - ap_feature_coordinator
         - ap_framework_generator
@@ -621,8 +601,6 @@
       The compact brief must carry the verified mission pointer, root governance pointers, latest goal-check and ledger-check evidence pointers, scratch directory, sentinel path/payload, output schema, and truthful model/effort status. Do not require pasted doctrine or legacy `BRIEF.md`, `AGENTS.md`, `COVERAGE.md`, `bucketlist.md`, or `BACKLOG.md`.
     toolFilter:
       deny:
-        - subagent
-        - subagent_fork
         - ap_arbiter
         - ap_depth_prober
         - ap_execharness_resolver
@@ -678,8 +656,6 @@
       The compact brief must carry the verified mission pointer, gate objective, owned boundary, required roadmap and raw-evidence pointers, output schema, and truthful model/effort status. Do not require pasted doctrine, a repeated mission transcript, or a fenced gate-corpus extract. If a required pointer is absent or mismatched, report INVALID-BRIEF; never guess or reconstruct it.
     toolFilter:
       deny:
-        - subagent
-        - subagent_fork
         - ap_arbiter
         - ap_depth_prober
         - ap_execharness_resolver
@@ -752,8 +728,6 @@
       Stop each worker explicitly once its final report is collected; a parked resumable worker is still a live worker and counts against the ceiling. Report only with zero live subagents: every worker you dispatched is collected and stopped. Report in <=150 words: executors dispatched, wave/dependencies, verdicts, retained evidence, blockers, and artifact paths. Echo the RUN-NONCE.
     toolFilter:
       deny:
-        - subagent
-        - subagent_fork
         - ap_feature_coordinator
         - ap_manager
         - ap_scope_coordinator
@@ -789,8 +763,6 @@
       Report in <=150 words: feature id, plan spine, key risks, tests-first command, and artifact path. Echo the RUN-NONCE.
     toolFilter:
       deny:
-        - subagent
-        - subagent_fork
         - ap_arbiter
         - ap_depth_prober
         - ap_execharness_resolver
@@ -845,8 +817,6 @@
       Report in <=150 words: RUN/READ/WRITE booleans with evidence, spawn capability, provider/model bindings, truthful effort status/source/maximum, and PASS or FAIL. Echo the RUN-NONCE.
     toolFilter:
       deny:
-        - subagent
-        - subagent_fork
         - ap_arbiter
         - ap_depth_prober
         - ap_execharness_resolver
@@ -911,8 +881,6 @@
       The compact brief must carry the verified mission pointer, root `ROADMAP.md` and `GATELOG.md` pointers, substantive frontier evidence pointers, output schema, and truthful model/effort status. Do not require pasted doctrine or legacy governance files for a new-format run.
     toolFilter:
       deny:
-        - subagent
-        - subagent_fork
         - ap_arbiter
         - ap_depth_prober
         - ap_execharness_resolver
@@ -972,8 +940,6 @@
       The compact brief must carry the verified mission pointer, gate objective, owned boundary, required roadmap and raw-evidence pointers, output schema, and truthful model/effort status. Do not require pasted doctrine, a repeated mission transcript, or a fenced gate-corpus extract. If a required pointer is absent or mismatched, report INVALID-BRIEF; never guess or reconstruct it.
     toolFilter:
       deny:
-        - subagent
-        - subagent_fork
         - ap_arbiter
         - ap_depth_prober
         - ap_execharness_resolver
@@ -1028,8 +994,6 @@
       Report in <=150 words plus numbered reasons: verdict, affected item ids/top blockers, LIES for G5, and artifact path. Echo the RUN-NONCE.
     toolFilter:
       deny:
-        - subagent
-        - subagent_fork
         - ap_arbiter
         - ap_depth_prober
         - ap_execharness_resolver
@@ -1096,8 +1060,6 @@
       Report in <=150 words: scope profile, actual agent count and rounds, approved feature/dependency order, retained evidence, assurance verdicts, and canonical `ROADMAP.md` path. Echo the RUN-NONCE.
     toolFilter:
       deny:
-        - subagent
-        - subagent_fork
         - ap_feature_coordinator
         - ap_scope_coordinator
         - ap_sweep_coordinator
@@ -1137,8 +1099,6 @@
       Report in <=150 words: role (author/scout), capability result when probed, scope profile, repository evidence, affected roadmap item ids, dependencies/launch lanes, and artifact path. Echo the RUN-NONCE.
     toolFilter:
       deny:
-        - subagent
-        - subagent_fork
         - ap_arbiter
         - ap_depth_prober
         - ap_execharness_resolver
@@ -1203,8 +1163,6 @@
       Report in <=150 words: which of the three governance files changed, appended transition ids, hashes/frontier recorded, and read-back verification. Echo the RUN-NONCE.
     toolFilter:
       deny:
-        - subagent
-        - subagent_fork
         - ap_arbiter
         - ap_depth_prober
         - ap_execharness_resolver
@@ -1262,8 +1220,6 @@
       Stop each worker explicitly once its final report is collected; a parked resumable worker is still a live worker and counts against the ceiling. A DONE report means zero live subagents: every worker you dispatched is collected and stopped. Report in <=150 words: sweep rounds and findings by severity, affected item re-entry, goal-check verdict, cleanup status, and DONE/NOT-DONE/PARTIAL. Echo the RUN-NONCE.
     toolFilter:
       deny:
-        - subagent
-        - subagent_fork
         - ap_feature_coordinator
         - ap_scope_coordinator
         - ap_sweep_coordinator
@@ -1304,8 +1260,6 @@
       The compact brief must carry the verified mission pointer, canonical roadmap pointer, owned neighborhood, raw change and verification evidence pointers, prior-finding keys for dedupe, output schema, and truthful model/effort status. Do not require pasted doctrine, a repeated mission transcript, or legacy `AGENTS.md`.
     toolFilter:
       deny:
-        - subagent
-        - subagent_fork
         - ap_arbiter
         - ap_depth_prober
         - ap_execharness_resolver
@@ -1360,8 +1314,6 @@
       Report in <=150 words: retained evidence, changed roadmap item ids, dependency/launch order, unresolved evidence gaps, and canonical `ROADMAP.md` path. Echo the RUN-NONCE.
     toolFilter:
       deny:
-        - subagent
-        - subagent_fork
         - ap_arbiter
         - ap_depth_prober
         - ap_execharness_resolver
@@ -1416,8 +1368,6 @@
       Report in <=150 words: verdict, red-to-green result, exact test command, regression count, coverage percentage, and artifact path. Echo the RUN-NONCE.
     toolFilter:
       deny:
-        - subagent
-        - subagent_fork
         - ap_arbiter
         - ap_depth_prober
         - ap_execharness_resolver
