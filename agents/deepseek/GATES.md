@@ -84,7 +84,7 @@ Author-independent verification is mandatory at every scope: the independent-ver
 
 G1 is conditional, never the default round trip. A planner reads the real artifact and writes `<artifacts>/<FID>-plan-vN.md` covering success, file-by-file changes, unhappy paths, tests first, real-system verification, risks, and the `>=95%` coverage argument. It does not write production code.
 
-`PLAN-CONFLICT` returns here with the conflict and opened evidence. Do not silently diverge from the roadmap.
+A material `PLAN-CONFLICT` returns here with the changed contract and opened evidence. Return PLAN-CONFLICT only when new evidence changes acceptance behavior, owned boundaries, cross-item dependencies, risk, or an explicitly frozen design decision. Adapt implementation details within those constraints autonomously, record the evidence and deviation, and retain normal G5/G6 review and verification. A changed parameter name, import path, or equivalent API call alone is not a plan conflict.
 
 ## G2: PLAN REVIEW
 
@@ -141,7 +141,7 @@ The implementer follows the roadmap item or approved G1 plan using strict TDD:
 5. run touched modules and direct dependents;
 6. prove `>=95%` changed-line and touched-module coverage.
 
-Use real runners and systems. Do not mock the system under test or databases in integration tests. Handle unhappy paths explicitly. If the contract is wrong, stop with `PLAN-CONFLICT` rather than improvising.
+Use real runners and systems. Do not mock the system under test or databases in integration tests. Handle unhappy paths explicitly. Return PLAN-CONFLICT only when new evidence changes acceptance behavior, owned boundaries, cross-item dependencies, risk, or an explicitly frozen design decision. Adapt implementation details within those constraints autonomously, record the evidence and deviation, and retain normal G5/G6 review and verification. A changed parameter name, import path, or equivalent API call alone is not a plan conflict.
 
 Write `<artifacts>/<FID>-impl-vN.md` with changed files, tests, real output, coverage, and deviations. Record G4 only after the TDD red and green evidence exists.
 
