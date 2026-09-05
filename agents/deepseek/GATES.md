@@ -196,9 +196,9 @@ A fresh, adversarial, default-FAIL goal checker sees the verified mission and ev
 - changed-line and touched-module coverage `>=95%`;
 - for debug work, issue-derived D4 red-to-green proof and fix LAYER equal to the D3 deepest cause;
 - successful validation of `PROMPTS.txt`, `ROADMAP.md`, `GATELOG.md`, and substantive evidence;
-- zero live subagents - every spawned agent is stopped, none left parked.
+- delivery acceptance is independently evidenced; final run closure additionally follows the completion ownership rule below.
 
-Verdict is `DONE | NOT-DONE`. NOT-DONE names every unmet item and routes it back through the gate rule above. Arbitration cannot waive capability failure, blockers, coverage, depth-lock, or real verification.
+Verdict is `PASS | NOT-DONE` for delivery acceptance. NOT-DONE names every unmet item and routes it back through the gate rule above. Arbitration cannot waive capability failure, blockers, coverage, depth-lock, or real verification.
 
 ## 4. GATELOG grammar
 
@@ -213,7 +213,7 @@ Gate rows are append-only and mechanically readable:
 [at HH:MM DD.MM.YYYY] <FID> G6 VERIFY (ap-verifier): <VERIFIED|FAILED> - artifact <path>
 [at HH:MM DD.MM.YYYY] <FID> G7 SIGN-OFF (ap-juror): <PASS|FAIL> - artifact <path>
 [at HH:MM DD.MM.YYYY] <FID> G8 SCRIBE (ap-scribe): logged - frontier=<state>
-[at HH:MM DD.MM.YYYY] <FID> GOAL-CHECK (ap-goal-checker): <DONE|NOT-DONE> - artifact <path>
+[at HH:MM DD.MM.YYYY] <FID> GOAL-CHECK (ap-goal-checker): <PASS|NOT-DONE> - artifact <path>
 ```
 
 Preserve the G3.5 and FEATURE-META forms exactly as defined above. Legacy rows remain parseable but never become templates for new writes.
@@ -237,3 +237,7 @@ Run required verification in the real environment; never fabricate evidence or c
 ## Finding scope and repair authority
 
 Finding scope: in a review-only mission, the deliverable is an independently verified report and recommendations, not code repairs. Route fixes into execution only when the user has authorized repair work. For build missions, findings that block authorized acceptance or were introduced by this change are delivery-blocking at every severity and must be closed. Record unrelated pre-existing defects and optional improvements separately with evidence, severity, impact, and ownership; do not silently drop, downgrade, or auto-fix them. An independent reviewer confirms this classification. Zero open findings in completion checks means zero open delivery-blocking findings, not an empty review report.
+
+## Completion ownership
+
+Completion ownership: GOAL-CHECK returns PASS or NOT-DONE for delivery acceptance only. Framework-local DONE means its assigned lane is accepted, not a sealed run. The parent collects and stops the checker, then performs enabled scratch cleanup through the janitor after ledger/evidence validation. It collects and stops the janitor and every remaining child before reporting FINALIZATION-READY to L0. Only L0, after collecting/stopping all descendants and checking final ledger and cleanup evidence, seals run-level DONE and writes the optional DONE sentinel atomically. No checker or cleanup worker must prove its own stopped state; zero live subagents is the final L0 condition.

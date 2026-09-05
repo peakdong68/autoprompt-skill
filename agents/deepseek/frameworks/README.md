@@ -109,3 +109,7 @@ Closure: closure is over SELECT ∪ GENERATE. Every routed leaf exists; every se
 is reachable; a confident branch ends at a leaf; a non-confident task returns MISS and
 routes to GENERATE (never a silent backend-implement); a genuinely two-piece task is
 decomposed then stacked (§2).
+
+## Local completion
+
+A framework-local DONE is lane acceptance only. GOAL-CHECK returns PASS/NOT-DONE; enabled cleanup and zero-live-subagent checks precede the final L0 run-level DONE, as specified in GATES.md Completion ownership.

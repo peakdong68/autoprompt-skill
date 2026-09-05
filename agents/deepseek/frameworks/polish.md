@@ -80,3 +80,7 @@ pause affected work without bypassing authorization or claiming the mission is c
 A VERTICAL overlay in practice (it reshapes only G7 as the `polish` tag), but a
 standalone polish task runs as ONE L3 track. Pairs with `frontend-review` findings
 and stacks over `frontend-implement`/`frontend-build` - `frameworks/composition.md`.
+
+## Local completion
+
+A framework-local DONE is lane acceptance only. GOAL-CHECK returns PASS/NOT-DONE; enabled cleanup and zero-live-subagent checks precede the final L0 run-level DONE, as specified in GATES.md Completion ownership.

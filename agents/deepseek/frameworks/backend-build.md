@@ -88,3 +88,7 @@ pause affected work without bypassing authorization or claiming the mission is c
 ONE L3 track (its internal L4 fan-out for parallel pieces is internal). A
 multi-surface mission is split in ROADMAP.md into disjoint features, each its own
 framework as a sibling track - `frameworks/composition.md`.
+
+## Local completion
+
+A framework-local DONE is lane acceptance only. GOAL-CHECK returns PASS/NOT-DONE; enabled cleanup and zero-live-subagent checks precede the final L0 run-level DONE, as specified in GATES.md Completion ownership.

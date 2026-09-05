@@ -130,3 +130,7 @@ Run required verification in the real environment; never fabricate evidence or c
 ## Finding scope and repair authority
 
 Finding scope: in a review-only mission, the deliverable is an independently verified report and recommendations, not code repairs. Route fixes into execution only when the user has authorized repair work. For build missions, findings that block authorized acceptance or were introduced by this change are delivery-blocking at every severity and must be closed. Record unrelated pre-existing defects and optional improvements separately with evidence, severity, impact, and ownership; do not silently drop, downgrade, or auto-fix them. An independent reviewer confirms this classification. Zero open findings in completion checks means zero open delivery-blocking findings, not an empty review report.
+
+## Completion ownership
+
+Completion ownership: GOAL-CHECK returns PASS or NOT-DONE for delivery acceptance only. Framework-local DONE means its assigned lane is accepted, not a sealed run. The parent collects and stops the checker, then performs enabled scratch cleanup through the janitor after ledger/evidence validation. It collects and stops the janitor and every remaining child before reporting FINALIZATION-READY to L0. Only L0, after collecting/stopping all descendants and checking final ledger and cleanup evidence, seals run-level DONE and writes the optional DONE sentinel atomically. No checker or cleanup worker must prove its own stopped state; zero live subagents is the final L0 condition.

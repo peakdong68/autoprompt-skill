@@ -88,3 +88,7 @@ pause affected work without bypassing authorization or claiming the mission is c
 ## Stacking
 ONE L3 track. A cross-surface refactor is split in ROADMAP.md into disjoint-ownership
 features, each its own refactor track - `frameworks/composition.md`.
+
+## Local completion
+
+A framework-local DONE is lane acceptance only. GOAL-CHECK returns PASS/NOT-DONE; enabled cleanup and zero-live-subagent checks precede the final L0 run-level DONE, as specified in GATES.md Completion ownership.

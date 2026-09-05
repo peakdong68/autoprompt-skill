@@ -23,10 +23,14 @@ Determine convergence and dispatch workers, but never read, write, edit, or run 
 ## Convergence
 Dispatch independent sweepers over disjoint neighborhoods, then one blind, adversarial goal checker. Preserve no-self-review. All delivery-blocking findings, including P2/P3, return only the affected authorized repair items to the appropriate build gate; retain clean evidence and do not rerun unrelated lanes. GOAL-CHECK is the universal default-FAIL floor and requires complete mission/roadmap coverage, user usability, real end-to-end execution, zero open findings, and >=95% changed-line coverage.
 
-On DONE, dispatch janitor cleanup only after the root three-file governance state and substantive evidence pass validation. New-run governance remains exactly `PROMPTS.txt`, `ROADMAP.md`, and `GATELOG.md`; do not require `BRIEF.md`, `AGENTS.md`, `COVERAGE.md`, `bucketlist.md`, or `BACKLOG.md`. Legacy files may be read for old resumes.
+On GOAL-CHECK PASS, collect and stop the checker, then dispatch enabled janitor cleanup only after the root three-file governance state and substantive evidence pass validation. New-run governance remains exactly `PROMPTS.txt`, `ROADMAP.md`, and `GATELOG.md`; do not require `BRIEF.md`, `AGENTS.md`, `COVERAGE.md`, `bucketlist.md`, or `BACKLOG.md`. Legacy files may be read for old resumes.
 
 ## Compact dispatch envelope
 Send role, objective, boundary, acceptance criteria, mission pointer, roadmap/evidence pointers with hashes, output schema, and model/effort status. Do not paste transcripts, the full roadmap, doctrine, or prior verdict reasoning. Blind workers receive raw evidence only.
 
 ## Report shape
-Stop each worker explicitly once its final report is collected; a parked resumable worker is still a live worker and counts against the ceiling. A DONE report means zero live subagents: every worker you dispatched is collected and stopped. Report in <=150 words: sweep rounds and findings by severity, affected item re-entry, goal-check verdict, cleanup status, and DONE/NOT-DONE/PARTIAL. Echo the RUN-NONCE.
+Stop each worker explicitly once its final report is collected; a parked resumable worker is still a live worker and counts against the ceiling. FINALIZATION-READY means every worker you dispatched is collected and stopped, with acceptance and enabled cleanup evidence ready for L0. Only L0 seals run-level DONE after stopping this coordinator too. Report in <=150 words: sweep rounds and findings by severity, affected item re-entry, goal-check verdict, cleanup status, and FINALIZATION-READY/NOT-DONE/PARTIAL. Echo the RUN-NONCE.
+
+## Completion ownership
+
+Completion ownership: GOAL-CHECK returns PASS or NOT-DONE for delivery acceptance only. Framework-local DONE means its assigned lane is accepted, not a sealed run. The parent collects and stops the checker, then performs enabled scratch cleanup through the janitor after ledger/evidence validation. It collects and stops the janitor and every remaining child before reporting FINALIZATION-READY to L0. Only L0, after collecting/stopping all descendants and checking final ledger and cleanup evidence, seals run-level DONE and writes the optional DONE sentinel atomically. No checker or cleanup worker must prove its own stopped state; zero live subagents is the final L0 condition.
