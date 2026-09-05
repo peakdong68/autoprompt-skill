@@ -92,12 +92,7 @@ invalid custom cap instead of silently inventing one.
 
 ### Chooser and attendance
 
-Resolve only undefined operator knobs before repository/tool work. In an attended
-session, ask once for all missing values:
-
-- concurrency: Tokensaver, Wide, or Custom;
-- agent selection: Inherit only;
-- effort capability: report exactly `inherited-only`.
+Before repository/tool work in an attended session, ask once for missing concurrency: Tokensaver, Wide (including billionaire), or Custom. Retain the operator's existing concurrency choice. Set agent selection to `off` and report effort capability as `inherited-only`; these fixed capabilities are not chooser questions.
 
 Do not ask the user to restate, narrow, or approve the mission. In a supervisor-
 launched unattended run, never ask: default missing concurrency to `tokensaver`
