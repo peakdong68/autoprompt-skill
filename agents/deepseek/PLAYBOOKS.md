@@ -103,4 +103,8 @@ Inspect the real external system, select a scalable test-safe integration path, 
 
 ## Closed-loop failures
 
-A failed review or verification, sign-off failure, sweep P0/P1, or NOT-DONE goal check re-enters the owning roadmap item or creates a bounded debug item. Accepted evidence survives. Repairs target only named failures. Arbitration chooses among safe mission-advancing options but cannot waive an open P0/P1, the coverage floor, or required real verification.
+A failed review or verification, sign-off failure, sweep delivery-blocking findings at any severity, or NOT-DONE goal check re-enters the owning roadmap item or creates a bounded debug item. Accepted evidence survives. Repairs target only named failures. Arbitration chooses among safe mission-advancing options but cannot waive an open P0/P1, the coverage floor, or required real verification.
+
+## Finding scope and repair authority
+
+Finding scope: in a review-only mission, the deliverable is an independently verified report and recommendations, not code repairs. Route fixes into execution only when the user has authorized repair work. For build missions, findings that block authorized acceptance or were introduced by this change are delivery-blocking at every severity and must be closed. Record unrelated pre-existing defects and optional improvements separately with evidence, severity, impact, and ownership; do not silently drop, downgrade, or auto-fix them. An independent reviewer confirms this classification. Zero open findings in completion checks means zero open delivery-blocking findings, not an empty review report.

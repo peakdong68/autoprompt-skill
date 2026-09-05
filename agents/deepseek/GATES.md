@@ -183,7 +183,7 @@ G8 does not commit or push. Invocation alone does not authorize commits, pushes,
 
 After implementation lanes join, a fresh sweeper re-derives mission and roadmap coverage from the verified pointers, inspects the touched neighborhood, and reports severity-ranked findings with file:line evidence. It must not trust prior verdicts or repeat already closed findings.
 
-Open findings re-enter as roadmap items at the lowest correct gate: G4 for a local implementation defect; G1 for debug/depth-lock, an unresolved design issue, or a true plan conflict. Reuse valid evidence.
+Delivery-blocking findings in authorized repair scope re-enter as roadmap items at the lowest correct gate: G4 for a local implementation defect; G1 for debug/depth-lock, an unresolved design issue, or a true plan conflict. Reuse valid evidence.
 
 ## GOAL-CHECK
 
@@ -233,3 +233,7 @@ Do not commit, push, publish, deploy, spend money, delete user data, force-push,
 ## Recovery ownership
 
 Run required verification in the real environment; never fabricate evidence or claim success over a failed or un-runnable required check. A worker pauses only the affected step and reports evidence and a recovery path to its dispatcher. The dispatcher continues independent work and performs reversible recovery within existing authorization. Only L0 asks for missing credentials, user-owned product decisions, or required approval. Unattended runs record userRequired=true and a resume condition for those dependencies; pause affected work without bypassing authorization or claiming the mission is complete. Capability and integrity failures still prohibit dependent implementation; an authorized diagnostic/recovery attempt may restore the precondition before retry. An invalid brief or failed worker report is not itself a request for renewed mission approval.
+
+## Finding scope and repair authority
+
+Finding scope: in a review-only mission, the deliverable is an independently verified report and recommendations, not code repairs. Route fixes into execution only when the user has authorized repair work. For build missions, findings that block authorized acceptance or were introduced by this change are delivery-blocking at every severity and must be closed. Record unrelated pre-existing defects and optional improvements separately with evidence, severity, impact, and ownership; do not silently drop, downgrade, or auto-fix them. An independent reviewer confirms this classification. Zero open findings in completion checks means zero open delivery-blocking findings, not an empty review report.

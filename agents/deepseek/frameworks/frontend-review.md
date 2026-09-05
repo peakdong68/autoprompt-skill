@@ -10,7 +10,7 @@ open the corpus yourself. You never edit or run code yourself. Goal: subject a R
 UI to a multi-persona live review - real users visiting the real site, capturing
 screenshots, and reporting bugs, visual defects, UX friction, copy problems, and
 customer-engagement/conversion observations - into ONE deduped review artifact whose
-actionable P0/P1s route back as fix lanes.
+actionable findings are reported; fix lanes execute only with existing repair authorization.
 
 GATE PATH (T2): G0 SURFACE-PROBE → G1 PLAN(personas + journeys) → PERSONA-FANOUT(N live visits, screenshots) → DEDUPE(one artifact) → G6 REVIEW-VERIFY(grounded) → ROUTE-FIXES → GOAL-CHECK. T1 drops the juror; T3 adds SCOPE-AND-ROADMAP + 3-juror sign-off.
 
@@ -65,9 +65,10 @@ live surface is downgraded or dropped; an artifact with invented/unreproducible
 findings is a THIN-REVIEW **S2** redo.
 
 ### Phase 5 - ROUTE-FIXES + GOAL-CHECK
-Each actionable P0/P1 is emitted as a fix lane (a `frontend-fix` feature per defect,
-or `frontend-implement`/`polish` for improvements) into the run's build wave; P2/P3
-are appended as non-blocking follow-up rows in `GATELOG.md`. A fresh default-FAIL goal-check confirms every persona journey was
+Each actionable finding is emitted as a recommendation with severity and evidence.
+Only already-authorized repairs enter the build wave as frontend-fix, frontend-implement,
+or polish items. P2/P3 are blocking when they prevent authorized acceptance or were
+introduced by this change; otherwise they remain explicitly classified observations. A fresh default-FAIL goal-check confirms every persona journey was
 walked with screenshots and every finding is evidence-backed → **S5** DONE.
 
 ## GRACEFUL DEGRADATION (mandatory - never fake a screenshot)
@@ -93,17 +94,21 @@ pause affected work without bypassing authorization or claiming the mission is c
   finding marked UNVERIFIED-VISUALLY; never a faked screenshot.
 - **S2 - the review is thin / findings don't reproduce on the live surface** → THIN-REVIEW;
   re-dispatch personas with the gap named. Never invent findings.
-- **S3 - a P0 found is really a code bug to fix now** → route it as a `frontend-fix`
-  lane; the review proceeds and completes.
+- **S3 - a P0 code bug is found** → report it with impact and a frontend-fix recommendation;
+  execute the lane only with repair authorization. The review itself continues.
 - **S4 - bigger than ONE bounded surface** (unrelated apps / a whole product audit) →
   OUT-OF-SCOPE; climb a tier (GATES.md ESCALATION).
 - **S5 - every persona journey walked with screenshots + one deduped evidence-backed
-  artifact + P0/P1s routed + goal-check PASS** → DONE.
+  artifact + recommendations recorded and authorized repairs routed + goal-check PASS** → DONE.
 
 ## Stacking
-ONE L3 track (internal L4 fan-out is the persona set). The fix lanes it emits become
+ONE L3 track (internal L4 fan-out is the persona set). Only authorized fix lanes become
 downstream sibling tracks - `frameworks/composition.md`.
 
 ## Verification applicability
 
 Verification applicability: strict TDD, executable fail-to-pass tests, and the >=95% changed-line/touched-module coverage floor apply to executable code changes. For documentation, research, design, or review-only deliverables with no executable code change, record those code-only metrics as N/A with evidence and independent reviewer approval; validate the actual artifact against its acceptance criteria instead. N/A never waives an applicable failing check, a runnable claim, or a user-required execution/demo. Mixed missions retain the code gates on every code-changing item. Usability means the requested artifact is accessible and usable by its audience; an onboarding artifact is required only when the mission or actual entry flow needs one.
+
+## Finding scope and repair authority
+
+Finding scope: in a review-only mission, the deliverable is an independently verified report and recommendations, not code repairs. Route fixes into execution only when the user has authorized repair work. For build missions, findings that block authorized acceptance or were introduced by this change are delivery-blocking at every severity and must be closed. Record unrelated pre-existing defects and optional improvements separately with evidence, severity, impact, and ownership; do not silently drop, downgrade, or auto-fix them. An independent reviewer confirms this classification. Zero open findings in completion checks means zero open delivery-blocking findings, not an empty review report.
