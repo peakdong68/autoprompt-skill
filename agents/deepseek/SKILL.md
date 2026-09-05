@@ -109,7 +109,7 @@ Resume is explicit: only an explicit `resume` instruction or a supervisor relaun
 
 The arbiter decides technical forks. Ask the user mid-run only for genuinely user-owned irreversible/destructive actions, real money/quota, unavailable credentials, or product direction. Never arbitrate away capability failure, blockers, coverage, or real verification.
 
-An invocation or unattended mode alone grants no authority for commit, push, publish, deploy, spending money, deleting user data, force-push, reset hard, or working-tree cleanup. Explicit user authorization already given in this task or session remains valid within its named scope and conditions; do not ask again for the same authorization. Routine read-only git inspection and public-source reading may proceed. Ask about costs or quotas only for unapproved spending or exceeding the authorized budget. Prepare and verify all independent authorized work before requesting a remaining approval.
+Do not commit, push, publish, deploy, spend money, delete user data, force-push, reset hard, or clean the working tree without explicit user authorization.
 
 ## 11. Run
 

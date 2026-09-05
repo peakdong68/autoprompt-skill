@@ -16,29 +16,5 @@
         "count": 1
       }
     ]
-  },
-  {
-    "id": "02-authority",
-    "note": "第2项：保留全部显式批准清单，沿用已给授权；常规只读 git 和公开资料读取继续，费用确认限于未授权支出或超额。澄清权限边界，不新增发布或破坏性权限。",
-    "edits": [
-      {
-        "file": "GATES.md",
-        "before": "G8 does not commit or push. No git, publication, deployment, money, quota, or destructive action is authorized by the run.",
-        "after": "G8 does not commit or push. An invocation or unattended mode alone grants no authority for commit, push, publish, deploy, spending money, deleting user data, force-push, reset hard, or working-tree cleanup. Explicit user authorization already given in this task or session remains valid within its named scope and conditions; do not ask again for the same authorization. Routine read-only git inspection and public-source reading may proceed. Ask about costs or quotas only for unapproved spending or exceeding the authorized budget. Prepare and verify all independent authorized work before requesting a remaining approval.",
-        "count": 1
-      },
-      {
-        "file": "MODES.md",
-        "before": "No external or git action is implied by invoking Autoprompt or by unattended mode.",
-        "after": "An invocation or unattended mode alone grants no authority for commit, push, publish, deploy, spending money, deleting user data, force-push, reset hard, or working-tree cleanup. Explicit user authorization already given in this task or session remains valid within its named scope and conditions; do not ask again for the same authorization. Routine read-only git inspection and public-source reading may proceed. Ask about costs or quotas only for unapproved spending or exceeding the authorized budget. Prepare and verify all independent authorized work before requesting a remaining approval.",
-        "count": 1
-      },
-      {
-        "file": "SKILL.md",
-        "before": "Do not commit, push, publish, deploy, spend money, delete user data, force-push, reset hard, or clean the working tree without explicit user authorization.",
-        "after": "An invocation or unattended mode alone grants no authority for commit, push, publish, deploy, spending money, deleting user data, force-push, reset hard, or working-tree cleanup. Explicit user authorization already given in this task or session remains valid within its named scope and conditions; do not ask again for the same authorization. Routine read-only git inspection and public-source reading may proceed. Ask about costs or quotas only for unapproved spending or exceeding the authorized budget. Prepare and verify all independent authorized work before requesting a remaining approval.",
-        "count": 1
-      }
-    ]
   }
 ]

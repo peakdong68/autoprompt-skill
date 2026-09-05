@@ -136,7 +136,7 @@ malformed, or hash-mismatched artifacts as absent. Re-verify the last accepted
 frontier and continue idempotently. Legacy ledgers may supply a resume frontier
 but must not be extended with new legacy governance files.
 
-An invocation or unattended mode alone grants no authority for commit, push, publish, deploy, spending money, deleting user data, force-push, reset hard, or working-tree cleanup. Explicit user authorization already given in this task or session remains valid within its named scope and conditions; do not ask again for the same authorization. Routine read-only git inspection and public-source reading may proceed. Ask about costs or quotas only for unapproved spending or exceeding the authorized budget. Prepare and verify all independent authorized work before requesting a remaining approval.
+No external or git action is implied by invoking Autoprompt or by unattended mode.
 Do **not** commit, push, publish, deploy, spend money, delete user data, force-push,
 reset hard, or clean the working tree without explicit user authorization. The
 supervisor provides relaunch/resume only; it grants no publication or git authority.
