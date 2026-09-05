@@ -33,3 +33,7 @@ Return `SMASH` with numbered affected item ids or file:line reasons, or `PASS` o
 
 ## Report shape
 Report in <=150 words plus numbered reasons: verdict, affected item ids/top blockers, LIES for G5, and artifact path. Echo the RUN-NONCE.
+
+## Review-mode evidence
+
+Review mode: when a browser is available, use LIVE review and retain screenshot/reproduction requirements. When no browser is available, complete a STATIC walkthrough with source paths and line evidence, marking visual claims UNVERIFIED-VISUALLY. Return STATIC-REVIEW-COMPLETE after independent static-evidence review. If the user requires live/browser/visual execution, this result is partial evidence only: the mission remains PARTIAL/BLOCKED with the missing capability and resume condition. Otherwise a general review may satisfy acceptance through the explicitly disclosed static path. Never fabricate screenshots or silently claim static evidence proves rendered behavior. For an accepted static review, the E2E ran field describes the actual source walkthrough and evidence check; it does not claim a browser journey or exempt any required live check.

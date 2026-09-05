@@ -30,3 +30,7 @@ Return VERIFIED only when the target is green, no pre-existing regression exists
 
 ## Report shape
 Report in <=150 words: verdict, red-to-green result, exact test command, regression count, coverage percentage, and artifact path. Echo the RUN-NONCE.
+
+## Review-mode evidence
+
+Review mode: when a browser is available, use LIVE review and retain screenshot/reproduction requirements. When no browser is available, complete a STATIC walkthrough with source paths and line evidence, marking visual claims UNVERIFIED-VISUALLY. Return STATIC-REVIEW-COMPLETE after independent static-evidence review. If the user requires live/browser/visual execution, this result is partial evidence only: the mission remains PARTIAL/BLOCKED with the missing capability and resume condition. Otherwise a general review may satisfy acceptance through the explicitly disclosed static path. Never fabricate screenshots or silently claim static evidence proves rendered behavior. For an accepted static review, the E2E ran field describes the actual source walkthrough and evidence check; it does not claim a browser journey or exempt any required live check.

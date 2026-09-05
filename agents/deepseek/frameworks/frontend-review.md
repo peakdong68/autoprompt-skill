@@ -49,7 +49,7 @@ evidence and a severity (P0/P1/P2/P3): bugs and broken behavior; visual defects
 confusing flows, missing states); copy problems (unclear, wrong, off-tone); and
 conversion / customer-engagement observations (where trust drops, where the CTA is
 weak, where a real buyer would bounce) - plus a concrete improvement suggestion per
-finding. A persona that only read source and took no screenshot did NOT review → redo.
+finding. In LIVE mode, a persona that only read source and took no screenshot did NOT perform the live review → redo. STATIC mode follows the separate evidence and acceptance path below.
 
 ### Phase 3 - DEDUPE into ONE review artifact
 The deduper merges all persona reports into a single artifact: findings deduped
@@ -58,7 +58,8 @@ with its screenshot evidence and improvement suggestion. Nothing a persona surfa
 is silently dropped. Customer-engagement observations get their own section.
 
 ### Phase 4 - REVIEW-VERIFY (G6, grounded, fresh worker)
-A fresh worker confirms, on the REAL running surface, that each P0/P1 reproduces as
+In STATIC mode, a fresh worker checks every claim against the referenced source, keeps visual claims UNVERIFIED-VISUALLY, and returns STATIC-REVIEW-COMPLETE only when the static report is complete and supported. No screenshot or live reproduction gate applies to this path; user-required live execution still blocks mission completion.
+In LIVE mode, a fresh worker confirms, on the REAL running surface, that each P0/P1 reproduces as
 described (loads the route, sees the defect) and that every finding carries real
 screenshot evidence - not a prose claim. A finding that cannot be reproduced on the
 live surface is downgraded or dropped; an artifact with invented/unreproducible
@@ -68,8 +69,7 @@ findings is a THIN-REVIEW **S2** redo.
 Each actionable finding is emitted as a recommendation with severity and evidence.
 Only already-authorized repairs enter the build wave as frontend-fix, frontend-implement,
 or polish items. P2/P3 are blocking when they prevent authorized acceptance or were
-introduced by this change; otherwise they remain explicitly classified observations. A fresh default-FAIL goal-check confirms every persona journey was
-walked with screenshots and every finding is evidence-backed → **S5** DONE.
+introduced by this change; otherwise they remain explicitly classified observations. A fresh default-FAIL goal-check checks the selected mode: LIVE requires walked journeys and screenshots; STATIC requires complete source walkthroughs and independent source-evidence review. Both require supported findings and satisfaction of the user's actual requested review mode → **S5** lane acceptance.
 
 ## GRACEFUL DEGRADATION (mandatory - never fake a screenshot)
 No browser available → **S1-DEGRADE**: personas do a STATIC walkthrough of the
@@ -91,15 +91,14 @@ pause affected work without bypassing authorization or claiming the mission is c
 ## Closed decision scenarios (each ends at ONE verdict)
 - **S1 - no running surface can be stood up at all** → BLOCKED (report attempt + unblock path).
   **S1-DEGRADE - surface renders but no browser tooling** → static walkthrough, every
-  finding marked UNVERIFIED-VISUALLY; never a faked screenshot.
+  visual finding marked UNVERIFIED-VISUALLY; return STATIC-REVIEW-COMPLETE after independent source review. A user-required LIVE review remains PARTIAL/BLOCKED; otherwise use static acceptance.
 - **S2 - the review is thin / findings don't reproduce on the live surface** → THIN-REVIEW;
   re-dispatch personas with the gap named. Never invent findings.
 - **S3 - a P0 code bug is found** → report it with impact and a frontend-fix recommendation;
   execute the lane only with repair authorization. The review itself continues.
 - **S4 - bigger than ONE bounded surface** (unrelated apps / a whole product audit) →
   OUT-OF-SCOPE; climb a tier (GATES.md ESCALATION).
-- **S5 - every persona journey walked with screenshots + one deduped evidence-backed
-  artifact + recommendations recorded and authorized repairs routed + goal-check PASS** → DONE.
+- **S5 - requested review mode satisfied + complete mode-specific evidence + one deduped artifact + recommendations recorded and authorized repairs routed + goal-check PASS** → lane DONE. A static report alone cannot satisfy an explicitly requested live review.
 
 ## Stacking
 ONE L3 track (internal L4 fan-out is the persona set). Only authorized fix lanes become
@@ -116,3 +115,7 @@ Finding scope: in a review-only mission, the deliverable is an independently ver
 ## Local completion
 
 A framework-local DONE is lane acceptance only. GOAL-CHECK returns PASS/NOT-DONE; enabled cleanup and zero-live-subagent checks precede the final L0 run-level DONE, as specified in GATES.md Completion ownership.
+
+## Mode-specific acceptance
+
+Review mode: when a browser is available, use LIVE review and retain screenshot/reproduction requirements. When no browser is available, complete a STATIC walkthrough with source paths and line evidence, marking visual claims UNVERIFIED-VISUALLY. Return STATIC-REVIEW-COMPLETE after independent static-evidence review. If the user requires live/browser/visual execution, this result is partial evidence only: the mission remains PARTIAL/BLOCKED with the missing capability and resume condition. Otherwise a general review may satisfy acceptance through the explicitly disclosed static path. Never fabricate screenshots or silently claim static evidence proves rendered behavior.
