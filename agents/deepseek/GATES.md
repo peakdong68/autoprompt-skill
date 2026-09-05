@@ -175,7 +175,7 @@ Each juror is default-FAIL and returns `PASS | FAIL` with opened evidence. Requi
 
 The scribe evaluates nothing and edits no production code. It appends the gate transition, persona, exact model/effort status, artifact hash, verdict, elapsed time, and frontier to `GATELOG.md`. It may write or update substantive evidence named by the gate, but creates no additional governance ledger.
 
-G8 does not commit or push. No git, publication, deployment, money, quota, or destructive action is authorized by the run.
+G8 does not commit or push. Invocation alone does not authorize commits, pushes, publication, deployment, spending, or destructive actions. Explicit user authorization already given in this task or session remains valid within its named scope and conditions; do not ask again for the same authorization. Routine read-only git inspection and public-source reading may proceed. Ask about costs or quotas only for unapproved spending or exceeding the authorized budget. Prepare and verify independent authorized work before requesting a remaining approval.
 
 ## SWEEP
 

@@ -104,7 +104,7 @@ resolve any knob conflict in the operator's favor and record it in `GATELOG.md`,
 never defer it into a silent default.
 
 The arbiter resolves technical forks. Mid-run user questions are limited to
-user-owned irreversible/destructive actions, real money or quota, unavailable
+user-owned irreversible/destructive actions, unapproved spending or quota increases, unavailable
 credentials, or product direction. Capability failure, blockers, coverage, and
 real verification cannot be arbitrated away.
 
@@ -136,7 +136,7 @@ malformed, or hash-mismatched artifacts as absent. Re-verify the last accepted
 frontier and continue idempotently. Legacy ledgers may supply a resume frontier
 but must not be extended with new legacy governance files.
 
-No external or git action is implied by invoking Autoprompt or by unattended mode.
+Invocation or unattended mode alone does not authorize commits, pushes, publication, deployment, spending, or destructive actions. Explicit user authorization already given in this task or session remains valid within its named scope and conditions; do not ask again for the same authorization. Routine read-only git inspection and public-source reading may proceed. Ask about costs or quotas only for unapproved spending or exceeding the authorized budget. Prepare and verify independent authorized work before requesting a remaining approval.
 Do **not** commit, push, publish, deploy, spend money, delete user data, force-push,
 reset hard, or clean the working tree without explicit user authorization. The
 supervisor provides relaunch/resume only; it grants no publication or git authority.

@@ -107,9 +107,9 @@ DONE requires full mission/roadmap coverage, zero open findings, usability, no p
 
 Resume is explicit: only an explicit `resume` instruction or a supervisor relaunch resumes a run; skill load, bare invocation, or leftover artifacts never do. The only startup read is the `GATELOG.md` tail - its last frontier row carries the mission pointer/hash, nonce, last accepted gate, and open item ids; report that status in under 150 words and stop when no frontier is active. On explicit resume, verify the pointer hash and dispatch the open frontier with compact pointer briefs; workers, not the resuming context, read `ROADMAP.md`, `PROMPTS.txt`, and substantive evidence. Treat temporary, empty, or unparsable artifacts as absent. Append later self-written steering to the next `PROMPTS.txt` block without rewriting history.
 
-The arbiter decides technical forks. Ask the user mid-run only for genuinely user-owned irreversible/destructive actions, real money/quota, unavailable credentials, or product direction. Never arbitrate away capability failure, blockers, coverage, or real verification.
+The arbiter decides technical forks. Ask the user mid-run only for genuinely user-owned irreversible/destructive actions, unapproved spending or quota increases, unavailable credentials, or product direction. Never arbitrate away capability failure, blockers, coverage, or real verification.
 
-Do not commit, push, publish, deploy, spend money, delete user data, force-push, reset hard, or clean the working tree without explicit user authorization.
+Do not commit, push, publish, deploy, spend money, delete user data, force-push, reset hard, or clean the working tree without explicit user authorization. Explicit user authorization already given in this task or session remains valid within its named scope and conditions; do not ask again for the same authorization. Routine read-only git inspection and public-source reading may proceed. Ask about costs or quotas only for unapproved spending or exceeding the authorized budget. Prepare and verify independent authorized work before requesting a remaining approval.
 
 ## 11. Run
 
