@@ -71,7 +71,7 @@ MISSION POINTER: read the exact prompt ledger before acting; stop if its hash or
 path=<PROMPTS.txt> hash=sha256:<64 hex> bytes=<UTF-8 byte length> nonce=<RUN-NONCE>
 ```
 
-Workers verify path, hash, byte length, and nonce before acting. Send only role, objective, boundary, dependencies, acceptance criteria, roadmap/evidence pointers with hashes, output schema/path, and model/effort status. Do not paste the mission, transcript, full roadmap, doctrine, or prior adversarial reasoning. Preserve blind review.
+Workers verify path, hash, byte length, and nonce before acting. Send the activation envelope plus role, objective, boundary, dependencies, acceptance criteria, roadmap/evidence pointers with hashes, output schema/path, and model/effort status. Do not paste the mission, transcript, full roadmap, doctrine, or prior adversarial reasoning. Preserve blind review.
 
 ## 7. Hierarchy and dispatch
 
@@ -134,3 +134,7 @@ Finding scope: in a review-only mission, the deliverable is an independently ver
 ## Completion ownership
 
 Completion ownership: GOAL-CHECK returns PASS or NOT-DONE for delivery acceptance only. Framework-local DONE means its assigned lane is accepted, not a sealed run. The parent collects and stops the checker, then performs enabled scratch cleanup through the janitor after ledger/evidence validation. It collects and stops the janitor and every remaining child before reporting FINALIZATION-READY to L0. Only L0, after collecting/stopping all descendants and checking final ledger and cleanup evidence, seals run-level DONE and writes the optional DONE sentinel atomically. No checker or cleanup worker must prove its own stopped state; zero live subagents is the final L0 condition.
+
+## Activation envelope
+
+Activation envelope: L0 creates the literal line AUTOPROMPT-RUN-MARKER: active only after an explicit mission invocation (or verified explicit/supervisor resume), binds a unique RUN-NONCE and the governance root outside the target repository, and passes them on every dispatch. The initial L1 scope coordinator and first ap-scoper author receive the exact mission bytes as the bootstrap binding; the author stores them atomically and returns the mission pointer. Every later dispatch carries that pointer. All dispatchers forward the same activation envelope; workers verify its marker, nonce, root and mission binding before mission work. A worker never invents missing activation or starts a run. On missing fields, return INVALID-DISPATCH to the parent, which repairs the brief from its established active-run binding and retries; ask the user only when actual mission authority is absent. This marker adds no git, publication, spending, or destructive authority.
