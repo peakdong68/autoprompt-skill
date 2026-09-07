@@ -302,7 +302,7 @@ test('all nine public provider payloads contain the complete product', () => {
   assert.equal(prime.files.filter(file => /^prompts\/frameworks\/.*\.md$/.test(file)).length, frameworkCount)
   assert.equal(omp.files.filter(file => /^agents\/ap-.*\.md$/.test(file)).length, personaCount)
   assert.equal(deepseek.files.filter(file => /^agents\/ap-.*\.md$/.test(file)).length, personaCount)
-  assert.equal(reasonix.files.filter(file => /^skills\/ap-.*\/SKILL\.md$/.test(file)).length, personaCount)
+  assert.equal(reasonix.files.filter(file => /^skills\/ap-.*\/SKILL\.md$/.test(file)).length, Object.keys(require('../../agents/reasonix/role-policy.json').physical_roles).length)
   assert.ok(claude.files.includes('workflow/autoprompt-gate.js'))
   assert.ok(codex.files.includes('SKILL.md'))
   assert.ok(codex.files.includes('agents/role-policy.json'))
@@ -437,7 +437,7 @@ test('Codex contract dependency discovery rejects reference traversal', t => {
 
 test('each provider installs and verifies as a complete isolated payload', () => {
   for (const provider of [
-    'claude', 'codex', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek', 'reasonix',
+    'claude', 'codex', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek',
   ]) {
     const sandbox = temporaryDirectory(`autoprompt-${provider}-`)
     const destination = provider === 'codex'
@@ -672,4 +672,9 @@ test('packed npm payload installs the complete Codex activation dependency closu
   assert.equal(uninstall.retained.length, 0)
   assert.equal(uninstall.removed.length, expectedCount)
   assert.equal(fs.existsSync(path.join(packedPlan.bundleRoot, 'scripts', 'local-only-safety.cjs')), false)
+})
+
+test('Reasonix cannot be installed through the legacy globally visible payload API', () => {
+  assert.throws(() => installationPlan('reasonix', '/unused', ROOT), /public skill-root payload is forbidden/)
+  assert.throws(() => installPayload('reasonix', '/unused', ROOT), /public skill-root payload is forbidden/)
 })

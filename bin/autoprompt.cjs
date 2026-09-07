@@ -54,6 +54,8 @@ const HELP_TEXT = [
   '  autoprompt uninstall [client|all] [--root <absolute-path>]',
   '  autoprompt configure codex --agents <off|auto|model,...> [--model-map <absolute-json>] [--effort <low|medium|high|xhigh>] [--root <absolute-path>]',
   '  autoprompt activate codex [--target <absolute-path>] [--ttl <seconds>] [--resume <activation-id>] [--root <absolute-path>] -- <mission>',
+  '  autoprompt activate reasonix [--target <absolute-path>] [--ttl <seconds>] [--resume <activation-id>] [--root <absolute-path>] -- <mission>',
+  '  autoprompt configure reasonix --agents <off|auto|model[,model...]> [--model-map <path>] [--effort <low|medium|high|max>] [--root <absolute-path>]',
   '  autoprompt update',
   '  autoprompt repo',
   '  autoprompt support',
@@ -134,7 +136,8 @@ function parseLifecycle(command, rest, doctor = false) {
 }
 
 function parseCodexActivation(rest, alias = false) {
-  if (!alias && rest[0] !== 'codex') usageError('Activate currently supports only codex.')
+  if (!alias && !['codex', 'reasonix'].includes(rest[0])) usageError('Activate supports codex and reasonix.')
+  const provider = alias ? 'codex' : rest[0]
   const args = alias ? rest : rest.slice(1)
   let root = ''
   let target = ''
@@ -174,12 +177,12 @@ function parseCodexActivation(rest, alias = false) {
       continue
     }
     if (argument.startsWith('-')) usageError(`Unknown activate flag: ${argument}`)
-    usageError('Activate codex requires `--` before the mission.')
+    usageError(`Activate ${provider} requires \`--\` before the mission.`)
   }
-  if (!missionMode || mission.length === 0) usageError('Activate codex requires at least one mission argv after `--`.')
+  if (!missionMode || mission.length === 0) usageError(`Activate ${provider} requires at least one mission argv after \`--\`.`)
   return {
     command: 'activate',
-    provider: 'codex',
+    provider,
     missionArgs: mission,
     ...(root ? { root } : {}),
     ...(target ? { target } : {}),
@@ -225,7 +228,8 @@ function parseArgs(argv) {
   if (command === 'activate') return parseCodexActivation(rest)
   if (command === 'codex') return parseCodexActivation(rest, true)
   if (command === 'configure') {
-    if (rest[0] !== 'codex') usageError('Configure currently supports only codex.')
+    if (!['codex', 'reasonix'].includes(rest[0])) usageError('Configure supports codex and reasonix.')
+    const provider = rest[0]
     let selector = ''
     let modelMap = ''
     let effort
@@ -244,16 +248,17 @@ function parseArgs(argv) {
         modelMap = value
       } else if (flag === '--effort') {
         if (effort !== undefined) usageError('--effort may be provided only once.')
-        if (!['low', 'medium', 'high', 'xhigh'].includes(value)) usageError('--effort requires low, medium, high, or xhigh.')
+        const efforts = provider === 'reasonix' ? ['low', 'medium', 'high', 'max'] : ['low', 'medium', 'high', 'xhigh']
+        if (!efforts.includes(value)) usageError(`--effort requires ${efforts.join(', ')}.`)
         effort = value
       } else {
         if (root) usageError('--root may be provided only once.')
         root = validateLifecycleRoot(value)
       }
     }
-    if (!selector) usageError('Configure codex requires --agents.')
-    if (effort !== undefined && selector.trim().toLowerCase() === 'off') usageError('--effort requires enabled Codex agents.')
-    const parsed = { command: 'configure', provider: 'codex', selector, modelMap }
+    if (!selector) usageError(`Configure ${provider} requires --agents.`)
+    if (effort !== undefined && selector.trim().toLowerCase() === 'off') usageError('--effort requires enabled agents.')
+    const parsed = { command: 'configure', provider, selector, modelMap }
     if (effort !== undefined) parsed.effort = effort
     if (root) parsed.root = root
     return parsed
@@ -1357,7 +1362,16 @@ function run(argv, overrides = {}) {
     return runInteractiveUninstall(options)
   }
   if (command.command === 'configure') {
-    const configure = require(path.join(options.packageRoot, 'scripts', 'codex-configure.cjs'))
+    if (command.provider === 'reasonix') {
+      try {
+        const configure = require(path.join(options.packageRoot, 'scripts', 'reasonix-configure.cjs'))
+        configure.configure({ env: command.root ? { ...options.env, AUTOPROMPT_INSTALL_ROOT: command.root } : options.env,
+          selector: command.selector, effort: command.effort, modelMap: command.modelMap })
+        options.stdout.write('Autoprompt configure (reasonix): model selection saved.\n')
+        return 0
+      } catch (error) { options.stderr.write(`Autoprompt configure (reasonix): ${error.message}\n`); return 1 }
+    }
+    const configure = require(path.join(options.packageRoot, 'scripts', `${command.provider}-configure.cjs`))
     return configure.run({
       env: command.root
         ? { ...options.env, AUTOPROMPT_INSTALL_ROOT: command.root }
@@ -1371,7 +1385,7 @@ function run(argv, overrides = {}) {
     })
   }
   if (command.command === 'activate') {
-    const configure = require(path.join(options.packageRoot, 'scripts', 'codex-configure.cjs'))
+    const configure = require(path.join(options.packageRoot, 'scripts', `${command.provider}-configure.cjs`))
     try {
       const result = configure.launchActivation({
         env: command.root
@@ -1389,7 +1403,7 @@ function run(argv, overrides = {}) {
       options.stdout.write(`Autoprompt activation ${result.activationId}: status=${result.status} revoked=true\n`)
       return result.status
     } catch (error) {
-      options.stderr.write(`Autoprompt activate (codex): ${error.message}\n`)
+      options.stderr.write(`Autoprompt activate (${command.provider}): ${error.message}\n`)
       return 1
     }
   }

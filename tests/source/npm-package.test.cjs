@@ -122,10 +122,13 @@ function packageFilesOnDisk() {
     path.join(ROOT, 'package.json'),
     path.join(ROOT, 'README.md'),
     path.join(ROOT, 'LICENSE'),
+    ...filesBelow(path.join(ROOT, 'node_modules', '@iarna', 'toml')),
     ...filesBelow(path.join(ROOT, 'bin')),
     path.join(ROOT, 'scripts', 'codex-configure.cjs'),
     path.join(ROOT, 'scripts', 'codex-runtime-identity.cjs'),
     path.join(ROOT, 'scripts', 'local-only-safety.cjs'),
+    path.join(ROOT, 'scripts', 'reasonix-package.cjs'),
+    path.join(ROOT, 'scripts', 'reasonix-configure.cjs'),
     path.join(ROOT, 'scripts', 'harness-provider-config.cjs'),
     path.join(ROOT, 'scripts', 'runtime-payload.cjs'),
     ...filesBelow(path.join(ROOT, 'scripts', 'benchmark-evidence')),
@@ -265,7 +268,7 @@ function expectedPublicCodexEvidence() {
   }
 }
 
-test('package metadata is public-ready under the exact available name and remains dependency-free', () => {
+test('package metadata is public-ready under the exact available name and declares its native TOML parser', () => {
   const packageJson = JSON.parse(fs.readFileSync(PACKAGE_PATH, 'utf8'))
   assert.equal(packageJson.name, 'autoprompt-skill')
   assert.equal(packageJson.version, PACKAGE_VERSION)
@@ -283,7 +286,7 @@ test('package metadata is public-ready under the exact available name and remain
     autoprompt: 'bin/autoprompt.cjs',
     'autoprompt-skill': 'bin/autoprompt.cjs',
   })
-  assert.equal(packageJson.dependencies, undefined)
+  assert.deepEqual(packageJson.dependencies, { '@iarna/toml': '2.2.5' })
   assert.equal(packageJson.devDependencies, undefined)
   assert.equal(packageJson.optionalDependencies, undefined)
   assert.equal(packageJson.peerDependencies, undefined)
@@ -394,8 +397,10 @@ test('package metadata is public-ready under the exact available name and remain
     'docs/guides/9router-routing.png',
     'docs/guides/codex-v2-local-records.md',
     'docs/guides/custom-agent-compatibility.md',
+    'scripts/reasonix-package.cjs',
+    'scripts/reasonix-configure.cjs',
   ])
-  assert.equal(fs.existsSync(path.join(ROOT, 'package-lock.json')), false)
+  assert.equal(fs.existsSync(path.join(ROOT, 'package-lock.json')), true)
   assert.equal(fs.existsSync(path.join(ROOT, '.npmignore')), false)
 })
 
@@ -412,7 +417,6 @@ test('npm dry-run inventory is an exact allowlist and excludes repository-only m
     '.git',
     '.github/',
     'coverage/',
-    'node_modules/',
     'tests/',
     'agents/other/',
     'agents/vibe/',
@@ -420,6 +424,7 @@ test('npm dry-run inventory is an exact allowlist and excludes repository-only m
     'scripts/generate-provider-contracts.cjs',
   ]
   for (const file of actual) {
+    if (file.startsWith('node_modules/')) assert.ok(file.startsWith('node_modules/@iarna/toml/'), file)
     assert.equal(
       forbiddenPrefixes.some(prefix => file === prefix || file.startsWith(prefix)),
       false,
@@ -584,7 +589,7 @@ test('every npm-packaged bin entrypoint has an LF shebang, no carriage returns, 
   }
 })
 
-test('packed tarball installs into an isolated temporary global prefix and its shim runs', () => {
+test('packed tarball installs offline into an isolated temporary global prefix and includes the Reasonix runtime', () => {
   const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt npm package '))
   const packDirectory = path.join(temporaryRoot, 'tarball output')
   const prefix = path.join(temporaryRoot, 'global prefix')
@@ -608,6 +613,7 @@ test('packed tarball installs into an isolated temporary global prefix and its s
     const installed = runNpm([
       'install',
       '--global',
+      '--offline',
       '--ignore-scripts',
       '--no-audit',
       '--no-fund',
@@ -644,6 +650,16 @@ test('packed tarball installs into an isolated temporary global prefix and its s
       assert.equal(invoked.status, 0, invoked.stderr)
       assert.equal(invoked.stdout, `${PACKAGE_VERSION}\n`)
     }
+    const installedPackage = path.join(prefix, ...(process.platform === 'win32' ? [] : ['lib']), 'node_modules', 'autoprompt-skill')
+    const reasonix = require(path.join(installedPackage, 'scripts/reasonix-package.cjs'))
+    const reasonixRoot = path.join(temporaryRoot, 'reasonix-root')
+    const receipt = reasonix.install(reasonixRoot, installedPackage)
+    assert.equal(receipt.contractVersion, '2.0.0')
+    assert.ok(receipt.files['agents/reasonix/workflow/transport.js'])
+    assert.ok(receipt.files['agents/codex/workflow/phase-budget.js'])
+    assert.ok(receipt.files['node_modules/@iarna/toml/lib/toml-parser.js'])
+    assert.equal(reasonix.verify(reasonixRoot).payloadDigest, receipt.payloadDigest)
+    reasonix.uninstall(reasonixRoot)
   } finally {
     fs.rmSync(temporaryRoot, { recursive: true, force: true })
   }

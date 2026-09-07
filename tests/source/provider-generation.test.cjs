@@ -649,7 +649,7 @@ test('provider projection stays Codex-first, capability-gated, and plain-languag
     reason: 'attestation-required-before-runtime-admission',
   })
   assert.ok(contracts.projectionPlan
-    .filter(decision => decision.provider !== 'codex')
+    .filter(decision => !['codex', 'reasonix'].includes(decision.provider))
     .every(decision => decision.projectionMode === 'PORT_CLOSED' && decision.claimsRealBehavior === false))
 
   const unsafe = structuredClone(contracts)

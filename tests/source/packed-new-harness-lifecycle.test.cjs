@@ -13,10 +13,10 @@ const PACKAGE_VERSION = JSON.parse(fs.readFileSync(
   path.join(ROOT, 'package.json'),
   'utf8',
 )).version
+// Reasonix v2 lifecycle coverage lives in reasonix-v2.test.cjs.
 const PROVIDERS = Object.freeze({
   omp: Object.freeze({ command: 'omp', version: 'omp/17.4.0' }),
   deepseek: Object.freeze({ command: 'dsh', version: '0.1.0-rc.7' }),
-  reasonix: Object.freeze({ command: 'reasonix', version: 'reasonix v1.30.0' }),
 })
 
 function npmCliPath() {
@@ -155,7 +155,7 @@ function writeFakeHarness(bin, provider) {
   fs.chmodSync(target, 0o755)
 }
 
-test('packed 1.0.4 CLI completes lifecycle for OMP, DeepSeek Harness, and Reasonix', {
+test('packed 1.0.4 CLI completes the v1 lifecycle for OMP and DeepSeek Harness', {
   timeout: 900000,
 }, () => {
   const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-packed-harnesses-'))

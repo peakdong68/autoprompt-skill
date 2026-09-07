@@ -100,6 +100,19 @@ uninstall_root() {
   return 0
 }
 
+uninstall_reasonix_lifecycle() {
+  local root
+  root="$(config_root reasonix)"
+  if [ ! -f "$root/.autoprompt-reasonix-v2.json" ]; then
+    uninstall_root "$root" reasonix
+  elif node "$REPO_ROOT/scripts/reasonix-package.cjs" uninstall --root "$root"; then
+    RESULT_ROWS+=("RESULT=OK client=reasonix removed=private-v2")
+  else
+    RESULT_ROWS+=("RESULT=FAIL client=reasonix code=1")
+    UNINSTALL_EXIT_CODE=1
+  fi
+}
+
 uninstall_prime_lifecycle() {
   local root helper output rc
   root="$(config_root prime)"
@@ -152,7 +165,8 @@ main() {
   if [ "$target" = "all" ]; then
     local c root
     for c in "${CLIENTS_ALL[@]}"; do
-      if [ "$c" = prime ]; then uninstall_prime_lifecycle
+      if [ "$c" = reasonix ]; then uninstall_reasonix_lifecycle
+      elif [ "$c" = prime ]; then uninstall_prime_lifecycle
       else
         root="$(config_root "$c")"
         uninstall_root "$root" "$c"
@@ -169,7 +183,8 @@ main() {
     printf 'Autoprompt uninstall: unknown client %s.\n' "$target" >&2
     usage; exit 2
   fi
-  if [ "$target" = prime ]; then uninstall_prime_lifecycle
+  if [ "$target" = reasonix ]; then uninstall_reasonix_lifecycle
+  elif [ "$target" = prime ]; then uninstall_prime_lifecycle
   else uninstall_root "$(config_root "$target")" "$target"
   fi
   print_matrix

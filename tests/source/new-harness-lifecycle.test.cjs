@@ -28,10 +28,10 @@ const PYTHON_DIRECTORY = path.dirname(childProcess.spawnSync(
   ['-c', 'import sys; print(sys.executable)'],
   { encoding: 'utf8' },
 ).stdout.trim())
+// Reasonix v2 lifecycle coverage lives in reasonix-v2.test.cjs.
 const PROVIDERS = Object.freeze({
   omp: Object.freeze({ command: 'omp', version: 'omp/17.4.0' }),
   deepseek: Object.freeze({ command: 'dsh', version: '0.1.0-rc.7' }),
-  reasonix: Object.freeze({ command: 'reasonix', version: 'reasonix v1.30.0' }),
 })
 
 function run(command, args, options = {}) {
@@ -1850,7 +1850,7 @@ test('OMP and Reasonix lifecycle configure recursion depth and restore the prior
   timeout: 600000,
 }, () => {
   for (const port of LIFECYCLE_PORTS) {
-    for (const provider of ['omp', 'reasonix']) {
+    for (const provider of ['omp']) {
       const context = makeContext(`${provider}-depth-${port}`)
       const config = providerConfig(provider, context.customRoot)
       fs.writeFileSync(config.file, config.before)

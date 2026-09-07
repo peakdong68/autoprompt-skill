@@ -887,6 +887,74 @@ function verifyCodexEnforcementProof(repository, environment, proof) {
   }
 }
 
+function verifyReasonixEnforcementProof(repository, environment, proof) {
+  const evidence = { provider: 'reasonix', profilePath: proof.profilePath }
+  const failures = []
+  try {
+    const profile = path.resolve(proof.profilePath)
+    const item = fs.lstatSync(profile)
+    if (proof.schemaVersion !== 1 || !item.isFile() || item.isSymbolicLink() || item.nlink !== 1 ||
+        (process.platform !== 'win32' && (item.mode & 0o077) !== 0) ||
+        pathEqual(profile, repository.worktreeRoot) || pathWithin(repository.worktreeRoot, profile)) {
+      throw new OperationalError('Reasonix enforcement profile must be one private file outside the worktree')
+    }
+    const bytes = fs.readFileSync(profile)
+    if (crypto.createHash('sha256').update(bytes).digest('hex') !== proof.profileSha256) {
+      throw new OperationalError('Reasonix enforcement profile changed')
+    }
+    const policy = JSON.parse(bytes)
+    if (policy.provider !== 'reasonix' || policy.contractVersion !== '2.0.0' ||
+        policy.commandSandbox !== 'enforce' || policy.commandNetwork !== false ||
+        policy.configurationIsolation !== 'private-home-and-empty-launch-directory' ||
+        policy.implicitSkills !== false || policy.externalTools !== false || policy.nestedDispatch !== false) {
+      throw new OperationalError('Reasonix enforcement profile does not enforce all required channels')
+    }
+    // A declarative profile is not capability evidence. Reopen the release's
+    // independent attestation and bind it to the actual native executable and
+    // every installed runtime byte before reporting an enforced channel.
+    const bundle = path.resolve(__dirname, '..')
+    const releaseEvidence = JSON.parse(fs.readFileSync(path.join(bundle, 'agents/contracts/reasonix-live-conformance-evidence.json'), 'utf8'))
+    const ring = JSON.parse(fs.readFileSync(path.join(bundle, 'agents/contracts/reasonix-trusted-public-keys.json'), 'utf8'))
+    const attestation = releaseEvidence.attestation
+    const identity = proof.runtimeIdentityBody
+    const key = (ring.keys || []).find(entry => entry.keyId === attestation?.signature?.keyId)
+    if (releaseEvidence.status !== 'passed' || !key || !identity || identity.provider !== 'reasonix' ||
+        identity.platform !== process.platform || identity.architecture !== process.arch ||
+        attestation.providerId !== 'reasonix' || attestation.result !== 'supported' ||
+        attestation.verificationMethod !== 'live-conformance-suite' || attestation.signature.algorithm !== 'ed25519' ||
+        Date.parse(attestation.issuedAt) > Date.now() || !(Date.parse(attestation.expiresAt) > Date.now()) ||
+        attestation.runtimeIdentityHash !== crypto.createHash('sha256').update(JSON.stringify(identity)).digest('hex') ||
+        !['isolation', 'privateSkillRoot', 'isolatedChecking', 'processOwnership'].every(name => attestation.verifiedCapabilities?.includes(name))) {
+      throw new OperationalError('Reasonix enforcement lacks independently verified native capability evidence')
+    }
+    const signed = JSON.parse(JSON.stringify(attestation))
+    delete signed.signature.value
+    const stable = value => Array.isArray(value) ? value.map(stable) : value && typeof value === 'object'
+      ? Object.fromEntries(Object.keys(value).sort().map(key => [key, stable(value[key])])) : value
+    if (!crypto.verify(null, Buffer.from(JSON.stringify(stable(signed))), key.publicKeyPem, Buffer.from(attestation.signature.value, 'base64url'))) {
+      throw new OperationalError('Reasonix enforcement attestation signature is invalid')
+    }
+    const actualExecutable = fs.lstatSync(proof.nativeExecutable)
+    if (!actualExecutable.isFile() || actualExecutable.isSymbolicLink() || actualExecutable.nlink !== 1 ||
+        crypto.createHash('sha256').update(fs.readFileSync(proof.nativeExecutable)).digest('hex') !== identity.executableSha256) {
+      throw new OperationalError('Reasonix enforcement executable changed')
+    }
+    for (const [relative, hash] of Object.entries(identity.files || {})) {
+      const file = path.resolve(bundle, relative)
+      if (!pathWithin(bundle, file)) throw new OperationalError('Reasonix runtime evidence path escapes its bundle')
+      const item = fs.lstatSync(file)
+      if (!item.isFile() || item.isSymbolicLink() || item.nlink !== 1 ||
+          crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex') !== hash) throw new OperationalError('Reasonix enforcement runtime changed')
+    }
+    evidence.profileSha256 = proof.profileSha256
+    evidence.runtimeIdentityHash = attestation.runtimeIdentityHash
+  } catch (error) { failures.push(residual('ENFORCEMENT_PROOF_INVALID', error.message)) }
+  return {
+    provider: channel(true, failures.length === 0, evidence, failures),
+    shell: channel(true, failures.length === 0, evidence, failures),
+  }
+}
+
 function inspect(repository, expectedBranch, environment = process.env, options = {}) {
   const config = readConfig(repository.worktreeRoot, null, {
     environment,
@@ -965,7 +1033,9 @@ function inspect(repository, expectedBranch, environment = process.env, options 
 
   const repositoryOk = checks.every(item => item.status === 'pass')
   const githubCli = inspectGithubCliBoundary(repository, environment)
-  const proof = verifyCodexEnforcementProof(repository, environment, options.enforcementProof)
+  const proof = options.enforcementProof?.provider === 'reasonix'
+    ? verifyReasonixEnforcementProof(repository, environment, options.enforcementProof)
+    : verifyCodexEnforcementProof(repository, environment, options.enforcementProof)
   const channels = {
     repositoryGitBarrier: channel(true, repositoryOk, {
       checks: checks.map(item => ({ id: item.id, status: item.status })),

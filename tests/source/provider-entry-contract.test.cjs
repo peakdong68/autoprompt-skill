@@ -13,7 +13,7 @@ const ROOT = path.resolve(__dirname, '..', '..')
 const PROVIDERS = [
   'claude', 'codex', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek', 'reasonix',
 ]
-const TEXT_CONTRACT_PROVIDERS = PROVIDERS.filter(provider => provider !== 'codex')
+const TEXT_CONTRACT_PROVIDERS = PROVIDERS.filter(provider => !['codex', 'reasonix'].includes(provider))
 const SKILLS = new Map(PROVIDERS.map(provider => [
   provider,
   provider === 'prime'
@@ -31,7 +31,7 @@ function chooserBlock(source) {
   return match[1]
 }
 
-test('non-Codex public skills retain their existing explicit-only text contract', () => {
+test('v1 public skills retain their existing explicit-only text contract', () => {
   for (const provider of TEXT_CONTRACT_PROVIDERS) {
     const relativePath = SKILLS.get(provider)
     const source = read(relativePath)
@@ -58,7 +58,7 @@ test('OMP and DeepSeek expose the top-level skill only to explicit user invocati
   assert.match(read(SKILLS.get('reasonix')), /^invocation: manual$/m)
 })
 
-test('non-Codex attended providers retain one pre-work chooser declaration', () => {
+test('v1 attended providers retain one pre-work chooser declaration', () => {
   for (const provider of TEXT_CONTRACT_PROVIDERS) {
     const relativePath = SKILLS.get(provider)
     const source = read(relativePath)
@@ -73,7 +73,7 @@ test('chooser model options match each provider capability', () => {
     assert.match(block, /Agent selection:[^\n]*`off`\/inherit[^\n]*`auto`[^\n]*explicit model list/i, provider)
   }
 
-  for (const provider of ['opencode', 'kilo', 'vscode', 'omp', 'deepseek', 'reasonix']) {
+  for (const provider of ['opencode', 'kilo', 'vscode', 'omp', 'deepseek']) {
     const block = chooserBlock(read(SKILLS.get(provider)))
     assert.match(block, /Agent selection:[^\n]*`off`\/inherit/i, `${provider} inherit choice`)
     assert.match(block, /inherited-only/i, `${provider} truthful capability`)
@@ -86,7 +86,7 @@ test('chooser model options match each provider capability', () => {
   assert.match(prime, /no per-child model routing selector is available/i)
   assert.doesNotMatch(prime, /`agents=auto`|Auto-tier|Custom (?:model )?(?:set|models)/i)
 
-  for (const provider of ['opencode', 'kilo', 'vscode', 'omp', 'deepseek', 'reasonix']) {
+  for (const provider of ['opencode', 'kilo', 'vscode', 'omp', 'deepseek']) {
     const modes = read(`agents/${provider}/MODES.md`)
     const chooser = /### Chooser and attendance([\s\S]*?)### [^\n]+ agent selection and effort/.exec(modes)
     assert.ok(chooser, `${provider} modes chooser`)
@@ -98,7 +98,7 @@ test('chooser model options match each provider capability', () => {
 
 test('provider routing statements match the real adapters', () => {
   assert.match(read(SKILLS.get('claude')), /Claude Code routing uses `opus`, `sonnet`, and `haiku`/)
-  for (const provider of ['opencode', 'kilo', 'vscode', 'omp', 'deepseek', 'reasonix']) {
+  for (const provider of ['opencode', 'kilo', 'vscode', 'omp', 'deepseek']) {
     const source = read(SKILLS.get(provider))
     assert.match(source, /inherit(?:s|ed)[^\n]*model/i, provider)
     assert.match(source, /inherited-only/i, provider)
@@ -162,4 +162,15 @@ test('an attended conductor cannot dispatch Agent or Task before the chooser', (
     transcripts: [{ ...transcript('AskUserQuestion'), hasUserInterrupt: true }],
   }), [])
   assert.deepEqual(startupHandshakeFindings({ attended: false, transcripts: [transcript('Agent')] }), [])
+})
+
+// Both v2 entries bind exact mission arguments through explicit launchers.
+test('Reasonix entry requires an explicit mission and private activation', () => {
+  assert.throws(() => parseArgs(['activate', 'reasonix']))
+  assert.throws(() => parseArgs(['activate', 'reasonix', '--']))
+  assert.deepEqual(parseArgs(['activate', 'reasonix', '--', 'fix', 'the bug']), {
+    command: 'activate', provider: 'reasonix', missionArgs: ['fix', 'the bug'], compatibilityAlias: false,
+  })
+  assert.match(read(SKILLS.get('reasonix')), /autoprompt activate reasonix/)
+  assert.match(read(SKILLS.get('reasonix')), /loading a skill alone never creates or resumes a run/)
 })

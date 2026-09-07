@@ -213,7 +213,7 @@ function validateReceiptBoundRegistry(registry, options = {}) {
   const observedAtMs = registry && Date.parse(registry.observedAt)
   const expiresAtMs = registry && Date.parse(registry.expiresAt)
   if (!registry || typeof registry !== 'object' || Array.isArray(registry) ||
-      registry.schemaVersion !== 'codex-model-registry.v1' ||
+      !['codex-model-registry.v1', 'reasonix-model-registry.v1'].includes(registry.schemaVersion) ||
       typeof registry.issuer !== 'string' || !registry.issuer.trim() ||
       !Number.isFinite(observedAtMs) || !Number.isFinite(expiresAtMs) || observedAtMs >= expiresAtMs ||
       !Number.isFinite(nowMs) || nowMs >= expiresAtMs ||

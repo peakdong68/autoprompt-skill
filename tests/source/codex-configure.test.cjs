@@ -893,7 +893,7 @@ test('explicit effort configures receipt-bound private assignments and omission 
   const { readPrivateAgentAssignment, createDefaultRuntimeOptions } = require('../../agents/codex/workflow/phase-budget.js')
   // Exercise the real assignment implementation called by the production
   // resolver, without claiming full activation/capability admission here.
-  assert.match(createDefaultRuntimeOptions.toString(), /assignmentResolver:\s*\(\{ providerRole, logicalRole \}\) =>\s*readPrivateAgentAssignment\(activation, providerRole, logicalRole\)/u)
+  assert.match(createDefaultRuntimeOptions.toString(), /assignmentResolver:\s*context\.assignmentResolver \|\| \(\(\{ providerRole, logicalRole \}\) =>\s*readPrivateAgentAssignment\(activation, providerRole, logicalRole\)/u)
   const args = ['configure', 'codex', '--agents', 'gpt-5.6-sol']
   const initial = invoke(context, args)
   assert.equal(initial.status, 0, initial.stderr)

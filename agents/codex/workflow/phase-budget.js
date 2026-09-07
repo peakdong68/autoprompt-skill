@@ -2312,7 +2312,7 @@ class RuntimeCapabilityAuthority {
       runId: options.runId,
       generation: options.generation,
       targetIdentity: options.targetIdentity,
-      provider: 'codex',
+      provider: options.providerId || 'codex',
     })
     this.now = options.now || Date.now
     this.environment = options.environment || process.env
@@ -19949,7 +19949,7 @@ function activationRuntimeSettings(activation, context = {}) {
   const providerMaximum = clampNonNegInt(context.providerMaximum, Math.max(1, Math.min(10, available)))
   return {
     explicit,
-    providerId: 'codex',
+    providerId: activation.providerId || 'codex',
     capabilities: { modelRouting: true, wideMaxSubs: providerMaximum },
     interactive: process.stdin.isTTY === true,
     ...((activation.deadline || activation.record && activation.record.deadline || context.deadline)
@@ -29423,6 +29423,7 @@ function safeExpectedBranch(repository, environment) {
 
 function createRuntimeCapabilityBinding(input) {
   const authority = new RuntimeCapabilityAuthority({
+    providerId: input.activation.providerId || 'codex',
     activationAttestation: input.activation.activationAttestation,
     runtimeMetadataSha256: input.activation.supervisorRuntime.metadataSha256,
     profileSha256: input.activation.enforcementProof.profileSha256,
@@ -31612,7 +31613,8 @@ function createDefaultRuntimeOptions(input) {
         generationId: generation,
       })
       trustedTestRunner = runner
-      codexAdapter = new CodexExecAdapter({
+      const ExecutionAdapter = context.ExecutionAdapter || CodexExecAdapter
+      codexAdapter = new ExecutionAdapter({
         runner,
         executable: probe.executable,
         executableArgs: context.executableArgs,
@@ -31623,6 +31625,7 @@ function createDefaultRuntimeOptions(input) {
         outputSchemaResolver: launch => outputSchemaForRole(roleContract, launch),
         providerSchemaRoot: path.join(activation.activationRoot, 'provider-output-schemas'),
         checkerScratchVerifier: runtimeOptions.checkerScratchFactory.verify,
+        ...(context.executionAdapterOptions || {}),
       })
       if (pendingCrashResume) {
         const checkpoint = pendingCrashResume.checkpointEvidence.record.checkpoint
@@ -31761,8 +31764,8 @@ function createDefaultRuntimeOptions(input) {
         terminalStatus: 'FAILED',
       })
     },
-    assignmentResolver: ({ providerRole, logicalRole }) =>
-      readPrivateAgentAssignment(activation, providerRole, logicalRole),
+    assignmentResolver: context.assignmentResolver || (({ providerRole, logicalRole }) =>
+      readPrivateAgentAssignment(activation, providerRole, logicalRole)),
     profileUpdater: async ({ route, settings: resolved }) => {
       currentRoute = route
       return deriveProfileLimits({
@@ -32645,6 +32648,11 @@ if (require.main === module) {
 
 module.exports = {
   CodexExecAdapter,
+  codexProviderCanonicalOutputSchema,
+  codexPrivateWorkspaceProjection,
+  codexCheckerScratchProjection,
+  codexExplicitExternalLocalProjection,
+  codexChildToolCallLimit,
   imageDatumOutcomeFromPreWorkAdmission,
   billableModelTokens,
   resolvePreMutationRouteDecisionHash,
@@ -32717,6 +32725,7 @@ module.exports = {
   createResidualRiskDisposition,
   createMinimalTestEnvironment,
   createCodexJsonlAccumulator,
+  codexTransportEvidence,
   createCheckerObservationBinding,
   checkerResultBoundToCommandExecutionEvidence,
   normalizeCheckerOutcomeIdentity,

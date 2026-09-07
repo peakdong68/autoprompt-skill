@@ -778,7 +778,7 @@ function validateCompiledRouteExamples(markdown, routes, routesSha256, label) {
   return true
 }
 
-function providerProjectionPlan(contracts, openedProviders = ['codex']) {
+function providerProjectionPlan(contracts, openedProviders = ['codex', 'reasonix']) {
   const records = contracts.providers.providers || []
   requireCondition(sameMembers(records.map(provider => provider.id), PUBLIC_PROVIDER_IDS), 'provider projection consumer mismatch')
   const opened = new Set(openedProviders)
@@ -1765,6 +1765,67 @@ function renderCodexOutputs(root = ROOT) {
   validateCompiledRouteExamples(outputs.get(registry.generatedOutputs['SKILL.md']), contracts.routes, routesSha256, 'Codex L0 prompt')
   validateCompiledRouteExamples(outputs.get(`${registry.generatedOutputs.agents}/ap-route-analyst.toml`), contracts.routes, routesSha256, 'Codex route analyst prompt')
   validateGeneratedPlainLanguage(outputs, contracts.plainLanguage)
+  return outputs
+}
+
+// Both adapters compile the same reviewed v2 policy. Only the native profile
+// encoding and activation syntax differ; no legacy persona renderer is used.
+function renderReasonixOutputs(root = ROOT) {
+  const contracts = loadCodexV2Contracts(root)
+  const codex = renderCodexOutputs(root)
+  const outputs = new Map()
+  for (const [sourcePath, source] of codex) {
+    const relative = sourcePath.slice('agents/codex/'.length)
+    if (relative.startsWith('agents/')) {
+      const id = path.basename(relative, '.toml')
+      const role = contracts.rolePolicy.physical_roles[id]
+      requireCondition(role, `Reasonix role ${id} has no canonical policy`)
+      const description = JSON.parse(source.match(/^description = (.+)$/m)[1])
+      const body = source.match(/developer_instructions = """\n([\s\S]*)\n"""\n$/)[1]
+        .replace('# Codex role instructions', '# Reasonix role instructions')
+      const readOnly = role.sandbox_mode === 'read-only'
+      // C0 owns dispatch. Even coordinators return assignments to C0 instead
+      // of receiving unrestricted task/fleet/run_skill tools.
+      const tools = readOnly
+        ? ['read_file', 'bash', 'bash_output', 'kill_shell']
+        : ['read_file', 'bash', 'bash_output', 'kill_shell', 'write_file', 'edit_file']
+      outputs.set(`agents/reasonix/skills/${id}/SKILL.md`, [
+        '---', `name: ${id}`, `description: ${yamlDoubleQuoted(description)}`,
+        'invocation: manual', 'runAs: subagent', `read-only: ${readOnly}`,
+        `allowed-tools: ${JSON.stringify(tools)}`, '---', '', body, '',
+        'The external Autoprompt controller owns all child launches. Return any permitted child assignments to the controller; do not invoke task, fleet, run_skill, or another CLI to dispatch them.', '',
+      ].join('\n'))
+    } else if (relative === 'SKILL.md') {
+      const body = source.slice(source.indexOf('# Autoprompt 2.0 provider-neutral instructions'))
+      outputs.set('agents/reasonix/SKILL.md', [
+        '---', 'name: autoprompt',
+        'description: "Run explicitly requested Autoprompt work with task routing, owned assignments, independent checks, and bounded recovery."',
+        'invocation: manual', '---', '', '# Autoprompt for Reasonix', '',
+        'Start through `autoprompt activate reasonix --target <absolute-project-path> -- <mission>`. The native `/autoprompt` entry explains this launcher; loading a skill alone never creates or resumes a run.',
+        'Reasonix uses native manual subagent profiles. The external controller owns dispatch, private activation, run records, and recovery. Model and effort selection use Reasonix configuration and are bound before launch.', '', body,
+      ].join('\n'))
+    } else if (relative === 'README.md') {
+      outputs.set('agents/reasonix/README.md', [
+        '# Reasonix v2 package', '',
+        'This adapter projects the same version 2 routes, role policy, checks, and recovery contracts as Codex into Reasonix 1.30.0 native profiles.', '',
+        '- `SKILL.md`: explicit entry and coordinator instructions',
+        `- \`skills/\`: ${Object.keys(contracts.rolePolicy.physical_roles).length} native manual profiles, including compatibility aliases`,
+        '- `frameworks/`: the canonical task and check workflows',
+        '- `workflow/`: native transport and external controller integration',
+        '- `GATES.md`, `MODES.md`, and `PLAYBOOKS.md`: compiled v2 contracts', '',
+        '```bash', 'autoprompt activate reasonix --target <absolute-project-path> -- <request>', '```', '',
+        'Internal profiles are installed in a private bundle and become available only to an explicit activation. Installation and source tests do not constitute live provider conformance.', '',
+        'Production activation currently refuses with `PROVIDER_UNSUPPORTED`: this release has no independent signed Reasonix conformance attestation. This is the same required-capability admission policy used by v2. Do not replace the missing record with self-issued evidence.', '',
+        'Configure model inheritance with `autoprompt configure reasonix --agents off`, one model with `--agents provider/model --effort high`, or measured automatic selection with `--agents auto --model-map <reasonix-registry.json>`. Explicit lists use the same measured registry. Model selection never changes the task route.', '',
+      ].join('\n'))
+    } else {
+      outputs.set(`agents/reasonix/${relative}`, relative === 'VERSION' ? '2.0.0\n'
+        : source.replaceAll('Codex', 'Reasonix').replaceAll('autoprompt activate codex', 'autoprompt activate reasonix'))
+    }
+  }
+  const policy = structuredClone(contracts.rolePolicy)
+  policy.policy_id = policy.policy_id.replace('codex', 'reasonix')
+  outputs.set('agents/reasonix/role-policy.json', `${JSON.stringify(policy, null, 2)}\n`)
   return outputs
 }
 
@@ -2930,9 +2991,10 @@ function renderLegacyOutputs(root = ROOT) {
 function renderOutputs(root = ROOT) {
   const outputs = renderLegacyOutputs(root)
   for (const relativePath of [...outputs.keys()]) {
-    if (relativePath.startsWith('agents/codex/')) outputs.delete(relativePath)
+    if (/^agents\/(codex|reasonix)\//.test(relativePath)) outputs.delete(relativePath)
   }
   for (const [relativePath, content] of renderCodexOutputs(root)) outputs.set(relativePath, content)
+  for (const [relativePath, content] of renderReasonixOutputs(root)) outputs.set(relativePath, content)
   return outputs
 }
 
@@ -2951,14 +3013,14 @@ function differingOutputs(outputs, root = ROOT) {
 function run(argv, root = ROOT, io = process) {
   const check = argv.includes('--check')
   const codexOnly = argv.includes('--codex-only')
-  if (argv.some(argument => !['--check', '--codex-only'].includes(argument))) {
-    io.stderr.write('generate-provider-contracts: only --check and --codex-only are supported\n')
+  const reasonixOnly = argv.includes('--reasonix-only')
+  if ((codexOnly && reasonixOnly) || argv.some(argument => !['--check', '--codex-only', '--reasonix-only'].includes(argument))) {
+    io.stderr.write('generate-provider-contracts: use --check with at most one of --codex-only or --reasonix-only\n')
     return 2
   }
-  // Codex-first v2 phase: only the validated Codex projection is active. The
-  // legacy renderer remains an API for the eight unchanged provider trees.
-  const outputs = renderCodexOutputs(root)
-  if (!codexOnly) {
+  const outputs = reasonixOnly ? new Map() : renderCodexOutputs(root)
+  if (!codexOnly) for (const [file, content] of renderReasonixOutputs(root)) outputs.set(file, content)
+  if (!codexOnly && !reasonixOnly) {
     for (const [relativePath, content] of renderSharedFrameworkOutputs(root)) outputs.set(relativePath, content)
   }
   const differing = differingOutputs(outputs, root)
@@ -3014,6 +3076,7 @@ module.exports = {
   renderPrimePyproject,
   renderPrimeSkill,
   renderReasonixAgent,
+  renderReasonixOutputs,
   renderSharedFrameworkOutputs,
   renderVsCodeAgent,
   renderVsCodeProviderText,

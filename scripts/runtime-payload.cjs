@@ -403,6 +403,7 @@ function payloadSha256(provider, filePath) {
 function runtimeFiles(provider, root = ROOT) {
   const definition = PROVIDERS[provider]
   if (provider === 'codex') return codexRuntimeFiles(root)
+  if (provider === 'reasonix') return allFilesBelow(path.join(root, 'agents', 'reasonix')).filter(file => file !== 'SKILL.md').sort()
   const contract = JSON.parse(fs.readFileSync(path.join(root, 'agents', 'contracts', 'autoprompt.contract.json'), 'utf8'))
   const files = [...definition.topLevel]
   const frameworkRoot = definition.frameworkRoot || 'frameworks'
@@ -609,6 +610,13 @@ function renderManifest(provider, root = ROOT) {
     files,
     sha256: hashes,
   }
+  if (provider === 'reasonix') {
+    manifest.contractVersion = '2.0.0'
+    manifest.rolePolicy = 'role-policy.json'
+    manifest.logicalRoles = Object.keys(JSON.parse(fs.readFileSync(path.join(root, 'agents/reasonix/role-policy.json'), 'utf8')).physical_roles).sort()
+    manifest.entrypoints = ['workflow/transport.js']
+    manifest.installation = 'private-reasonix-v2-bundle'
+  }
   if (provider === 'codex') {
     const policy = JSON.parse(fs.readFileSync(path.join(root, 'agents', 'codex', 'agents', 'role-policy.json'), 'utf8'))
     manifest.contractVersion = policy.policy_version
@@ -794,6 +802,7 @@ function codexActivationLayout(destination, payloadGeneration) {
 }
 
 function installationPlan(provider, destination, root = ROOT) {
+  if (provider === 'reasonix') throw new Error('Reasonix v2 uses scripts/reasonix-package.cjs with --root <provider-config-root>; a public skill-root payload is forbidden')
   const manifest = loadManifest(provider, root)
   const codexRegistry = provider === 'codex' ? loadCodexPackageRegistry(root) : null
   verifySource(manifest, root)
@@ -924,6 +933,8 @@ function loadManifest(provider, root = ROOT) {
   for (const hash of Object.values(manifest.sha256)) {
     if (!HASH_PATTERN.test(hash)) throw new Error(`invalid runtime SHA-256 in ${manifestPath}`)
   }
+  if (provider === 'reasonix' && (manifest.contractVersion !== '2.0.0' || manifest.rolePolicy !== 'role-policy.json' ||
+      manifest.installation !== 'private-reasonix-v2-bundle')) throw new Error('Reasonix v2 manifest metadata mismatch')
   if (provider === 'codex') {
     const policy = JSON.parse(fs.readFileSync(path.join(root, 'agents', 'codex', 'agents', 'role-policy.json'), 'utf8'))
     const expectedRoles = Object.keys(policy.physical_roles).sort()
@@ -1039,6 +1050,7 @@ function removeEmptyDirectories(directory) {
 }
 
 function prunePayload(provider, destination, root = ROOT) {
+  if (provider === 'reasonix') throw new Error('Reasonix v2 uses scripts/reasonix-package.cjs with --root <provider-config-root>; a public skill-root payload is forbidden')
   if (provider === 'codex') {
     // Codex bundles are immutable and generation-qualified. Installer receipt
     // reconciliation owns retirement of prior generations and preserves drift.
@@ -1061,6 +1073,7 @@ function prunePayload(provider, destination, root = ROOT) {
 }
 
 function installPayload(provider, destination, root = ROOT) {
+  if (provider === 'reasonix') throw new Error('Reasonix v2 uses scripts/reasonix-package.cjs with --root <provider-config-root>; a public skill-root payload is forbidden')
   const manifest = loadManifest(provider, root)
   verifySource(manifest, root)
   const plan = installationPlan(provider, destination, root)
@@ -1102,6 +1115,7 @@ function installPayload(provider, destination, root = ROOT) {
 }
 
 function verifyPayload(provider, destination, root = ROOT) {
+  if (provider === 'reasonix') throw new Error('Reasonix v2 uses scripts/reasonix-package.cjs with --root <provider-config-root>; a public skill-root payload is forbidden')
   const manifest = loadManifest(provider, root)
   verifySource(manifest, root)
   const plan = installationPlan(provider, destination, root)

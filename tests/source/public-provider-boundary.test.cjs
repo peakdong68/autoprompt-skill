@@ -202,7 +202,7 @@ test('unsupported model routing is stated plainly in every language', () => {
   for (const [relativePath, wording] of expectations) {
     const source = read(relativePath)
     const row = source.split('\n').find(line => line.includes('|') && line.includes('`agents=`')) ?? ''
-    assert.equal((row.match(/✕/g) ?? []).length, 7, relativePath)
-    assert.equal(row.split(wording).length - 1, 7, relativePath)
+    assert.equal((row.match(/✕/g) ?? []).length, 6, relativePath)
+    assert.equal(row.split(wording).length - 1, 6, relativePath)
   }
 })

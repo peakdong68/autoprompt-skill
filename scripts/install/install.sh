@@ -115,6 +115,18 @@ config_root() {
   autoprompt_config_root "$client"
 }
 
+install_reasonix_lifecycle() {
+  local destination
+  destination="$(config_root reasonix)"
+  if node "$REPO_ROOT/scripts/reasonix-package.cjs" install --root "$destination"; then
+    RESULT_ROWS+=("RESULT=PASS client=reasonix dest=$destination format=private-v2")
+  else
+    RESULT_ROWS+=("RESULT=FAIL client=reasonix stage=lifecycle")
+    ANY_FAIL=1
+    return 1
+  fi
+}
+
 install_prime_lifecycle() {
   local helper="$SCRIPT_DIR/prime-lifecycle.cjs" output rc destination prime_cli
   prime_cli="$(type -P -- "${AUTOPROMPT_CLIENT_BIN[prime]}" 2>/dev/null)" || prime_cli=""
@@ -1821,7 +1833,8 @@ main() {
     done
     local -a ordinary=()
     for c in "${present[@]}"; do
-      if [ "$c" = prime ]; then install_prime_lifecycle || true
+      if [ "$c" = reasonix ]; then install_reasonix_lifecycle || true
+      elif [ "$c" = prime ]; then install_prime_lifecycle || true
       else ordinary+=("$c")
       fi
     done
@@ -1851,6 +1864,11 @@ main() {
     printf 'Autoprompt install (%s): SKIP - CLI not detected on PATH. Install it and re-run.\n' "$target" >&2
     RESULT_ROWS+=("SKIP=skip client=$target reason=not-detected")
     print_matrix; exit 0
+  fi
+  if [ "$target" = reasonix ]; then
+    install_reasonix_lifecycle || true
+    print_matrix
+    exit "$(install_exit_code)"
   fi
   if [ "$target" = prime ]; then
     install_prime_lifecycle || true

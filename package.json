@@ -57,12 +57,14 @@
     "docs/guides/9router-multi-provider-setup.md",
     "docs/guides/9router-routing.png",
     "docs/guides/codex-v2-local-records.md",
-    "docs/guides/custom-agent-compatibility.md"
+    "docs/guides/custom-agent-compatibility.md",
+    "scripts/reasonix-package.cjs",
+    "scripts/reasonix-configure.cjs"
   ],
   "scripts": {
     "normalize:shell": "node scripts/normalize-shell-line-endings.cjs",
     "pretest": "npm run normalize:shell",
-    "test": "npm run test:cli && npm run test:providers && npm run test:benchmark",
+    "test": "npm run test:cli && npm run test:providers && npm run test:benchmark && npm run test:reasonix",
     "test:cli": "node --test tests/source/autoprompt-cli.test.cjs tests/source/codex-configure.test.cjs tests/source/npm-package.test.cjs tests/source/public-provider-boundary.test.cjs tests/source/release-notes.test.cjs tests/source/source-test-contract.test.cjs tests/source/test-codex-source-discovery.test.cjs",
     "test:providers": "node scripts/generate-provider-contracts.cjs --check && node scripts/runtime-payload.cjs --check && node --test tests/source/provider-generation.test.cjs tests/source/runtime-payload.test.cjs tests/source/vscode-custom-agent-fixture.test.cjs tests/source/provider-compatibility-registry.test.cjs tests/source/codex-current-parity.test.cjs tests/source/prime-provider.test.cjs tests/source/provider-entry-contract.test.cjs tests/source/supervisor-mode-contract.test.cjs tests/source/custom-claude-formatter.test.cjs tests/source/powershell-hash-fallback.test.cjs tests/source/harness-provider-config.test.cjs",
     "test:benchmark": "node --test tests/source/benchmark-evidence-v2.test.cjs tests/source/benchmark-evidence-test-closures.test.cjs tests/benchmarks/autoprompt-benchmark.test.cjs",
@@ -76,7 +78,8 @@
     "test:lifecycle": "node --test --test-concurrency=1 tests/source/claude-lifecycle.test.cjs tests/source/kilo-provider.test.cjs tests/source/opencode-lifecycle.test.cjs tests/source/vscode-lifecycle.test.cjs tests/source/prime-lifecycle.test.cjs tests/source/new-harness-lifecycle.test.cjs tests/source/packed-new-harness-lifecycle.test.cjs tests/source/install-custom-root.test.cjs tests/source/codex-receipt-lifecycle.test.cjs tests/source/packed-codex-lifecycle.test.cjs tests/source/codex-artifact.test.cjs tests/source/codex-version-probe-isolation.test.cjs tests/source/install-extras-runtime-path.test.cjs tests/source/opencode-launch-wrapper.test.cjs tests/source/powershell-home-precedence.test.cjs tests/source/posix-shell-performance.test.cjs",
     "verify": "npm test && npm run test:codex-core && npm run test:lifecycle",
     "prepack": "npm test",
-    "prepublishOnly": "npm run verify && npm run benchmark:release-quality-gate"
+    "prepublishOnly": "npm run verify && npm run benchmark:release-quality-gate",
+    "test:reasonix": "node --test tests/source/reasonix-v2.test.cjs tests/source/reasonix-native.test.cjs"
   },
   "engines": {
     "node": ">=20.0.0"
@@ -104,5 +107,11 @@
     "reasonix",
     "deepseek-harness",
     "vscode"
-  ]
+  ],
+  "bundleDependencies": [
+    "@iarna/toml"
+  ],
+  "dependencies": {
+    "@iarna/toml": "2.2.5"
+  }
 }

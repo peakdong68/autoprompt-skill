@@ -364,6 +364,19 @@ legacy_codex_installed() {
 # extras completeness (full runtime set for claude/codex).
 probe_client() {
   local client="$1"
+  if [ "$client" = reasonix ]; then
+    local root detected=no installed=no verifies=no version=- reason=not-installed extras=missing
+    root="$(config_root reasonix)"
+    local det
+    if det="$(detect_client reasonix 2>/dev/null)"; then detected=yes; version="${det##*version=}"; fi
+    if [ -f "$root/.autoprompt-reasonix-v2.json" ]; then
+      installed=yes
+      if node "$REPO_ROOT/scripts/reasonix-package.cjs" verify --root "$root" >/dev/null 2>&1; then verifies=yes; reason=-; extras=complete
+      else reason=payload-invalid; fi
+    fi
+    printf '%s %s %s version=%s reason=%s extras=%s activation=attestation-required' "$detected" "$installed" "$verifies" "$version" "$reason" "$extras"
+    return 0
+  fi
   if [ "$client" = prime ]; then
     local root helper det_rec version="-" detected="no" installed="no"
     local verifies="no" reason="-" extras="invalid:prime-lifecycle" output rc prime_cli=""

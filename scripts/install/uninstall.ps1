@@ -148,6 +148,17 @@ function Uninstall-Root {
     $script:ResultRows += "RESULT=OK client=$Label removed=$removed"
 }
 
+function Uninstall-ReasonixLifecycle {
+    $root = Get-ConfigRoot -Client 'reasonix'
+    if (-not (Test-Path -LiteralPath (Join-Path $root '.autoprompt-reasonix-v2.json'))) {
+        Uninstall-Root -Root $root -Label 'reasonix'
+        return
+    }
+    & node (Join-Path $RepoRoot 'scripts/reasonix-package.cjs') uninstall --root $root
+    if ($LASTEXITCODE -eq 0) { $script:ResultRows += 'RESULT=OK client=reasonix removed=private-v2' }
+    else { $script:ResultRows += 'RESULT=FAIL client=reasonix code=1'; $script:UninstallExitCode = 1 }
+}
+
 function Uninstall-PrimeLifecycle {
     $root = Get-ConfigRoot -Client 'prime'
     $receipt = Join-Path $root '.autoprompt-prime-install.json'
@@ -207,7 +218,8 @@ if (-not (Test-AutopromptInstallRootContract -Target $Target)) { exit 2 }
 
 if ($Target -eq 'all') {
     foreach ($c in $ClientsAll) {
-        if ($c -ceq 'prime') { Uninstall-PrimeLifecycle }
+        if ($c -ceq 'reasonix') { Uninstall-ReasonixLifecycle }
+        elseif ($c -ceq 'prime') { Uninstall-PrimeLifecycle }
         else {
             $root = Get-ConfigRoot -Client $c
             Uninstall-Root -Root $root -Label $c
@@ -221,7 +233,8 @@ if ($ClientsAll -notcontains $Target -and $LegacyCleanupClients -notcontains $Ta
     [Console]::Error.WriteLine("Autoprompt uninstall: unknown client $Target.")
     Write-Usage; exit 2
 }
-if ($Target -ceq 'prime') { Uninstall-PrimeLifecycle }
+if ($Target -ceq 'reasonix') { Uninstall-ReasonixLifecycle }
+elseif ($Target -ceq 'prime') { Uninstall-PrimeLifecycle }
 else { Uninstall-Root -Root (Get-ConfigRoot -Client $Target) -Label $Target }
 Write-Matrix
 exit $script:UninstallExitCode

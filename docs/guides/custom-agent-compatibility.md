@@ -51,7 +51,7 @@ A copied `SKILL.md` is not enough. The host needs a native adapter and a safe li
 | Prime Agent | 0.7.2; checked on 0.7.2 | Native package, personas, framework prompts, guarded recursion | Inherits selected parent model |
 | Oh My Pi | 17.4.0+; adapter contract, install lifecycle, and native role payload verified for 17.4.0 | Skill, Markdown agents, native `spawns` allowlists | Inherits selected parent model |
 | DeepSeek Harness | 0.1.0-rc.7+; adapter contract, install lifecycle, and native role payload verified for 0.1.0-rc.7 | Skill, user preset, fixed-persona tools, headless patch | Inherits selected parent model |
-| Reasonix | 1.30.0+; adapter contract, install lifecycle, and native role payload verified for 1.30.0 | Skill and 25 manual native subagent profiles | Inherits selected parent model |
+| Reasonix | V2 port for 1.30.0; production conformance pending | Private controller and 32 manual profiles; one public launcher | Inheritance, explicit model/effort, measured registry selection |
 
 See the [support notes](../faq/which-coding-agents-are-supported.md).
 

@@ -1,12 +1,19 @@
-# Reasonix package
+# Reasonix v2 package
 
-This package targets Reasonix 1.30.0.
+This adapter projects the same version 2 routes, role policy, checks, and recovery contracts as Codex into Reasonix 1.30.0 native profiles.
 
-- [`SKILL.md`](SKILL.md): L0 conductor prompt
-- [`skills`](skills/): 25 native subagent profiles
-- [`frameworks`](frameworks/): 18 task and gate workflows
-- [`GATES.md`](GATES.md), [`MODES.md`](MODES.md), and [`PLAYBOOKS.md`](PLAYBOOKS.md): execution contracts
+- `SKILL.md`: explicit entry and coordinator instructions
+- `skills/`: 32 native manual profiles, including compatibility aliases
+- `frameworks/`: the canonical task and check workflows
+- `workflow/`: native transport and external controller integration
+- `GATES.md`, `MODES.md`, and `PLAYBOOKS.md`: compiled v2 contracts
 
-Reasonix discovers the installed top-level skill and `ap-*` subagent profiles from its skill directory. Canonical role prompts define the recursive child edges.
+```bash
+autoprompt activate reasonix --target <absolute-project-path> -- <request>
+```
 
-Every role inherits the selected parent model. Custom `agents=` model routing is not available.
+Internal profiles are installed in a private bundle and become available only to an explicit activation. Installation and source tests do not constitute live provider conformance.
+
+Production activation currently refuses with `PROVIDER_UNSUPPORTED`: this release has no independent signed Reasonix conformance attestation. This is the same required-capability admission policy used by v2. Do not replace the missing record with self-issued evidence.
+
+Configure model inheritance with `autoprompt configure reasonix --agents off`, one model with `--agents provider/model --effort high`, or measured automatic selection with `--agents auto --model-map <reasonix-registry.json>`. Explicit lists use the same measured registry. Model selection never changes the task route.

@@ -76,7 +76,7 @@ autoprompt
 | 지원 | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) | 0.7.2; 0.7.2 검증 완료; 네이티브 패키지 어댑터 | `prime` |
 | 지원 | [Oh My Pi](https://omp.sh/) | 17.4.0+; 17.4.0에서 어댑터 계약, 설치 수명주기, 네이티브 역할 페이로드 검증 완료 | `omp` |
 | 지원 | [DeepSeek Harness](https://deepseek.com/harness/en/) | 0.1.0-rc.7+; 0.1.0-rc.7에서 어댑터 계약, 설치 수명주기, 네이티브 역할 페이로드 검증 완료 | `deepseek` |
-| 지원 | [Reasonix](https://reasonix.io/docs/) | 1.30.0+; 1.30.0에서 어댑터 계약, 설치 수명주기, 네이티브 역할 페이로드 검증 완료 | `reasonix` |
+| V2 포트 | [Reasonix](https://reasonix.io/docs/) | 1.30.0; 네이티브 전송 테스트 완료, 운영용 독립 적합성 검증 대기 | `reasonix` |
 
 [지원 및 검증 정보](../faq/which-coding-agents-are-supported.md)를 참고하세요.
 
@@ -152,7 +152,7 @@ autoprompt activate codex -- path=light "<goal>"
 | 제어 | Claude Code | Codex | OpenCode | Kilo | VS Code | Prime Agent | Oh My Pi | DeepSeek Harness | Reasonix |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | `mode=` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| 사용자 지정 `agents=` 라우팅 | ✓ | ✓ | ✕ 미지원 - 활성 모델 사용 | ✕ 미지원 - 활성 모델 사용 | ✕ 미지원 - 활성 모델 사용 | ✕ 미지원 - 선택한 부모 모델 사용 | ✕ 미지원 - 선택한 부모 모델 사용 | ✕ 미지원 - 선택한 부모 모델 사용 | ✕ 미지원 - 선택한 부모 모델 사용 |
+| 사용자 지정 `agents=` 라우팅 | ✓ | ✓ | ✕ 미지원 - 활성 모델 사용 | ✕ 미지원 - 활성 모델 사용 | ✕ 미지원 - 활성 모델 사용 | ✕ 미지원 - 선택한 부모 모델 사용 | ✕ 미지원 - 선택한 부모 모델 사용 | ✕ 미지원 - 선택한 부모 모델 사용 | ✓ V2 설정; 활성화 검증 필요 |
 
 ## 작동 방식
 

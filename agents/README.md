@@ -14,7 +14,7 @@ This folder contains the complete Autoprompt product. The prompts, custom agents
 | [Prime Agent](prime/) | [Package adapter](prime/package.json) and [skill](prime/skills/autoprompt/SKILL.md) | [25 persona prompts](prime/personas/) | [18 workflows](prime/prompts/frameworks/) | Recursive through the native package adapter |
 | [Oh My Pi](omp/) | [`SKILL.md`](omp/SKILL.md) | [25 Markdown agents](omp/agents/) | [18 workflows](omp/frameworks/) | Recursive through native `task` dispatch and `spawns` allowlists |
 | [DeepSeek Harness](deepseek/) | [`SKILL.md`](deepseek/SKILL.md) | [25 fixed-persona tools](deepseek/agents/) | [18 workflows](deepseek/frameworks/) | Recursive through the user preset or headless patch |
-| [Reasonix](reasonix/) | [`SKILL.md`](reasonix/SKILL.md) | [25 native profiles](reasonix/skills/) | [18 workflows](reasonix/frameworks/) | Recursive through native subagent profiles |
+| [Reasonix](reasonix/) | [`SKILL.md`](reasonix/SKILL.md) | [32 v2 profiles](reasonix/skills/) | [18 workflows](reasonix/frameworks/) | Private v2 controller; production conformance pending |
 
 Installer floors and audited releases are tracked in the [support matrix](../docs/faq/which-coding-agents-are-supported.md). Every shipped package above is pinned by a runtime manifest and generated from the same 25-persona, 18-framework contract.
 

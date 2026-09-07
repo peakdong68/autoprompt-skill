@@ -76,7 +76,7 @@ autoprompt
 | Operativo | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) | 0.7.2; auditado con 0.7.2; adaptador de paquete nativo | `prime` |
 | Operativo | [Oh My Pi](https://omp.sh/) | 17.4.0+; contrato del adaptador, ciclo de instalación y carga de roles nativos verificados con 17.4.0 | `omp` |
 | Operativo | [DeepSeek Harness](https://deepseek.com/harness/en/) | 0.1.0-rc.7+; contrato del adaptador, ciclo de instalación y carga de roles nativos verificados con 0.1.0-rc.7 | `deepseek` |
-| Operativo | [Reasonix](https://reasonix.io/docs/) | 1.30.0+; contrato del adaptador, ciclo de instalación y carga de roles nativos verificados con 1.30.0 | `reasonix` |
+| Port V2 | [Reasonix](https://reasonix.io/docs/) | 1.30.0; transporte nativo probado; conformidad independiente pendiente para producción | `reasonix` |
 
 Consulta las [notas de soporte y auditoría](../faq/which-coding-agents-are-supported.md).
 
@@ -152,7 +152,7 @@ Usa `mode=` para definir la concurrencia. Usa `agents=` para dirigir modelos cua
 | Control | Claude Code | Codex | OpenCode | Kilo | VS Code | Prime Agent | Oh My Pi | DeepSeek Harness | Reasonix |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | `mode=` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Enrutamiento personalizado con `agents=` | ✓ | ✓ | ✕ No disponible - hereda el modelo activo | ✕ No disponible - hereda el modelo activo | ✕ No disponible - hereda el modelo activo | ✕ No disponible - hereda el modelo padre seleccionado | ✕ No disponible - hereda el modelo padre seleccionado | ✕ No disponible - hereda el modelo padre seleccionado | ✕ No disponible - hereda el modelo padre seleccionado |
+| Enrutamiento personalizado con `agents=` | ✓ | ✓ | ✕ No disponible - hereda el modelo activo | ✕ No disponible - hereda el modelo activo | ✕ No disponible - hereda el modelo activo | ✕ No disponible - hereda el modelo padre seleccionado | ✕ No disponible - hereda el modelo padre seleccionado | ✕ No disponible - hereda el modelo padre seleccionado | ✓ Configuración V2; activación sujeta a verificación |
 
 ## Cómo funciona
 

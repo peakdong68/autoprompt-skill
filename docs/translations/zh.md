@@ -76,7 +76,7 @@ autoprompt
 | 可用 | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) | 0.7.2；已验证 0.7.2；原生包适配器 | `prime` |
 | 可用 | [Oh My Pi](https://omp.sh/) | 17.4.0+；已在 17.4.0 上验证适配器契约、安装生命周期和原生角色载荷 | `omp` |
 | 可用 | [DeepSeek Harness](https://deepseek.com/harness/en/) | 0.1.0-rc.7+；已在 0.1.0-rc.7 上验证适配器契约、安装生命周期和原生角色载荷 | `deepseek` |
-| 可用 | [Reasonix](https://reasonix.io/docs/) | 1.30.0+；已在 1.30.0 上验证适配器契约、安装生命周期和原生角色载荷 | `reasonix` |
+| V2 移植 | [Reasonix](https://reasonix.io/docs/) | 1.30.0；原生传输测试通过，生产环境独立合规验证尚未完成 | `reasonix` |
 
 更多信息见[支持与验证说明](../faq/which-coding-agents-are-supported.md)。
 
@@ -152,7 +152,7 @@ autoprompt activate codex -- path=light "<goal>"
 | 控制项 | Claude Code | Codex | OpenCode | Kilo | VS Code | Prime Agent | Oh My Pi | DeepSeek Harness | Reasonix |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | `mode=` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| 自定义 `agents=` 路由 | ✓ | ✓ | ✕ 不支持 - 沿用当前模型 | ✕ 不支持 - 沿用当前模型 | ✕ 不支持 - 沿用当前模型 | ✕ 不支持 - 沿用所选父模型 | ✕ 不支持 - 沿用所选父模型 | ✕ 不支持 - 沿用所选父模型 | ✕ 不支持 - 沿用所选父模型 |
+| 自定义 `agents=` 路由 | ✓ | ✓ | ✕ 不支持 - 沿用当前模型 | ✕ 不支持 - 沿用当前模型 | ✕ 不支持 - 沿用当前模型 | ✕ 不支持 - 沿用所选父模型 | ✕ 不支持 - 沿用所选父模型 | ✕ 不支持 - 沿用所选父模型 | ✓ V2 配置；激活需通过验证 |
 
 ## 工作方式
 

@@ -132,6 +132,16 @@ function Get-ConfigRoot {
     return (Get-AutopromptConfigRoot -Name $Client)
 }
 
+function Install-ReasonixLifecycle {
+    $destination = Get-ConfigRoot -Client 'reasonix'
+    & node (Join-Path $RepoRoot 'scripts/reasonix-package.cjs') install --root $destination
+    if ($LASTEXITCODE -eq 0) { $script:ResultRows += "RESULT=PASS client=reasonix dest=$destination format=private-v2" }
+    else {
+        $script:ResultRows += 'RESULT=FAIL client=reasonix stage=lifecycle'
+        $script:AnyFail = 1
+    }
+}
+
 function Install-PrimeLifecycle {
     $helper = Join-Path $ScriptDir 'prime-lifecycle.cjs'
     $primeCommand = Get-Command $AutopromptClientBin['prime'] `
@@ -2607,6 +2617,10 @@ if ($Target -eq 'all') {
         )
         $script:ResultRows += "SKIP=skip client=$c reason=$reason"
     }
+    if ($present -contains 'reasonix') {
+        Install-ReasonixLifecycle
+        $present = @($present | Where-Object { $_ -cne 'reasonix' })
+    }
     if ($present -contains 'prime') {
         Install-PrimeLifecycle
         $present = @($present | Where-Object { $_ -cne 'prime' })
@@ -2635,6 +2649,11 @@ if ($det.Code -ne 0) {
     [Console]::Error.WriteLine("Autoprompt install ($Target): SKIP -- CLI not detected on PATH. Install it and re-run.")
     $script:ResultRows += "SKIP=skip client=$Target reason=not-detected"
     Write-Matrix; exit 0
+}
+if ($Target -ceq 'reasonix') {
+    Install-ReasonixLifecycle
+    Write-Matrix
+    exit (Get-InstallExitCode)
 }
 if ($Target -ceq 'prime') {
     Install-PrimeLifecycle

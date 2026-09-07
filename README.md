@@ -76,7 +76,7 @@ autoprompt
 | Working | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) | 0.7.2; audited 0.7.2; native package adapter | `prime` |
 | Working | [Oh My Pi](https://omp.sh/) | 17.4.0+; adapter contract, install lifecycle, and native role payload verified for 17.4.0 | `omp` |
 | Working | [DeepSeek Harness](https://deepseek.com/harness/en/) | 0.1.0-rc.7+; adapter contract, install lifecycle, and native role payload verified for 0.1.0-rc.7 | `deepseek` |
-| Working | [Reasonix](https://reasonix.io/docs/) | 1.30.0+; adapter contract, install lifecycle, and native role payload verified for 1.30.0 | `reasonix` |
+| V2 port | [Reasonix](https://reasonix.io/docs/) | 1.30.0; private runtime and native wire tested; production conformance pending | `reasonix` |
 
 See [support and audit notes](docs/faq/which-coding-agents-are-supported.md).
 
@@ -150,6 +150,18 @@ To set Codex concurrency, use separate arguments and leave route selection autom
 autoprompt activate codex -- --concurrency custom --max-subs 4 "add retries and test the edge cases"
 ```
 
+## Reasonix v2
+
+Reasonix uses the same v2 routes, 32 role profiles, state machine, checks, budgets, and recovery controller as Codex. Its adapter uses native streamed runs and session continuation. Installation places the runtime in a private bundle and leaves one manual launcher skill in the public skill directory.
+
+```bash
+autoprompt install reasonix
+autoprompt configure reasonix --agents off
+autoprompt activate reasonix --target /absolute/project -- "fix the bug and verify it"
+```
+
+Production activation currently returns `PROVIDER_UNSUPPORTED` because an independent signed Reasonix conformance record has not been supplied. Native transport tests cover actual tool output, token accounting, checker write denial, and session continuation; they do not establish complete provider conformance. See the [Reasonix v2 package](agents/reasonix/README.md).
+
 ## Run controls
 
 Use `mode=` to set concurrency. Use `agents=` to route models where the host supports it. [Custom model setup](docs/faq/how-to-add-custom-models.md)
@@ -157,7 +169,7 @@ Use `mode=` to set concurrency. Use `agents=` to route models where the host sup
 | Control | Claude Code | Codex | OpenCode | Kilo | VS Code | Prime Agent | Oh My Pi | DeepSeek Harness | Reasonix |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | `mode=` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Custom `agents=` routing | ✓ | ✓ | ✕ Not available - inherits active model | ✕ Not available - inherits active model | ✕ Not available - inherits active model | ✕ Not available - inherits selected parent model | ✕ Not available - inherits selected parent model | ✕ Not available - inherits selected parent model | ✕ Not available - inherits selected parent model |
+| Custom `agents=` routing | ✓ | ✓ | ✕ Not available - inherits active model | ✕ Not available - inherits active model | ✕ Not available - inherits active model | ✕ Not available - inherits selected parent model | ✕ Not available - inherits selected parent model | ✕ Not available - inherits selected parent model | ✓ V2 configuration; activation gated |
 
 ## How it works
 

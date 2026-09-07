@@ -409,6 +409,20 @@ function Invoke-LibCapture {
 
 function Get-ClientStatus {
     param([string]$Client)
+    if ($Client -ceq 'reasonix') {
+        $root = Get-ConfigRoot -Client 'reasonix'
+        $det = Invoke-LibCapture -Call { Detect-Client -Name 'reasonix' }
+        $detected = if ($det.Code -eq 0) { 'yes' } else { 'no' }
+        $version = if ($det.Code -eq 0) { $det.Record -replace '^.*version=', '' } else { '-' }
+        $installed = if (Test-Path -LiteralPath (Join-Path $root '.autoprompt-reasonix-v2.json')) { 'yes' } else { 'no' }
+        $verifies = 'no'; $reason = 'not-installed'
+        if ($installed -ceq 'yes') {
+            & node (Join-Path $RepoRoot 'scripts/reasonix-package.cjs') verify --root $root *> $null
+            if ($LASTEXITCODE -eq 0) { $verifies = 'yes'; $reason = '-' }
+            else { $reason = 'payload-invalid' }
+        }
+        return @{ Detected = $detected; Installed = $installed; Verifies = $verifies; Version = $version; Reason = $reason; Extras = $(if ($verifies -ceq 'yes') { 'complete' } else { 'missing' }); Mode = '-'; Support = 'degraded'; Activation = 'attestation-required' }
+    }
     if ($Client -ceq 'prime') {
         $root = Get-ConfigRoot -Client 'prime'
         $det = Invoke-LibCapture -Call { Detect-Client -Name 'prime' }
