@@ -23,6 +23,7 @@ if (-not (Test-Path -LiteralPath $Lib -PathType Leaf)) {
     exit 1
 }
 . $Lib
+. (Join-Path $ScriptDir 'harness-v2.ps1')
 
 $ClientsAll = @(
     'prime','vscode','claude','codex','opencode','kilo',
@@ -219,7 +220,7 @@ if (-not (Test-AutopromptInstallRootContract -Target $Target)) { exit 2 }
 if ($Target -eq 'all') {
     foreach ($c in $ClientsAll) {
         if ($c -ceq 'reasonix') { Uninstall-ReasonixLifecycle }
-        elseif ($c -ceq 'prime') { Uninstall-PrimeLifecycle }
+        elseif (Test-HarnessV2Provider -Client $c) { Uninstall-HarnessV2Lifecycle -Client $c }
         else {
             $root = Get-ConfigRoot -Client $c
             Uninstall-Root -Root $root -Label $c
@@ -234,7 +235,7 @@ if ($ClientsAll -notcontains $Target -and $LegacyCleanupClients -notcontains $Ta
     Write-Usage; exit 2
 }
 if ($Target -ceq 'reasonix') { Uninstall-ReasonixLifecycle }
-elseif ($Target -ceq 'prime') { Uninstall-PrimeLifecycle }
+elseif (Test-HarnessV2Provider -Client $Target) { Uninstall-HarnessV2Lifecycle -Client $Target }
 else { Uninstall-Root -Root (Get-ConfigRoot -Client $Target) -Label $Target }
 Write-Matrix
 exit $script:UninstallExitCode

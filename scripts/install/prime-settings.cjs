@@ -550,6 +550,7 @@ module.exports = {
   inspect,
   installSettings,
   parseDocument,
+  removeArrayItem,
   stableJson,
   uninstallSettings,
 }

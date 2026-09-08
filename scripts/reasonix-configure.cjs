@@ -13,7 +13,7 @@ const { processIdentityForPid } = require('../agents/codex/workflow/mission-lock
 const { createRunRecord } = require('../agents/codex/workflow/run-record.js')
 const { ReasonixExecAdapter } = require('../agents/reasonix/workflow/transport.js')
 const safety = require('./local-only-safety.cjs')
-const { verifyAdmission } = require('../agents/reasonix/workflow/admission.js')
+const { verifyAdmission, importedTrustDirectory } = require('../agents/reasonix/workflow/admission.js')
 const { selectModelAssignment, validateReceiptBoundRegistry } = require('../agents/codex/workflow/effort-policy.js')
 
 const PROFILE = Object.freeze({
@@ -57,6 +57,27 @@ function credentialEnvironment(connection, root, environment) {
   return values
 }
 
+function importedAdmission(root) {
+  const directory = importedTrustDirectory(root), file = path.join(directory, 'admission.json')
+  if (!fs.existsSync(file)) return null
+  try { new RootGuard(root).assertExisting(directory, 'directory') } catch { throw new ReasonixError('PROVIDER_UNSUPPORTED', 'Reasonix imported conformance directory is not physical and private') }
+  let value
+  try { value = JSON.parse(readBound(file)) } catch { throw new ReasonixError('PROVIDER_UNSUPPORTED', 'Reasonix imported conformance manifest is unreadable') }
+  if (value?.schemaVersion !== 'harness-v2-imported-admission.v1' || value.provider !== 'reasonix' || value.trustDirectory !== directory ||
+      !/^[a-f0-9]{64}$/.test(value.conformanceRequestSha256 || '') || !/^[a-f0-9]{64}$/.test(value.requestSha256 || '')) {
+    throw new ReasonixError('PROVIDER_UNSUPPORTED', 'Reasonix imported conformance manifest is invalid')
+  }
+  let requestBytes, request
+  try { requestBytes = readBound(path.join(directory, 'request.json')); request = JSON.parse(requestBytes) } catch { throw new ReasonixError('PROVIDER_UNSUPPORTED', 'Reasonix imported conformance request is unreadable') }
+  if (sha256(requestBytes) !== value.requestSha256 || request?.schemaVersion !== 'harness-v2-admission-request.v1' || request.provider !== 'reasonix' ||
+      sha256(JSON.stringify(request)) !== value.conformanceRequestSha256 || !/^[a-f0-9]{64}$/.test(request.runtimeIdentityHash || '') ||
+      !request.runtimeIdentityBody || !/^[a-f0-9]{64}$/.test(request.nativeDiagnostic?.sha256 || '') ||
+      !/^[a-f0-9]{64}$/.test(request.reviewedLiveConformance?.sha256 || '')) {
+    throw new ReasonixError('PROVIDER_UNSUPPORTED', 'Reasonix imported conformance request is not bound to its manifest')
+  }
+  return { trustDirectory: directory, conformanceRequestSha256: value.conformanceRequestSha256 }
+}
+
 function prepareActivation(options = {}) {
   const environment = options.env || process.env
   const root = options.root || packaging.resolveRoot(environment)
@@ -65,7 +86,8 @@ function prepareActivation(options = {}) {
   if (!fs.statSync(target).isDirectory()) throw new ReasonixError('INVALID_INPUT', 'Mission target must be a directory')
   const request = requestEnvelope(options.missionArgs)
   const executable = probeExecutable({ env: environment, executable: options.executable })
-  const admission = verifyAdmission(installed, executable)
+  const localAdmission = importedAdmission(root)
+  const admission = verifyAdmission(installed, executable, localAdmission || {})
   const connection = connectionConfig(path.join(root, 'config.toml'))
   const credentials = credentialEnvironment(connection, root, environment)
   const ttlSeconds = options.ttlSeconds === undefined ? 24 * 60 * 60 : Number(options.ttlSeconds)
@@ -97,7 +119,7 @@ function prepareActivation(options = {}) {
       const profilePath = path.join(activationRoot, 'autoprompt.reasonix.profile.json')
       writePrivate(profilePath, `${JSON.stringify(PROFILE)}\n`)
       const profileSha256 = sha256(readBound(profilePath))
-      const proof = { schemaVersion: 1, provider: 'reasonix', nativeExecutable: executable.path, runtimeIdentityBody: admission.runtimeIdentityBody, profilePath, profileSha256, checkerProfilePath: profilePath, checkerProfileSha256: profileSha256, selectedProfile: 'autoprompt', checkerSelectedProfile: 'autoprompt-checker', strictConfig: true }
+      const proof = { schemaVersion: 1, provider: 'reasonix', nativeExecutable: executable.path, runtimeIdentityBody: admission.runtimeIdentityBody, profilePath, profileSha256, checkerProfilePath: profilePath, checkerProfileSha256: profileSha256, selectedProfile: 'autoprompt', checkerSelectedProfile: 'autoprompt-checker', strictConfig: true, admissionTrust: admission.trustSource }
       const proofPath = path.join(activationRoot, 'enforcement-proof.json')
       writePrivate(proofPath, `${JSON.stringify(proof)}\n`)
       const gitConfig = path.join(activationRoot, 'gitconfig')
@@ -260,4 +282,4 @@ if (require.main === module) {
   } else { process.stderr.write('Reasonix supervisor requires an explicit activation request.\n'); process.exitCode = 2 }
 }
 
-module.exports = { PROFILE, configure, credentialEnvironment, launchActivation, prepareActivation, requestEnvelope, resolveAssignment, validateSelection, supervise }
+module.exports = { PROFILE, configure, credentialEnvironment, importedAdmission, launchActivation, prepareActivation, requestEnvelope, resolveAssignment, validateSelection, supervise }

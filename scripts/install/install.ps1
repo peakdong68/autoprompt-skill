@@ -32,6 +32,7 @@ if (-not (Test-Path -LiteralPath $Lib -PathType Leaf)) {
     exit 1
 }
 . $Lib
+. (Join-Path $ScriptDir 'harness-v2.ps1')
 
 $ClientsAll = @(
     'claude','codex','opencode','kilo','vscode','prime','omp','deepseek','reasonix'
@@ -2621,10 +2622,10 @@ if ($Target -eq 'all') {
         Install-ReasonixLifecycle
         $present = @($present | Where-Object { $_ -cne 'reasonix' })
     }
-    if ($present -contains 'prime') {
-        Install-PrimeLifecycle
-        $present = @($present | Where-Object { $_ -cne 'prime' })
+    foreach ($client in @($present)) {
+        if (Test-HarnessV2Provider -Client $client) { Install-HarnessV2Lifecycle -Client $client }
     }
+    $present = @($present | Where-Object { -not (Test-HarnessV2Provider -Client $_) })
     if ($present.Count -gt 0) { Install-Batch -Clients $present }
     Write-Matrix
     exit (Get-InstallExitCode)
@@ -2655,8 +2656,8 @@ if ($Target -ceq 'reasonix') {
     Write-Matrix
     exit (Get-InstallExitCode)
 }
-if ($Target -ceq 'prime') {
-    Install-PrimeLifecycle
+if (Test-HarnessV2Provider -Client $Target) {
+    Install-HarnessV2Lifecycle -Client $Target
     Write-Matrix
     exit (Get-InstallExitCode)
 }

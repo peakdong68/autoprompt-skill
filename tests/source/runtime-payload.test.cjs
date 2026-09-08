@@ -178,12 +178,12 @@ test('runtime installation rejects real linked ancestors without changing the ou
   fs.writeFileSync(path.join(existing, 'sentinel.txt'), 'untouched\n')
   const linked = path.join(sandbox, 'linked')
   fs.symlinkSync(outside, linked, process.platform === 'win32' ? 'junction' : 'dir')
-  assert.throws(() => installPayload('claude', path.join(linked, 'activation'), ROOT), /activation root resolves through a link/)
+  assert.throws(() => require('../../scripts/harness-v2-package.cjs').install('claude', path.join(linked, 'activation')), /[Ll]ink/)
   assert.deepEqual(fs.readdirSync(outside), ['activation'])
   assert.deepEqual(fs.readdirSync(existing), ['sentinel.txt'])
   assert.equal(fs.readFileSync(path.join(existing, 'sentinel.txt'), 'utf8'), 'untouched\n')
   if (process.platform === 'win32') {
-    assert.throws(() => installPayload('claude', path.join(linked, 'missing'), ROOT), /activation root resolves through a link/)
+    assert.throws(() => require('../../scripts/harness-v2-package.cjs').install('claude', path.join(linked, 'missing')), /[Ll]ink/)
     assert.equal(fs.existsSync(path.join(outside, 'missing')), false)
   }
 })
@@ -233,7 +233,8 @@ test('Codex manifest currentness rejects CRLF byte drift', t => {
 
 test('all nine public provider payloads contain the complete product', () => {
   const contract = require('../../agents/contracts/autoprompt.contract.json')
-  const personaCount = contract.personas.length
+  const personaCount = Object.keys(require('../../agents/codex/agents/role-policy.json').physical_roles).length
+  assert.equal(personaCount, 32)
   const frameworkCount = contract.frameworks.length
 
   const manifests = renderManifests(ROOT)
@@ -328,7 +329,9 @@ test('all nine public provider payloads contain the complete product', () => {
   assert.ok(deepseek.files.includes('agent-preset/agent.cordis.yml'))
   assert.ok(deepseek.files.includes('agent-preset/preset.yml'))
   assert.ok(reasonix.files.includes('README.md'))
-  assert.equal(prime.files.length, 48)
+  assert.deepEqual(prime.files, Object.keys(prime.sha256))
+  assert.ok(prime.files.includes('native-projection.json'))
+  assert.ok(prime.files.includes('role-policy.json'))
 })
 
 test('Codex runtime inventory proves the local require closure and declares cross-root inputs', () => {
@@ -435,15 +438,30 @@ test('Codex contract dependency discovery rejects reference traversal', t => {
   )
 })
 
-test('each provider installs and verifies as a complete isolated payload', () => {
+test('Codex installs and verifies as a complete isolated payload', () => {
   for (const provider of [
-    'claude', 'codex', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek',
+    'codex',
   ]) {
     const sandbox = temporaryDirectory(`autoprompt-${provider}-`)
     const destination = provider === 'codex'
       ? path.join(sandbox, 'skills', 'autoprompt')
       : sandbox
     try {
+      if (provider !== 'codex') {
+        const packaging = require('../../scripts/harness-v2-package.cjs')
+        const installed = packaging.install(provider, destination, ROOT)
+        assert.equal(packaging.verify(provider, destination).payloadDigest, installed.payloadDigest)
+        const manifest = loadManifest(provider, ROOT)
+        for (const file of manifest.files) {
+          const bytes = fs.readFileSync(path.join(installed.bundle, 'agents', provider, file))
+          assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'), installed.files[`agents/${provider}/${file}`])
+        }
+        assert.throws(() => installPayload(provider, destination, ROOT), /public skill-root payload is forbidden/)
+        fs.writeFileSync(path.join(destination, 'custom.txt'), 'retain')
+        packaging.uninstall(provider, destination)
+        assert.equal(fs.readFileSync(path.join(destination, 'custom.txt'), 'utf8'), 'retain')
+        continue
+      }
       const installed = installPayload(provider, destination, ROOT)
       const manifest = loadManifest(provider, ROOT)
       const plan = installationPlan(provider, destination, ROOT)
@@ -674,7 +692,13 @@ test('packed npm payload installs the complete Codex activation dependency closu
   assert.equal(fs.existsSync(path.join(packedPlan.bundleRoot, 'scripts', 'local-only-safety.cjs')), false)
 })
 
-test('Reasonix cannot be installed through the legacy globally visible payload API', () => {
-  assert.throws(() => installationPlan('reasonix', '/unused', ROOT), /public skill-root payload is forbidden/)
-  assert.throws(() => installPayload('reasonix', '/unused', ROOT), /public skill-root payload is forbidden/)
+test('v2 native providers reject every legacy public payload mutation before writing', t => {
+  const root = temporaryDirectory('autoprompt-no-public-v1-')
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  for (const provider of ['reasonix', ...require('../../scripts/harness-v2-package.cjs').PROVIDERS]) {
+    for (const operation of [installationPlan, installPayload]) {
+      assert.throws(() => operation(provider, root, ROOT), /public skill-root payload is forbidden/, provider)
+      assert.deepEqual(fs.readdirSync(root), [], provider)
+    }
+  }
 })

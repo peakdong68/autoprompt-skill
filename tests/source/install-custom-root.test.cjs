@@ -1023,8 +1023,10 @@ test('PowerShell receiptless legacy optional directories are snapshot-bound acro
           '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script
         ], {
           binding, phase: `optional-${present}-${mode}`, signal: t.signal, cwd: ROOT,
-          timeout: process.platform === 'win32' ? 120000 : 30000,
-          warnAfter: process.platform === 'win32' ? 60000 : undefined,
+          // The same PowerShell transaction and durable-validator work runs on
+          // every host. Cold Linux/macOS PowerShell also needs this bound.
+          timeout: 120000,
+          warnAfter: 60000,
           progressPrefix, diagnostic,
         })
         assert.equal(completed.status, 0, processFailureDetails(completed))

@@ -1,12 +1,25 @@
-# DeepSeek Harness package
+# DeepSeek Harness v2 package
 
-This package targets DeepSeek Harness 0.1.0-rc.7.
+This generated package projects the canonical v2 routes, role policy, checks, modes, procedures, and framework instructions. Codex and Reasonix use the same canonical base.
 
-- [`SKILL.md`](SKILL.md): L0 conductor prompt
-- [`agents`](agents/): 25 generated role definitions
-- [`frameworks`](frameworks/): 18 task and gate workflows
-- [`GATES.md`](GATES.md), [`MODES.md`](MODES.md), and [`PLAYBOOKS.md`](PLAYBOOKS.md): execution contracts
+- [Entry](SKILL.md): explicit activation and route instructions.
+- [Internal roles](agents/): 32 physical profiles, including inactive compatibility aliases.
+- [Frameworks](frameworks/): 18 compiled procedure projections.
+- [Role policy](role-policy.json): exact parents, allowed children, resources, modes, authority, and alias restrictions.
+- [Native projection](native-projection.json): private profile paths and provider tool mapping.
 
-Select the Autoprompt agent preset for Web sessions. For headless runs, pass the installed `headless.patch.yml` with `--patch`. Each role tool denies non-allowlisted role tools and uses a depth ceiling of four.
+```bash
+autoprompt activate deepseek --target <absolute-project> -- <request>
+```
 
-Every role inherits the selected parent model. Custom `agents=` model routing is not available.
+The installer must expose only one public manual launcher. Full instructions and internal profiles remain in the immutable private bundle and are loaded only for a validated explicit activation.
+
+All physical child launches belong to the external controller. Coordinators return only permitted assignments; leaves and retired aliases cannot dispatch. DIRECT and LIGHT have no mandatory coordinator. Model and effort settings are resolved before launch and do not select the task route.
+
+Read-only native profiles omit production write and shell tools. Executable checking requires a separately admitted isolated-checking transport. Native tool restrictions alone do not prove filesystem isolation, resource ownership, identity, continuation, cancellation, usage accounting, or result capture.
+
+Generation parity is not runtime conformance. The provider capability registry and current independent evidence govern runtime admission. Missing required capabilities produce PROVIDER_UNSUPPORTED; there is no unverified fallback advertised as full v2.
+
+The production adapter uses the owned sdk-minimal Cordis bridge, which disables native Bash/editor and exposes six controller tools. The official SDK core resumes persisted history; the external controller verifies exact usage, receipts and process drain. Static persona-tool presets are compatibility projections and are never loaded by the production transport.
+
+Native format reference: [DeepSeek Harness documentation](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/subagent/tool-subagent/src/index.ts).

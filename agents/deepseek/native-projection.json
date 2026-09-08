@@ -1,0 +1,1513 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": "2.0.0",
+  "provider": "deepseek",
+  "format": "fixed-persona-tool",
+  "activationCommand": "autoprompt activate deepseek --target <absolute-project> -- <request>",
+  "activation": "explicit-only",
+  "internalRoleVisibility": "private",
+  "dispatchOwner": "external-controller",
+  "nativeDispatchAllowed": false,
+  "runtimeAdmission": "independent-capability-evidence-required",
+  "canonicalInputs": [
+    "agents/contracts/product.json",
+    "agents/contracts/routes.json",
+    "agents/contracts/state-machine.json",
+    "agents/contracts/roles.json",
+    "agents/contracts/gates.json",
+    "agents/contracts/providers.json",
+    "agents/contracts/plain-language.json"
+  ],
+  "executionTransport": {
+    "kind": "owned-sdk-plugin",
+    "protocol": "deepseek-json",
+    "testedNativeVersion": "0.1.2-rc.1",
+    "builtinsEnabled": false,
+    "toolNames": [
+      "autoprompt_owned_read",
+      "autoprompt_owned_list",
+      "autoprompt_owned_search",
+      "autoprompt_owned_write",
+      "autoprompt_owned_edit",
+      "autoprompt_owned_bash"
+    ],
+    "continuation": "native-core-resume"
+  },
+  "sourceRolePolicySha256": "13bf7b2076107fef3db04821c294574f993c79d3559b317e9646c4df170ad505",
+  "roles": {
+    "ap-arbiter": {
+      "path": "agents/ap-arbiter.md",
+      "logicalRole": "technical-decision-reviewer",
+      "logicalVersion": "2.0.0",
+      "layer": "L4",
+      "phase": "explicit-diagnostic",
+      "mode": "reversible-technical-only",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "reversible-technical-only"
+      ],
+      "activationAllowed": false,
+      "decisionRights": [
+        "report-compatibility-redirect"
+      ],
+      "mutualExclusionGroup": "technical-decision-seat",
+      "telemetryRequired": true,
+      "compatibilityAlias": {
+        "enabled": true,
+        "alias_of": "ap-independent-checker",
+        "remove_after": "2.x-compatibility-release"
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "target.named.read",
+          "prior-results.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.checker.v2",
+      "outputSchemaId": "result.compatibility-alias.v2"
+    },
+    "ap-depth-prober": {
+      "path": "agents/ap-depth-prober.md",
+      "logicalRole": "worker",
+      "logicalVersion": "2.0.0",
+      "layer": "L3",
+      "phase": "explicit-diagnostic",
+      "mode": "root-cause",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "root-cause"
+      ],
+      "activationAllowed": false,
+      "decisionRights": [
+        "report-compatibility-redirect"
+      ],
+      "mutualExclusionGroup": "root-cause-seat",
+      "telemetryRequired": true,
+      "compatibilityAlias": {
+        "enabled": true,
+        "alias_of": "ap-worker",
+        "remove_after": "2.x-compatibility-release"
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "target.named.read",
+          "prior-results.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.checker.v2",
+      "outputSchemaId": "result.compatibility-alias.v2"
+    },
+    "ap-execharness-resolver": {
+      "path": "agents/ap-execharness-resolver.md",
+      "logicalRole": "worker",
+      "logicalVersion": "2.0.0",
+      "layer": "L3",
+      "phase": "execution",
+      "mode": "check-resolver",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "check-resolver"
+      ],
+      "activationAllowed": false,
+      "decisionRights": [
+        "report-compatibility-redirect"
+      ],
+      "mutualExclusionGroup": "harness-owner-seat",
+      "telemetryRequired": true,
+      "compatibilityAlias": {
+        "enabled": true,
+        "alias_of": "ap-worker",
+        "remove_after": "2.x-compatibility-release"
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "target.named.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.harness.v2",
+      "outputSchemaId": "result.compatibility-alias.v2"
+    },
+    "ap-feature-coordinator": {
+      "path": "agents/ap-feature-coordinator.md",
+      "logicalRole": "mission-coordinator",
+      "logicalVersion": "2.0.0",
+      "layer": "L1",
+      "phase": "roadmap-execution",
+      "mode": "compatibility",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "compatibility"
+      ],
+      "activationAllowed": false,
+      "decisionRights": [
+        "report-compatibility-redirect"
+      ],
+      "mutualExclusionGroup": "run-coordinator-seat",
+      "telemetryRequired": true,
+      "compatibilityAlias": {
+        "enabled": true,
+        "alias_of": "ap-run-coordinator",
+        "remove_after": "2.x-compatibility-release"
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "plan.roadmap.read",
+          "prior-results.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.coordination.v2",
+      "outputSchemaId": "result.compatibility-alias.v2"
+    },
+    "ap-framework-generator": {
+      "path": "agents/ap-framework-generator.md",
+      "logicalRole": "worker",
+      "logicalVersion": "2.0.0",
+      "layer": "L3",
+      "phase": "explicit-diagnostic",
+      "mode": "compatibility-compiler",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "compatibility-compiler"
+      ],
+      "activationAllowed": false,
+      "decisionRights": [
+        "report-compatibility-redirect"
+      ],
+      "mutualExclusionGroup": "retired-framework-generator-seat",
+      "telemetryRequired": true,
+      "compatibilityAlias": {
+        "enabled": true,
+        "alias_of": "ap-worker",
+        "remove_after": "2.x-compatibility-release"
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "target.named.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.diagnostic.v2",
+      "outputSchemaId": "result.compatibility-alias.v2"
+    },
+    "ap-framework-validator": {
+      "path": "agents/ap-framework-validator.md",
+      "logicalRole": "plan-checker",
+      "logicalVersion": "2.0.0",
+      "layer": "L4",
+      "phase": "explicit-diagnostic",
+      "mode": "compatibility",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "compatibility"
+      ],
+      "activationAllowed": false,
+      "decisionRights": [
+        "report-compatibility-redirect"
+      ],
+      "mutualExclusionGroup": "descriptor-checker-seat",
+      "telemetryRequired": true,
+      "compatibilityAlias": {
+        "enabled": true,
+        "alias_of": "ap-independent-checker",
+        "remove_after": "2.x-compatibility-release"
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "target.named.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.checker.v2",
+      "outputSchemaId": "result.compatibility-alias.v2"
+    },
+    "ap-fresh-verifier": {
+      "path": "agents/ap-fresh-verifier.md",
+      "logicalRole": "independent-reviewer",
+      "logicalVersion": "2.0.0",
+      "layer": "L4",
+      "phase": "roadmap-authoring",
+      "mode": "roadmap-blind",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "roadmap-blind"
+      ],
+      "activationAllowed": false,
+      "decisionRights": [
+        "report-compatibility-redirect"
+      ],
+      "mutualExclusionGroup": "roadmap-plan-checker-seat",
+      "telemetryRequired": true,
+      "compatibilityAlias": {
+        "enabled": true,
+        "alias_of": "ap-independent-checker",
+        "remove_after": "2.x-compatibility-release"
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "plan.roadmap.read",
+          "target.named.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.checker.v2",
+      "outputSchemaId": "result.compatibility-alias.v2"
+    },
+    "ap-goal-checker": {
+      "path": "agents/ap-goal-checker.md",
+      "logicalRole": "independent-reviewer",
+      "logicalVersion": "2.0.0",
+      "layer": "L4",
+      "phase": "independent-check",
+      "mode": "request-completeness",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "request-completeness"
+      ],
+      "activationAllowed": false,
+      "decisionRights": [
+        "report-compatibility-redirect"
+      ],
+      "mutualExclusionGroup": "final-check-completeness-seat",
+      "telemetryRequired": true,
+      "compatibilityAlias": {
+        "enabled": true,
+        "alias_of": "ap-independent-checker",
+        "remove_after": "2.x-compatibility-release"
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "target.named.read",
+          "prior-results.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.checker.v2",
+      "outputSchemaId": "result.compatibility-alias.v2"
+    },
+    "ap-implementer": {
+      "path": "agents/ap-implementer.md",
+      "logicalRole": "worker",
+      "logicalVersion": "2.0.0",
+      "layer": "L3",
+      "phase": "execution",
+      "mode": "implementation",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "implementation"
+      ],
+      "activationAllowed": false,
+      "decisionRights": [
+        "report-compatibility-redirect"
+      ],
+      "mutualExclusionGroup": "production-owner-seat",
+      "telemetryRequired": true,
+      "compatibilityAlias": {
+        "enabled": true,
+        "alias_of": "ap-worker",
+        "remove_after": "2.x-compatibility-release"
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "target.named.read",
+          "prior-results.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.worker.v2",
+      "outputSchemaId": "result.compatibility-alias.v2"
+    },
+    "ap-independent-checker": {
+      "path": "agents/ap-independent-checker.md",
+      "logicalRole": "independent-checker",
+      "logicalVersion": "2.0.0",
+      "layer": "L4",
+      "phase": "independent-check",
+      "mode": "combined",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "combined",
+        "review",
+        "behavior-test",
+        "technical-decision",
+        "named-distinct-risk"
+      ],
+      "activationAllowed": true,
+      "decisionRights": [
+        "combined-review-and-testing-verdict",
+        "independent-review-verdict",
+        "behavior-test-verdict",
+        "reversible-technical-decision-recommendation",
+        "named-distinct-risk-verdict"
+      ],
+      "mutualExclusionGroup": "final-check-combined-seat",
+      "telemetryRequired": false,
+      "compatibilityAlias": {
+        "enabled": false,
+        "alias_of": null,
+        "remove_after": null
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "target.named.read",
+          "prior-results.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.checker.v2",
+      "outputSchemaId": "result.checker.v2"
+    },
+    "ap-intake": {
+      "path": "agents/ap-intake.md",
+      "logicalRole": "legacy-intake",
+      "logicalVersion": "2.0.0",
+      "layer": "L4",
+      "phase": "explicit-diagnostic",
+      "mode": "legacy-resume-only",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "legacy-resume-only"
+      ],
+      "activationAllowed": false,
+      "decisionRights": [
+        "report-compatibility-redirect"
+      ],
+      "mutualExclusionGroup": "legacy-input-seat",
+      "telemetryRequired": true,
+      "compatibilityAlias": {
+        "enabled": true,
+        "alias_of": "C0",
+        "remove_after": "2.x-compatibility-release"
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "legacy-input.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.diagnostic.v2",
+      "outputSchemaId": "result.compatibility-alias.v2"
+    },
+    "ap-janitor": {
+      "path": "agents/ap-janitor.md",
+      "logicalRole": "deterministic-control-plane",
+      "logicalVersion": "2.0.0",
+      "layer": "C0_COMPAT",
+      "phase": "explicit-diagnostic",
+      "mode": "finalizer",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "finalizer"
+      ],
+      "activationAllowed": false,
+      "decisionRights": [
+        "report-compatibility-redirect"
+      ],
+      "mutualExclusionGroup": "cleanup-review-seat",
+      "telemetryRequired": true,
+      "compatibilityAlias": {
+        "enabled": true,
+        "alias_of": "C0",
+        "remove_after": "2.x-compatibility-release"
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "registered-scratch.read",
+          "prior-results.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.lifecycle-report.v2",
+      "outputSchemaId": "result.compatibility-alias.v2"
+    },
+    "ap-juror": {
+      "path": "agents/ap-juror.md",
+      "logicalRole": "independent-reviewer",
+      "logicalVersion": "2.0.0",
+      "layer": "L4",
+      "phase": "independent-check",
+      "mode": "named-risk-only",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "named-risk-only"
+      ],
+      "activationAllowed": false,
+      "decisionRights": [
+        "report-compatibility-redirect"
+      ],
+      "mutualExclusionGroup": "named-risk-checker-seat",
+      "telemetryRequired": true,
+      "compatibilityAlias": {
+        "enabled": true,
+        "alias_of": "ap-independent-checker",
+        "remove_after": "2.x-compatibility-release"
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "target.named.read",
+          "prior-results.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.checker.v2",
+      "outputSchemaId": "result.compatibility-alias.v2"
+    },
+    "ap-manager": {
+      "path": "agents/ap-manager.md",
+      "logicalRole": "ap-work-group-manager",
+      "logicalVersion": "2.0.0",
+      "layer": "L2",
+      "phase": "roadmap-execution",
+      "mode": "roadmap-only",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "roadmap-only"
+      ],
+      "activationAllowed": false,
+      "decisionRights": [
+        "report-compatibility-redirect"
+      ],
+      "mutualExclusionGroup": "work-group-manager-seat",
+      "telemetryRequired": true,
+      "compatibilityAlias": {
+        "enabled": true,
+        "alias_of": "ap-work-group-manager",
+        "remove_after": "2.x-compatibility-release"
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "plan.roadmap.read",
+          "prior-results.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.manager.v2",
+      "outputSchemaId": "result.compatibility-alias.v2"
+    },
+    "ap-planner": {
+      "path": "agents/ap-planner.md",
+      "logicalRole": "roadmap-author",
+      "logicalVersion": "2.0.0",
+      "layer": "L3",
+      "phase": "roadmap-authoring",
+      "mode": "planning",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "planning"
+      ],
+      "activationAllowed": false,
+      "decisionRights": [
+        "report-compatibility-redirect"
+      ],
+      "mutualExclusionGroup": "roadmap-author-seat",
+      "telemetryRequired": true,
+      "compatibilityAlias": {
+        "enabled": true,
+        "alias_of": "ap-roadmap-author",
+        "remove_after": "2.x-compatibility-release"
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "plan.roadmap.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.roadmap-author.v2",
+      "outputSchemaId": "result.compatibility-alias.v2"
+    },
+    "ap-preflight-probe": {
+      "path": "agents/ap-preflight-probe.md",
+      "logicalRole": "diagnostic-probe",
+      "logicalVersion": "2.0.0",
+      "layer": "L4",
+      "phase": "explicit-diagnostic",
+      "mode": "explicit-diagnostic",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "explicit-diagnostic"
+      ],
+      "activationAllowed": false,
+      "decisionRights": [
+        "report-compatibility-redirect"
+      ],
+      "mutualExclusionGroup": "capability-diagnostic-seat",
+      "telemetryRequired": true,
+      "compatibilityAlias": {
+        "enabled": true,
+        "alias_of": "C0",
+        "remove_after": "2.x-compatibility-release"
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "target.named.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.diagnostic.v2",
+      "outputSchemaId": "result.compatibility-alias.v2"
+    },
+    "ap-re-anchor": {
+      "path": "agents/ap-re-anchor.md",
+      "logicalRole": "diagnostic-probe",
+      "logicalVersion": "2.0.0",
+      "layer": "L4",
+      "phase": "recovery",
+      "mode": "canonical-state-check",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "canonical-state-check"
+      ],
+      "activationAllowed": false,
+      "decisionRights": [
+        "report-compatibility-redirect"
+      ],
+      "mutualExclusionGroup": "recovery-seat",
+      "telemetryRequired": true,
+      "compatibilityAlias": {
+        "enabled": true,
+        "alias_of": "C0",
+        "remove_after": "2.x-compatibility-release"
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "saved-state.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.diagnostic.v2",
+      "outputSchemaId": "result.compatibility-alias.v2"
+    },
+    "ap-researcher": {
+      "path": "agents/ap-researcher.md",
+      "logicalRole": "worker",
+      "logicalVersion": "2.0.0",
+      "layer": "L3",
+      "phase": "execution",
+      "mode": "research",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "research"
+      ],
+      "activationAllowed": false,
+      "decisionRights": [
+        "report-compatibility-redirect"
+      ],
+      "mutualExclusionGroup": "report-owner-seat",
+      "telemetryRequired": true,
+      "compatibilityAlias": {
+        "enabled": true,
+        "alias_of": "ap-worker",
+        "remove_after": "2.x-compatibility-release"
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "target.named.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.research.v2",
+      "outputSchemaId": "result.compatibility-alias.v2"
+    },
+    "ap-reviewer": {
+      "path": "agents/ap-reviewer.md",
+      "logicalRole": "independent-reviewer",
+      "logicalVersion": "2.0.0",
+      "layer": "L4",
+      "phase": "independent-check",
+      "mode": "static-review",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "static-review"
+      ],
+      "activationAllowed": false,
+      "decisionRights": [
+        "report-compatibility-redirect"
+      ],
+      "mutualExclusionGroup": "final-check-static-seat",
+      "telemetryRequired": true,
+      "compatibilityAlias": {
+        "enabled": true,
+        "alias_of": "ap-independent-checker",
+        "remove_after": "2.x-compatibility-release"
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "target.named.read",
+          "prior-results.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.checker.v2",
+      "outputSchemaId": "result.compatibility-alias.v2"
+    },
+    "ap-roadmap-author": {
+      "path": "agents/ap-roadmap-author.md",
+      "logicalRole": "roadmap-author",
+      "logicalVersion": "2.0.0",
+      "layer": "L3",
+      "phase": "roadmap-authoring",
+      "mode": "author",
+      "sandboxMode": "workspace-write",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep",
+        "write",
+        "edit"
+      ],
+      "supportedModes": [
+        "author",
+        "repair"
+      ],
+      "activationAllowed": true,
+      "decisionRights": [
+        "author-roadmap",
+        "repair-roadmap-findings",
+        "request-named-scout"
+      ],
+      "mutualExclusionGroup": "roadmap-author-seat",
+      "telemetryRequired": false,
+      "compatibilityAlias": {
+        "enabled": false,
+        "alias_of": null,
+        "remove_after": null
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "target.named.read",
+          "prior-results.read"
+        ],
+        "write": [
+          "plan.roadmap.write"
+        ],
+        "exclusive": [
+          "plan.roadmap.write"
+        ]
+      },
+      "inputSchemaId": "assignment.roadmap-author.v2",
+      "outputSchemaId": "result.roadmap-author.v2"
+    },
+    "ap-roadmap-scout": {
+      "path": "agents/ap-roadmap-scout.md",
+      "logicalRole": "scout",
+      "logicalVersion": "2.0.0",
+      "layer": "L3",
+      "phase": "roadmap-authoring",
+      "mode": "named-unknown",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "named-unknown"
+      ],
+      "activationAllowed": true,
+      "decisionRights": [
+        "report-named-unknown-evidence"
+      ],
+      "mutualExclusionGroup": "roadmap-scout-seat",
+      "telemetryRequired": false,
+      "compatibilityAlias": {
+        "enabled": false,
+        "alias_of": null,
+        "remove_after": null
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "target.named.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.roadmap-scout.v2",
+      "outputSchemaId": "result.roadmap-scout.v2"
+    },
+    "ap-route-analyst": {
+      "path": "agents/ap-route-analyst.md",
+      "logicalRole": "route-analyst",
+      "logicalVersion": "2.0.0",
+      "layer": "L3",
+      "phase": "route-analysis",
+      "mode": "route-analysis",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "route-analysis"
+      ],
+      "activationAllowed": true,
+      "decisionRights": [
+        "recommend-route"
+      ],
+      "mutualExclusionGroup": "route-analyst-seat",
+      "telemetryRequired": false,
+      "compatibilityAlias": {
+        "enabled": false,
+        "alias_of": null,
+        "remove_after": null
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "target.named.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.route-analysis.v2",
+      "outputSchemaId": "result.route-analysis.v2"
+    },
+    "ap-run-coordinator": {
+      "path": "agents/ap-run-coordinator.md",
+      "logicalRole": "mission-coordinator",
+      "logicalVersion": "2.0.0",
+      "layer": "L1",
+      "phase": "roadmap-execution",
+      "mode": "roadmap-integration",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [
+        "ap-work-group-manager",
+        "ap-worker"
+      ],
+      "canDispatch": true,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "roadmap-integration"
+      ],
+      "activationAllowed": true,
+      "decisionRights": [
+        "schedule-ready-work",
+        "assign-owned-work",
+        "combine-work-status"
+      ],
+      "mutualExclusionGroup": "run-coordinator-seat",
+      "telemetryRequired": false,
+      "compatibilityAlias": {
+        "enabled": false,
+        "alias_of": null,
+        "remove_after": null
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "plan.roadmap.read",
+          "target.named.read",
+          "prior-results.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.coordination.v2",
+      "outputSchemaId": "result.coordination.v2"
+    },
+    "ap-scope-coordinator": {
+      "path": "agents/ap-scope-coordinator.md",
+      "logicalRole": "mission-coordinator",
+      "logicalVersion": "2.0.0",
+      "layer": "L1",
+      "phase": "roadmap-execution",
+      "mode": "compatibility",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "compatibility"
+      ],
+      "activationAllowed": false,
+      "decisionRights": [
+        "report-compatibility-redirect"
+      ],
+      "mutualExclusionGroup": "run-coordinator-seat",
+      "telemetryRequired": true,
+      "compatibilityAlias": {
+        "enabled": true,
+        "alias_of": "ap-run-coordinator",
+        "remove_after": "2.x-compatibility-release"
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "plan.roadmap.read",
+          "prior-results.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.coordination.v2",
+      "outputSchemaId": "result.compatibility-alias.v2"
+    },
+    "ap-scoper": {
+      "path": "agents/ap-scoper.md",
+      "logicalRole": "roadmap-author",
+      "logicalVersion": "2.0.0",
+      "layer": "L3",
+      "phase": "roadmap-authoring",
+      "mode": "author-or-scout-request",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "author-or-scout-request"
+      ],
+      "activationAllowed": false,
+      "decisionRights": [
+        "report-compatibility-redirect"
+      ],
+      "mutualExclusionGroup": "roadmap-scout-seat",
+      "telemetryRequired": true,
+      "compatibilityAlias": {
+        "enabled": true,
+        "alias_of": "ap-roadmap-author",
+        "remove_after": "2.x-compatibility-release"
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "target.named.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.roadmap-scout.v2",
+      "outputSchemaId": "result.compatibility-alias.v2"
+    },
+    "ap-scribe": {
+      "path": "agents/ap-scribe.md",
+      "logicalRole": "deterministic-control-plane",
+      "logicalVersion": "2.0.0",
+      "layer": "C0_COMPAT",
+      "phase": "explicit-diagnostic",
+      "mode": "event-recording",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "event-recording"
+      ],
+      "activationAllowed": false,
+      "decisionRights": [
+        "report-compatibility-redirect"
+      ],
+      "mutualExclusionGroup": "lifecycle-event-seat",
+      "telemetryRequired": true,
+      "compatibilityAlias": {
+        "enabled": true,
+        "alias_of": "C0",
+        "remove_after": "2.x-compatibility-release"
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "saved-state.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.lifecycle-report.v2",
+      "outputSchemaId": "result.compatibility-alias.v2"
+    },
+    "ap-sweep-coordinator": {
+      "path": "agents/ap-sweep-coordinator.md",
+      "logicalRole": "mission-coordinator",
+      "logicalVersion": "2.0.0",
+      "layer": "L1",
+      "phase": "roadmap-execution",
+      "mode": "compatibility",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "compatibility"
+      ],
+      "activationAllowed": false,
+      "decisionRights": [
+        "report-compatibility-redirect"
+      ],
+      "mutualExclusionGroup": "run-coordinator-seat",
+      "telemetryRequired": true,
+      "compatibilityAlias": {
+        "enabled": true,
+        "alias_of": "ap-run-coordinator",
+        "remove_after": "2.x-compatibility-release"
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "plan.roadmap.read",
+          "prior-results.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.coordination.v2",
+      "outputSchemaId": "result.compatibility-alias.v2"
+    },
+    "ap-sweeper": {
+      "path": "agents/ap-sweeper.md",
+      "logicalRole": "independent-reviewer",
+      "logicalVersion": "2.0.0",
+      "layer": "L4",
+      "phase": "independent-check",
+      "mode": "residual-risk",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "residual-risk"
+      ],
+      "activationAllowed": false,
+      "decisionRights": [
+        "report-compatibility-redirect"
+      ],
+      "mutualExclusionGroup": "final-check-broad-seat",
+      "telemetryRequired": true,
+      "compatibilityAlias": {
+        "enabled": true,
+        "alias_of": "ap-independent-checker",
+        "remove_after": "2.x-compatibility-release"
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "target.named.read",
+          "prior-results.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.checker.v2",
+      "outputSchemaId": "result.compatibility-alias.v2"
+    },
+    "ap-synthesizer": {
+      "path": "agents/ap-synthesizer.md",
+      "logicalRole": "roadmap-author",
+      "logicalVersion": "2.0.0",
+      "layer": "L3",
+      "phase": "roadmap-authoring",
+      "mode": "roadmap-repair",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "roadmap-repair"
+      ],
+      "activationAllowed": false,
+      "decisionRights": [
+        "report-compatibility-redirect"
+      ],
+      "mutualExclusionGroup": "roadmap-author-seat",
+      "telemetryRequired": true,
+      "compatibilityAlias": {
+        "enabled": true,
+        "alias_of": "ap-roadmap-author",
+        "remove_after": "2.x-compatibility-release"
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "plan.roadmap.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.roadmap-author.v2",
+      "outputSchemaId": "result.compatibility-alias.v2"
+    },
+    "ap-verifier": {
+      "path": "agents/ap-verifier.md",
+      "logicalRole": "independent-tester",
+      "logicalVersion": "2.0.0",
+      "layer": "L4",
+      "phase": "independent-check",
+      "mode": "runtime-testing",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "L0"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "runtime-testing"
+      ],
+      "activationAllowed": false,
+      "decisionRights": [
+        "report-compatibility-redirect"
+      ],
+      "mutualExclusionGroup": "final-check-runtime-seat",
+      "telemetryRequired": true,
+      "compatibilityAlias": {
+        "enabled": true,
+        "alias_of": "ap-independent-checker",
+        "remove_after": "2.x-compatibility-release"
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "target.named.read",
+          "prior-results.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.checker.v2",
+      "outputSchemaId": "result.compatibility-alias.v2"
+    },
+    "ap-work-group-manager": {
+      "path": "agents/ap-work-group-manager.md",
+      "logicalRole": "ap-work-group-manager",
+      "logicalVersion": "2.0.0",
+      "layer": "L2",
+      "phase": "roadmap-execution",
+      "mode": "roadmap-work-group",
+      "sandboxMode": "read-only",
+      "allowedParents": [
+        "ap-run-coordinator"
+      ],
+      "allowedChildren": [
+        "ap-worker"
+      ],
+      "canDispatch": true,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep"
+      ],
+      "supportedModes": [
+        "roadmap-work-group"
+      ],
+      "activationAllowed": true,
+      "decisionRights": [
+        "split-non-overlapping-work",
+        "assign-owned-work",
+        "combine-group-status"
+      ],
+      "mutualExclusionGroup": "work-group-manager-seat",
+      "telemetryRequired": false,
+      "compatibilityAlias": {
+        "enabled": false,
+        "alias_of": null,
+        "remove_after": null
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "plan.roadmap.read",
+          "target.named.read",
+          "prior-results.read"
+        ],
+        "write": [],
+        "exclusive": []
+      },
+      "inputSchemaId": "assignment.manager.v2",
+      "outputSchemaId": "result.coordination.v2"
+    },
+    "ap-worker": {
+      "path": "agents/ap-worker.md",
+      "logicalRole": "worker",
+      "logicalVersion": "2.0.0",
+      "layer": "L3",
+      "phase": "execution",
+      "mode": "general",
+      "sandboxMode": "workspace-write",
+      "allowedParents": [
+        "L0",
+        "ap-run-coordinator",
+        "ap-work-group-manager"
+      ],
+      "allowedChildren": [],
+      "canDispatch": false,
+      "nativeChildRoles": [],
+      "tools": [
+        "read",
+        "glob",
+        "grep",
+        "write",
+        "edit"
+      ],
+      "supportedModes": [
+        "general",
+        "implementation",
+        "research",
+        "check-resolver"
+      ],
+      "activationAllowed": true,
+      "decisionRights": [
+        "change-owned-resources",
+        "report-sourced-facts",
+        "resolve-real-commands",
+        "report-split-required",
+        "report-ownership-conflict"
+      ],
+      "mutualExclusionGroup": "production-owner-seat",
+      "telemetryRequired": false,
+      "compatibilityAlias": {
+        "enabled": false,
+        "alias_of": null,
+        "remove_after": null
+      },
+      "resourceSets": {
+        "read": [
+          "request-envelope.read",
+          "target.named.read",
+          "prior-results.read"
+        ],
+        "write": [
+          "target.owned.write",
+          "report.owned.write",
+          "harness.owned.write"
+        ],
+        "exclusive": [
+          "target.owned.write",
+          "report.owned.write",
+          "harness.owned.write"
+        ]
+      },
+      "inputSchemaId": "assignment.worker.v2",
+      "outputSchemaId": "result.worker.v2"
+    }
+  }
+}

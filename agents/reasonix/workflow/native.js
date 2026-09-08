@@ -12,6 +12,25 @@ const FORBIDDEN_TOOLS = Object.freeze([
   'skill_create', 'skill_edit', 'skill_delete', 'remember', 'forget',
   'use_capability', 'ask', 'update_goal', 'complete_step', 'todo_write', 'wait',
 ])
+const CONTROLLED_SERVER = 'autoprompt_owned'
+const CONTROLLED_PROXY = 'use_capability'
+const CONTROLLED_NAMES = Object.freeze(['read', 'list', 'search', 'write', 'edit', 'bash'])
+// v1.30 keeps MCP schemas behind one stable proxy. Permission rules still
+// resolve against the exact native MCP name, never the proxy or a wildcard.
+const CONTROLLED_TOOLS = Object.freeze(CONTROLLED_NAMES
+  .map(name => `mcp__${CONTROLLED_SERVER}__${name}`))
+const CONTROLLED_CAPABILITIES = Object.freeze(CONTROLLED_NAMES
+  .map(name => `mcp-tool:${CONTROLLED_SERVER}/${name}`))
+const CONTROLLED_DENIED_TOOLS = Object.freeze([...FORBIDDEN_TOOLS,
+  'bash', 'bash_output', 'kill_shell', 'read_file', 'list_dir', 'ls', 'glob', 'grep',
+  'write_file', 'edit_file', 'apply_patch', 'multi_edit', 'move_file', 'notebook_edit',
+  'delete_range', 'delete_symbol', 'web_fetch', 'web_search', 'code_index', 'compress',
+  'read_only_task', 'parallel_tasks', 'read_subagent_result', 'read_only_skill',
+  'read_skill', 'install_skill', 'install_source', 'slash_command', 'explore',
+  'research', 'review', 'security_review', 'review_report', 'docs', 'history',
+  'list_sessions', 'read_session', 'memory', 'lsp_definition', 'lsp_diagnostics',
+  'lsp_hover', 'lsp_references', `mcp_connect__${CONTROLLED_SERVER}`,
+])
 const sha256 = value => crypto.createHash('sha256').update(value).digest('hex')
 const inside = (root, candidate) => {
   const relative = path.relative(root, candidate)
@@ -91,7 +110,7 @@ function probeExecutable(options = {}) {
     env: options.env || process.env, encoding: 'utf8', shell: false, timeout: 15000, maxBuffer: 1024 * 1024,
   })
   const text = `${help.stdout || ''}\n${help.stderr || ''}`
-  if (help.error || help.status !== 0 || !['--output-format', '--resume', '--dir', '--max-steps'].every(flag => text.includes(flag))) {
+  if (help.error || help.status !== 0 || !['--output-format', '--resume', '--dir', '--max-steps', '--permission-mode', '--allowed-tools'].every(flag => text.includes(flag))) {
     throw new ReasonixError('PROVIDER_UNSUPPORTED', 'Reasonix lacks the required streamed run and resume interface')
   }
   if (sha256(readBound(executable.path)) !== executable.sha256) throw new ReasonixError('PROVIDER_UNSUPPORTED', 'Reasonix executable changed during its probe')
@@ -122,22 +141,99 @@ function connectionConfig(file) {
   return { ...(source.default_model ? { default_model: source.default_model } : {}), providers }
 }
 
+function renderCredentials(connection, environment) {
+  // v1.30 resolves provider keys from REASONIX_HOME/.env, not the inherited
+  // process environment. Project only explicitly configured credential names;
+  // never copy the caller's whole environment or an untrusted dotenv file.
+  const names = [...new Set(connection.providers.map(provider => provider.api_key_env).filter(Boolean))].sort()
+  return names.flatMap(name => {
+    if (typeof name !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new ReasonixError('PROFILE_INVALID', 'Invalid configured credential name')
+    if (!Object.hasOwn(environment, name) || environment[name] === '') return []
+    const value = environment[name]
+    if (typeof value !== 'string' || value.includes('\0') || Buffer.byteLength(value) > 65536) throw new ReasonixError('PROFILE_INVALID', 'Invalid configured credential value')
+    // Match godotenv's quoted-value escaping, including its interpolation
+    // metacharacters. Opaque credentials must not expand $OTHER_VARIABLE.
+    const escaped = value.replace(/[\\"$`]/g, character => `\\${character}`).replace(/\n/g, '\\n').replace(/\r/g, '\\r')
+    return [`${name}="${escaped}"\n`]
+  }).join('')
+}
+
+// v1.30 can kill its direct stdio child when the native context ends, before
+// closing that child's stdin. Keep the real controller server one pipe behind
+// a byte-preserving relay: even SIGKILL of this relay closes the server's input
+// and lets its existing lease/cancellation cleanup run. The server stays in
+// the same owned process group; no detached child or alternative tool surface.
+function runControlledStdioRelay(argv) {
+  if (argv[0] !== '--controlled-stdio') throw new ReasonixError('TOOL_POLICY_INVALID', 'Expected the controlled stdio entry point')
+  const serverPath = require.resolve('../../../scripts/harness-v2-tool-server.cjs')
+  const prepared = require(serverPath).parseArguments(argv.slice(1))
+  if (prepared.policy.provider !== 'reasonix') throw new ReasonixError('TOOL_POLICY_INVALID', 'Controlled stdio requires a Reasonix policy')
+  const child = childProcess.spawn(process.execPath, [serverPath, ...argv.slice(1)], {
+    env: process.env, stdio: ['pipe', 'pipe', 'inherit'], shell: false, detached: false,
+  })
+  let closing = false, parentSignal, failed = false, graceTimer, killTimer
+  const close = signal => {
+    if (signal) parentSignal ||= signal
+    if (closing) return
+    closing = true
+    process.stdin.unpipe(child.stdin)
+    process.stdin.pause()
+    child.stdin.end()
+    if (signal) child.kill(signal)
+    graceTimer = setTimeout(() => child.kill('SIGTERM'), 1000)
+    killTimer = setTimeout(() => child.kill('SIGKILL'), 3000)
+    graceTimer.unref(); killTimer.unref()
+  }
+  const brokenPipe = error => { if (error.code !== 'EPIPE') failed = true; close() }
+  const terminate = () => close('SIGTERM'), interrupt = () => close('SIGINT')
+  process.once('SIGTERM', terminate); process.once('SIGINT', interrupt)
+  process.stdin.once('end', () => close())
+  process.stdin.on('error', brokenPipe); process.stdout.on('error', brokenPipe)
+  child.stdin.on('error', brokenPipe); child.stdout.on('error', brokenPipe)
+  child.once('error', () => { failed = true; close() })
+  child.once('close', (code, signal) => {
+    clearTimeout(graceTimer); clearTimeout(killTimer)
+    process.stdin.unpipe(child.stdin); process.stdin.destroy()
+    process.removeListener('SIGTERM', terminate); process.removeListener('SIGINT', interrupt)
+    const terminalSignal = signal || parentSignal
+    if (terminalSignal) process.kill(process.pid, terminalSignal)
+    else process.exitCode = failed ? 1 : code ?? 1
+  })
+  process.stdin.pipe(child.stdin)
+  child.stdout.pipe(process.stdout)
+}
+
 function renderConfig(options) {
   const { connection, systemPrompt, targetPath, scratchPath, readOnly } = options
   if (!connection || !Array.isArray(connection.providers) || !path.isAbsolute(targetPath) || !path.isAbsolute(scratchPath)) {
     throw new ReasonixError('PROFILE_INVALID', 'Native profile requires absolute target and scratch paths and a provider configuration')
   }
+  // Load lazily: the boundary itself imports readBound/writePrivate from here.
+  const controlled = options.toolBoundary ? require('../../../scripts/harness-v2-controlled-tools.cjs') : null
+  const server = controlled?.serverSpec(options.toolBoundary, 'reasonix')
   return toml.stringify({
     ...connection,
     agent: { system_prompt: systemPrompt, max_subagent_depth: 1, max_subagent_concurrency: 1, max_parallel_writers: 1 },
     skills: { disable_implicit_invocation: true, paths: [] },
+    ...(server ? {
+      // A nonempty native enabled list filters builtin registration. Empty
+      // means ALL builtins in Reasonix, so never emit [] for controlled runs.
+      tools: { enabled: [CONTROLLED_PROXY] },
+      plugins: [{ name: CONTROLLED_SERVER, type: 'stdio', ...server,
+        args: [__filename, '--controlled-stdio', ...server.args.slice(1)],
+      }],
+    } : {}),
     permissions: {
-      mode: 'allow',
-      deny: [...FORBIDDEN_TOOLS, ...(readOnly && !options.checkerScratch ? ['write_file', 'edit_file', 'apply_patch'] : [])],
+      mode: server ? 'deny' : 'allow',
+      ...(server ? { allow: [...CONTROLLED_TOOLS] } : {}),
+      // Keep use_capability denied: a concrete call is authorized under its
+      // resolved MCP name; list/inspect/decline and native targets gain no grant.
+      deny: server ? [...CONTROLLED_DENIED_TOOLS] : [...FORBIDDEN_TOOLS, ...(readOnly && !options.checkerScratch ? ['write_file', 'edit_file', 'apply_patch'] : [])],
       allow_dynamic_bash: false,
     },
     sandbox: { workspace_root: readOnly ? scratchPath : targetPath, allow_write: [...(readOnly ? [] : [scratchPath]), ...(options.writableRoots || [])], bash: 'enforce', network: false },
-    telemetry: { enabled: false },
+    telemetry: { cli_metrics: 'off' },
+    secrets: { filter_subprocess_env: true },
   })
 }
 
@@ -160,4 +256,11 @@ function nativeUsage(usage) {
   return { noncachedInput: input - cached, cachedInput: cached, output, reasoning }
 }
 
-module.exports = { FORBIDDEN_TOOLS, MINIMUM_VERSION, ReasonixError, connectionConfig, inside, locateExecutable, nativeUsage, parseTerminal, privateDirectory, probeExecutable, readBound, renderConfig, sha256, writePrivate }
+module.exports = { CONTROLLED_CAPABILITIES, CONTROLLED_DENIED_TOOLS, CONTROLLED_PROXY, CONTROLLED_SERVER, CONTROLLED_TOOLS, FORBIDDEN_TOOLS, MINIMUM_VERSION, ReasonixError, connectionConfig, inside, locateExecutable, nativeUsage, parseTerminal, privateDirectory, probeExecutable, readBound, renderConfig, renderCredentials, sha256, writePrivate }
+
+if (require.main === module) {
+  try { runControlledStdioRelay(process.argv.slice(2)) } catch (error) {
+    process.stderr.write(`${error.code || 'TOOL_SERVER_FAILED'}: Controlled Reasonix stdio could not start\n`)
+    process.exitCode = 1
+  }
+}

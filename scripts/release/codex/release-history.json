@@ -205,6 +205,20 @@
       "payloadDigest": "886f8378b43319a8aa0835ed307b82a27735f224a59f521a2ded60bd43a09992",
       "previousRecordDigest": "606d9613835db5d2d07627ab3922c18940724bad8b007cf3dc8be23083427b77",
       "recordDigest": "9b66d88f82313d68c305d687e70ca644a94c2e6c3fef1b73c2d10b0592af8818"
+    },
+    {
+      "version": "1.0.34",
+      "payloadGeneration": "codex-v2.0.0-60d3692c06d1e37d",
+      "payloadDigest": "60d3692c06d1e37da6447307f6979e678deabee67c5f8341d1dadcb129748ab2",
+      "previousRecordDigest": "9b66d88f82313d68c305d687e70ca644a94c2e6c3fef1b73c2d10b0592af8818",
+      "recordDigest": "6f766ec85c81659add076e1b3c0d6841873dc5aec351a8c27f68805bd37646de"
+    },
+    {
+      "version": "1.0.35",
+      "payloadGeneration": "codex-v2.0.0-ec9d22813c6d295b",
+      "payloadDigest": "ec9d22813c6d295be0f216537de2a9d22188ec615369691312cfbdaff35eee63",
+      "previousRecordDigest": "6f766ec85c81659add076e1b3c0d6841873dc5aec351a8c27f68805bd37646de",
+      "recordDigest": "6c3cd62450065b306ccadfba7c1b5453ed948407c4d78e6f3a3a12b8513f6ae6"
     }
   ]
 }

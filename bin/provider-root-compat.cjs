@@ -258,6 +258,25 @@ function createProviderRootCompat(providerLabels, inventory) {
 
   return Object.freeze({
     inspect(root, providerId) {
+      // A v2 installation is private: public role counts are legacy migration
+      // evidence, not a requirement for a healthy current installation.
+      if (providerId !== 'codex' && Object.hasOwn(providerLayouts, providerId)) {
+        const receipt = matchAnchoredFile(root, [`.autoprompt-${providerId}-v2.json`])
+        if (receipt.status === 'unsafe') return { status: 'unsafe' }
+        if (receipt.status === 'match') {
+          try {
+            if (providerId === 'reasonix') require('../scripts/reasonix-package.cjs').verify(root)
+            else require('../scripts/harness-v2-package.cjs').verify(providerId, root)
+            return { status: 'accept' }
+          } catch {
+            return {
+              status: 'warn',
+              headline: `Warning: this ${providerLabels[providerId]} v2 installation could not be verified.`,
+              details: ['The private receipt, runtime bundle, and manual launcher must agree; a receipt alone is not installation evidence.'],
+            }
+          }
+        }
+      }
       const evidence = collectProviderLayoutEvidence(
         root,
         providerLayouts,

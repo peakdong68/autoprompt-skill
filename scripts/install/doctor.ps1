@@ -24,6 +24,7 @@ if (-not (Test-Path -LiteralPath $Lib -PathType Leaf)) {
     exit 1
 }
 . $Lib
+. (Join-Path $ScriptDir 'harness-v2.ps1')
 
 $ClientsAll = @(
     'claude','codex','opencode','kilo','vscode','prime',
@@ -409,6 +410,7 @@ function Invoke-LibCapture {
 
 function Get-ClientStatus {
     param([string]$Client)
+    if (Test-HarnessV2Provider -Client $Client) { return (Get-HarnessV2Status -Client $Client) }
     if ($Client -ceq 'reasonix') {
         $root = Get-ConfigRoot -Client 'reasonix'
         $det = Invoke-LibCapture -Call { Detect-Client -Name 'reasonix' }

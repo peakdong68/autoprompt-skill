@@ -56,6 +56,14 @@ const HELP_TEXT = [
   '  autoprompt activate codex [--target <absolute-path>] [--ttl <seconds>] [--resume <activation-id>] [--root <absolute-path>] -- <mission>',
   '  autoprompt activate reasonix [--target <absolute-path>] [--ttl <seconds>] [--resume <activation-id>] [--root <absolute-path>] -- <mission>',
   '  autoprompt configure reasonix --agents <off|auto|model[,model...]> [--model-map <path>] [--effort <low|medium|high|max>] [--root <absolute-path>]',
+  '  autoprompt activate <provider> [--target <absolute-path>] [--ttl <seconds>] [--resume <activation-id>] [--root <absolute-path>] -- <request>',
+  '  autoprompt configure <provider> --agents <off|auto|model[,model...]> [--model-map <path>] [--effort <native-name>] [--root <absolute-path>]',
+  '  Claude accepts --effort <low|medium|high|xhigh|max>. DeepSeek explicitly accepts <off|low|high|max>; automatic policy records medium→high and xhigh→max.',
+  '  OpenCode and Kilo accept <low|medium|high|xhigh|max> only for a selected model with that declared native variant; custom providers require variants.<effort>.reasoningEffort.',
+  '  Prime and OMP accept --effort <off|minimal|low|medium|high|xhigh|max>.',
+  '  VS Code owned BYOK accepts --effort <none|minimal|low|medium|high|xhigh>, subject to the selected model.',
+  '  autoprompt conformance [provider|all] [--native-tests] [--integration-tests] [--output <new-absolute-directory>]',
+  '  autoprompt admission <request|import> <provider> --root <absolute-path> --executable <absolute-path> --report <absolute-path> --live-report <absolute-path> [--output <new-absolute-json> | --request <absolute-json> --evidence <absolute-json> --keys <absolute-json>]',
   '  autoprompt update',
   '  autoprompt repo',
   '  autoprompt support',
@@ -65,6 +73,9 @@ const HELP_TEXT = [
   '  -v, --version    Print the package version.',
   '',
   'Interactive providers: claude, codex, opencode, kilo, vscode, prime, omp, deepseek, reasonix.',
+  'Activation and configuration accept the same nine providers; native capability admission is checked before work starts.',
+  'Conformance records local diagnostic evidence. It does not turn missing native capabilities into verified support.',
+  'Admission imports an explicitly reviewed, authority-signed live-conformance certificate into the private provider root.',
   '',
   'Launch `autoprompt` to check for CLI updates and open the installer.',
   'It scans detected roots and lets you install, update, or repair a provider.',
@@ -136,7 +147,7 @@ function parseLifecycle(command, rest, doctor = false) {
 }
 
 function parseCodexActivation(rest, alias = false) {
-  if (!alias && !['codex', 'reasonix'].includes(rest[0])) usageError('Activate supports codex and reasonix.')
+  if (!alias && !PUBLIC_PROVIDER_IDS.has(rest[0])) usageError('Activate requires one supported provider.')
   const provider = alias ? 'codex' : rest[0]
   const args = alias ? rest : rest.slice(1)
   let root = ''
@@ -169,6 +180,7 @@ function parseCodexActivation(rest, alias = false) {
         if (ttlSeconds !== undefined) usageError('--ttl may be provided only once.')
         if (!/^[0-9]+$/.test(value)) usageError('--ttl requires integer seconds.')
         ttlSeconds = Number(value)
+        if (!Number.isSafeInteger(ttlSeconds) || ttlSeconds < 1 || ttlSeconds > 604800) usageError('--ttl requires 1 to 604800 seconds.')
       } else {
         if (resume) usageError('--resume may be provided only once.')
         if (!/^apv2-[a-f0-9]{32}$/.test(value)) usageError('--resume requires an Autoprompt v2 activation id.')
@@ -227,8 +239,45 @@ function parseArgs(argv) {
   }
   if (command === 'activate') return parseCodexActivation(rest)
   if (command === 'codex') return parseCodexActivation(rest, true)
+  if (command === 'conformance') {
+    let provider = 'all'
+    let explicitProvider = false
+    let output = ''
+    let nativeTests = false
+    let integrationTests = false
+    for (let index = 0; index < rest.length; index += 1) {
+      const argument = rest[index]
+      if (argument === '--native-tests' && !nativeTests) nativeTests = true
+      else if (argument === '--integration-tests' && !integrationTests) integrationTests = true
+      else if (argument === '--output' && !output) {
+        const value = rest[++index]
+        if (!value || value.startsWith('--')) usageError('--output requires a new absolute directory.')
+        output = validateLifecycleRoot(value)
+      } else if (!argument.startsWith('-') && !explicitProvider) {
+        provider = validateProvider(argument, true)
+        explicitProvider = true
+      } else usageError(`Unknown or duplicate conformance argument: ${argument}`)
+    }
+    return { command, provider, nativeTests, integrationTests, ...(output ? { output } : {}) }
+  }
+  if (command === 'admission') {
+    const [action, provider, ...flags] = rest
+    if (!['request', 'import'].includes(action) || !PUBLIC_PROVIDER_IDS.has(provider)) usageError('Admission requires request or import and one supported provider.')
+    const values = {}
+    const allowed = new Set(['--root', '--executable', '--report', '--live-report', '--output', '--request', '--evidence', '--keys'])
+    for (let index = 0; index < flags.length; index += 2) {
+      const flag = flags[index], value = flags[index + 1]
+      if (!allowed.has(flag) || value === undefined || value.startsWith('--') || values[flag]) usageError(`Invalid admission argument: ${String(flag)}`)
+      values[flag] = validateLifecycleRoot(value)
+    }
+    for (const flag of ['--root', '--executable', '--report', '--live-report']) if (!values[flag]) usageError(`Admission ${action} requires ${flag}.`)
+    if (action === 'request' && !values['--output']) usageError('Admission request requires --output.')
+    if (action === 'import') for (const flag of ['--request', '--evidence', '--keys']) if (!values[flag]) usageError(`Admission import requires ${flag}.`)
+    return { command, action, provider, root: values['--root'], executable: values['--executable'], report: values['--report'],
+      liveReport: values['--live-report'], output: values['--output'], request: values['--request'], evidence: values['--evidence'], keys: values['--keys'] }
+  }
   if (command === 'configure') {
-    if (!['codex', 'reasonix'].includes(rest[0])) usageError('Configure supports codex and reasonix.')
+    if (!PUBLIC_PROVIDER_IDS.has(rest[0])) usageError('Configure requires one supported provider.')
     const provider = rest[0]
     let selector = ''
     let modelMap = ''
@@ -248,8 +297,10 @@ function parseArgs(argv) {
         modelMap = value
       } else if (flag === '--effort') {
         if (effort !== undefined) usageError('--effort may be provided only once.')
-        const efforts = provider === 'reasonix' ? ['low', 'medium', 'high', 'max'] : ['low', 'medium', 'high', 'xhigh']
-        if (!efforts.includes(value)) usageError(`--effort requires ${efforts.join(', ')}.`)
+        const efforts = provider === 'reasonix' ? ['low', 'medium', 'high', 'max']
+          : provider === 'codex' ? ['low', 'medium', 'high', 'xhigh'] : null
+        if (efforts && !efforts.includes(value)) usageError(`--effort requires ${efforts.join(', ')}.`)
+        if (!efforts && !/^[a-z][a-z0-9-]{0,31}$/.test(value)) usageError('--effort requires a native provider effort name.')
         effort = value
       } else {
         if (root) usageError('--root may be provided only once.')
@@ -318,58 +369,22 @@ function providerInstallLocations(client, locationOptions = {}) {
   const env = locationOptions.env || process.env
   const platform = locationOptions.platform || process.platform
   const home = configuredHome(env, locationOptions.homeDirectory)
-  const xdg = env.XDG_CONFIG_HOME || path.join(home, '.config')
   const singleRoot = installPath => ({
     roots: [{ label: 'Install directory', path: installPath }],
   })
 
-  if (client === 'claude') return singleRoot(path.join(home, '.claude'))
+  if (['claude', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek'].includes(client)) {
+    const defaults = { ...env, HOME: home }
+    delete defaults.AUTOPROMPT_INSTALL_ROOT
+    return singleRoot(require('../scripts/harness-v2-package.cjs').rootCandidate(client, defaults, locationOptions.cwd || process.cwd()))
+  }
+
   if (client === 'codex') return singleRoot(env.CODEX_HOME || path.join(home, '.codex'))
-  if (client === 'opencode') return singleRoot(path.join(xdg, 'opencode'))
-  if (client === 'prime') {
-    return singleRoot(env.PRIME_AGENT_CODING_AGENT_DIR || path.join(home, '.prime', 'agent'))
-  }
-  if (client === 'omp') {
-    const installRoot = ompInstallRoot(env, home)
-    const nativeRoot = ompNativeTaskAgentRoot(env, home)
-    if (nativeRoot === installRoot) return singleRoot(installRoot)
-    return {
-      roots: [
-        { label: 'Install directory', path: installRoot },
-        { label: 'Native task-agent root', path: nativeRoot },
-      ],
-    }
-  }
-  if (client === 'deepseek') {
-    return singleRoot(env.DSH_HOME || path.join(home, '.dsh'))
-  }
   if (client === 'reasonix') {
     const root = env.REASONIX_HOME || (platform === 'win32'
       ? path.join(env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'reasonix')
       : path.join(home, '.reasonix'))
     return singleRoot(root)
-  }
-  if (client === 'kilo') {
-    return {
-      roots: [
-        { label: 'Skill root', path: path.join(home, '.kilo') },
-        { label: 'Native root', path: path.join(xdg, 'kilo') },
-      ],
-    }
-  }
-  if (client === 'vscode') {
-    let settings = env.AUTOPROMPT_VSCODE_SETTINGS_PATH
-    if (!settings && platform === 'win32') {
-      settings = path.join(env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Code', 'User', 'settings.json')
-    } else if (!settings && platform === 'darwin') {
-      settings = path.join(home, 'Library', 'Application Support', 'Code', 'User', 'settings.json')
-    } else if (!settings) {
-      settings = path.join(xdg, 'Code', 'User', 'settings.json')
-    }
-    return {
-      ...singleRoot(path.join(home, '.copilot')),
-      settings,
-    }
   }
   throw new Error(`Unknown provider: ${String(client)}`)
 }
@@ -431,6 +446,19 @@ function providerInstallState(
   currentVersion = PACKAGE_JSON.version,
   packageRoot = PACKAGE_ROOT,
 ) {
+  if (client !== 'codex' && PUBLIC_PROVIDER_IDS.has(client)) {
+    const v2Receipt = path.join(root, `.autoprompt-${client}-v2.json`)
+    if (fs.existsSync(v2Receipt)) {
+      try {
+        const packaging = require(path.join(packageRoot, 'scripts', client === 'reasonix' ? 'reasonix-package.cjs' : 'harness-v2-package.cjs'))
+        const installed = client === 'reasonix' ? packaging.verify(root) : packaging.verify(client, root)
+        const source = client === 'reasonix' ? packaging.sourceInventory(packageRoot) : packaging.sourceInventory(client, packageRoot)
+        return { installed: true, version: installed.contractVersion, current: installed.payloadDigest === source.payloadDigest, contractVersion: installed.contractVersion }
+      } catch {
+        return { installed: true, version: '', current: false, corrupted: true }
+      }
+    }
+  }
   const receipt = path.join(
     root,
     client === 'prime' ? '.autoprompt-prime-install.json' : '.autoprompt-install-receipt.json',
@@ -463,6 +491,7 @@ function providerInstallState(
 }
 
 function stateLabel(state) {
+  if (state.corrupted) return 'installed v2 payload requires inspection; receipt verification failed'
   if (state.legacy) return `legacy install detected, update available: ${PACKAGE_JSON.version}`
   if (!state.installed) return 'not installed'
   if (state.current) return `installed ${state.version}, current`
@@ -802,6 +831,14 @@ function resolveInteractiveUpdateStatus(options, latestVersion, latestGitHubRevi
   const state = readUpdateState(options)
   const comparison = latest ? compareVersions(latest, PACKAGE_JSON.version) : 0
   const packagedInstall = isPackagedInstall(options.packageRoot)
+  if (packagedInstall && latest && comparison < 0) {
+    return {
+      action: 'none',
+      message: `Installed Autoprompt ${PACKAGE_JSON.version} is newer than release ${latest}; keeping this build.`,
+      latestGitHubRevision: revision,
+      latestVersion: latest,
+    }
+  }
   if (packagedInstall && comparison > 0) {
     return {
       action: 'registry-first',
@@ -812,21 +849,13 @@ function resolveInteractiveUpdateStatus(options, latestVersion, latestGitHubRevi
   }
 
   if (packagedInstall &&
+      state.installedGitHubRevision &&
       revision &&
       (revision !== state.installedGitHubRevision ||
         (latest && latest !== PACKAGE_JSON.version))) {
     return {
       action: 'github-main',
       message: `New Autoprompt build available on GitHub main (installed ${PACKAGE_JSON.version}). Updating...`,
-      latestGitHubRevision: revision,
-      latestVersion: latest,
-    }
-  }
-
-  if (packagedInstall && latest && comparison < 0) {
-    return {
-      action: 'registry-first',
-      message: `Installed Autoprompt ${PACKAGE_JSON.version} does not match current release ${latest}. Updating...`,
       latestGitHubRevision: revision,
       latestVersion: latest,
     }
@@ -922,9 +951,9 @@ function runPowerShell(command, options) {
   return childStatus(powerShellCore, options.stderr, 'pwsh')
 }
 
-function bashVersion(options) {
+function bashVersion(options, executable = 'bash') {
   const result = options.spawnSync(
-    'bash',
+    executable,
     ['-c', 'printf "%s" "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"'],
     {
       cwd: options.cwd,
@@ -951,8 +980,12 @@ function writeBashGuidance(options) {
 }
 
 function runBash(command, options) {
-  const version = bashVersion(options)
-  if (!bashIsCurrent(version)) {
+  // Homebrew does not replace /bin/bash. Resolve its installed shell explicitly
+  // on macOS so an otherwise valid installation need not rewrite the user's PATH.
+  const candidates = options.platform === 'darwin'
+    ? ['bash', '/opt/homebrew/bin/bash', '/usr/local/bin/bash'] : ['bash']
+  const executable = candidates.find(candidate => bashIsCurrent(bashVersion(options, candidate)))
+  if (!executable) {
     writeBashGuidance(options)
     return 1
   }
@@ -960,8 +993,8 @@ function runBash(command, options) {
     scriptPath(options.packageRoot, command.command, 'sh'),
     ...scriptArguments(command),
   ]
-  const result = options.spawnSync('bash', args, spawnOptions(options))
-  return childStatus(result, options.stderr, 'bash')
+  const result = options.spawnSync(executable, args, spawnOptions(options))
+  return childStatus(result, options.stderr, executable)
 }
 
 function runScript(command, options) {
@@ -1354,6 +1387,44 @@ function run(argv, overrides = {}) {
     return 0
   }
   if (command.command === 'update') return runUpdate(options)
+  if (command.command === 'conformance') {
+    try {
+      const diagnostic = require(path.join(options.packageRoot, 'scripts', 'harness-v2-conformance.cjs'))
+      const report = diagnostic.run({
+        providers: command.provider === 'all' ? PROVIDERS.map(provider => provider.id) : [command.provider],
+        env: options.env,
+        nativeTests: command.nativeTests,
+        integrationTests: command.integrationTests,
+        ...(command.output ? { output: command.output } : {}),
+      })
+      for (const item of report.providers) {
+        options.stdout.write(`${item.provider}: native-interface=${item.nativeInterface.status} native-tests=${item.nativeTests.status} production-admission=${item.productionAdmission.status}\n`)
+      }
+      options.stdout.write(`Diagnostic evidence: ${path.join(report.evidenceDirectory, 'report.json')}\n`)
+      options.stdout.write('Diagnostic results do not grant production admission.\n')
+      return report.providers.some(item => item.nativeTests.status === 'unsupported') ? 1 : 0
+    } catch (error) {
+      options.stderr.write(`Autoprompt conformance: ${error.code || 'DIAGNOSTIC_FAILED'}: ${error.message}\n`)
+      return 1
+    }
+  }
+  if (command.command === 'admission') {
+    try {
+      if (command.provider === 'codex') usageError('Admission is not implemented for codex.')
+      const localAdmission = require(path.join(options.packageRoot, 'scripts', 'harness-v2-local-admission.cjs'))
+      const input = { provider: command.provider, root: command.root, executable: command.executable, report: command.report,
+        liveReport: command.liveReport, env: options.env }
+      if (command.action === 'request') {
+        const result = localAdmission.createRequest(input)
+        fs.writeFileSync(command.output, `${JSON.stringify(result.request, null, 2)}\n`, { flag: 'wx', mode: 0o600 })
+        options.stdout.write(`Autoprompt admission request: ${command.output} sha256=${result.requestSha256}\n`)
+      } else {
+        const result = localAdmission.importAdmission({ ...input, request: command.request, evidence: command.evidence, keys: command.keys })
+        options.stdout.write(`Autoprompt admission import (${result.provider}): ${result.trustDirectory}\n`)
+      }
+      return 0
+    } catch (error) { options.stderr.write(`Autoprompt admission (${command.provider}): ${error.code || 'ADMISSION_FAILED'}: ${error.message}\n`); return 1 }
+  }
   if (command.command === 'uninstall' && command.client === null) {
     if (!options.interactive) {
       options.stderr.write(`Interactive uninstall requires a terminal.\n\n${HELP_TEXT}\n`)
@@ -1362,14 +1433,14 @@ function run(argv, overrides = {}) {
     return runInteractiveUninstall(options)
   }
   if (command.command === 'configure') {
-    if (command.provider === 'reasonix') {
+    if (command.provider !== 'codex') {
       try {
-        const configure = require(path.join(options.packageRoot, 'scripts', 'reasonix-configure.cjs'))
-        configure.configure({ env: command.root ? { ...options.env, AUTOPROMPT_INSTALL_ROOT: command.root } : options.env,
+        const configure = require(path.join(options.packageRoot, 'scripts', command.provider === 'reasonix' ? 'reasonix-configure.cjs' : 'harness-v2-configure.cjs'))
+        configure.configure({ provider: command.provider, env: command.root ? { ...options.env, AUTOPROMPT_INSTALL_ROOT: command.root } : options.env,
           selector: command.selector, effort: command.effort, modelMap: command.modelMap })
-        options.stdout.write('Autoprompt configure (reasonix): model selection saved.\n')
+        options.stdout.write(`Autoprompt configure (${command.provider}): model selection saved.\n`)
         return 0
-      } catch (error) { options.stderr.write(`Autoprompt configure (reasonix): ${error.message}\n`); return 1 }
+      } catch (error) { options.stderr.write(`Autoprompt configure (${command.provider}): ${error.code || 'CONFIGURATION_FAILED'}: ${error.message}\n`); return 1 }
     }
     const configure = require(path.join(options.packageRoot, 'scripts', `${command.provider}-configure.cjs`))
     return configure.run({
@@ -1385,9 +1456,10 @@ function run(argv, overrides = {}) {
     })
   }
   if (command.command === 'activate') {
-    const configure = require(path.join(options.packageRoot, 'scripts', `${command.provider}-configure.cjs`))
     try {
+      const configure = require(path.join(options.packageRoot, 'scripts', ['codex', 'reasonix'].includes(command.provider) ? `${command.provider}-configure.cjs` : 'harness-v2-configure.cjs'))
       const result = configure.launchActivation({
+        provider: command.provider,
         env: command.root
           ? { ...options.env, AUTOPROMPT_INSTALL_ROOT: command.root }
           : options.env,
@@ -1400,10 +1472,18 @@ function run(argv, overrides = {}) {
         target: command.target || options.cwd,
         ttlSeconds: command.ttlSeconds,
       })
-      options.stdout.write(`Autoprompt activation ${result.activationId}: status=${result.status} revoked=true\n`)
+      let revoked = result.revoked === true
+      // Codex returns the durable record path rather than a revoked flag. Its
+      // launch-time record can precede finalization, so reopen the saved state.
+      if (command.provider === 'codex' && typeof result.recordPath === 'string') {
+        const saved = JSON.parse(fs.readFileSync(result.recordPath, 'utf8'))
+        revoked = saved.activationId === result.activationId && saved.status === 'revoked' &&
+          saved.capability?.status === 'revoked'
+      }
+      options.stdout.write(`Autoprompt activation ${result.activationId}: status=${result.status} revoked=${revoked}\n`)
       return result.status
     } catch (error) {
-      options.stderr.write(`Autoprompt activate (${command.provider}): ${error.message}\n`)
+      options.stderr.write(`Autoprompt activate (${command.provider}): ${error.code || 'ACTIVATION_FAILED'}: ${error.message}\n`)
       return 1
     }
   }

@@ -7,7 +7,7 @@
 <p align="center">
   <a href="#benchmarks"><img src="https://img.shields.io/badge/Terminal--Bench%202.1-%2B14.61%20points-965477?style=flat-square&labelColor=302335" alt="Terminal-Bench 2.1: plus 14.61 points"/></a>
   <a href="https://github.com/Spielewoy/autoprompt-skill/releases/latest"><img src="https://img.shields.io/github/v/release/Spielewoy/autoprompt-skill?style=flat-square&label=version&color=965477&labelColor=302335" alt="Version 1.0.4"/></a>
-  <a href="#install"><img src="https://img.shields.io/badge/support-9%20supported%20providers-965477?style=flat-square&labelColor=302335" alt="Nine supported providers"/></a>
+  <a href="#install"><img src="https://img.shields.io/badge/ports-9%20provider%20ports-965477?style=flat-square&labelColor=302335" alt="Nine provider ports"/></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-965477?style=flat-square&labelColor=302335" alt="License MIT"/></a>
 </p>
 
@@ -22,6 +22,12 @@
 ## Contents
 
 [Install](#install) · [Benchmarks](#benchmarks) · [Invocation](#anatomy-of-an-invocation) · [Run controls](#run-controls) · [Workflow](#how-it-works) · [Agents](#the-agents) · [Examples](#examples) · [FAQ](#faq) · [License](#license)
+
+## Cross-harness v2 status
+
+This is the Codex-v2 development branch. Native role projections and private installers now exist for all nine provider keys, but **the new ports are not yet certified for production execution**. Installation checks and protocol fixtures do not prove a complete native task run. Read the [verification guide and remaining requirements](docs/guides/harness-v2-verification.md) before activating a port.
+
+The support versions and benchmark results below originate from the previous release unless explicitly marked v2; they are not v2 conformance evidence. To test this checkout rather than the published npm release, use the local commands in the verification guide. No publication is needed.
 
 ## Install
 
@@ -64,18 +70,18 @@ autoprompt
 - [Bash 4.3+](https://www.gnu.org/software/bash/) on macOS or Linux
 - [Git](https://git-scm.com/downloads) only for the GitHub checkout method
 
-### Support
+### Historical support and current v2 status
 
 | Status | Coding agent | Audited requirement | Key |
 |---|---|---|---|
-| Working | [Claude Code](https://code.claude.com/docs/en/setup) | 2.1.219+; audited 2.1.233 | `claude` |
-| Working | [Codex](https://github.com/openai/codex) | Subagent-capable build; audited 0.148.0 | `codex` |
-| Working | [OpenCode](https://opencode.ai/docs/agents) | 1.18.7+; audited 1.18.18 | `opencode` |
-| Working | [Kilo Code](https://kilo.ai/docs/customize/custom-subagents) | 7.4.22+; audited 7.4.22 | `kilo` |
-| Working | [VS Code](https://code.visualstudio.com/docs/agents/subagents) | 1.133+; audited 1.133.0 with Copilot 0.61.0 | `vscode` |
-| Working | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) | 0.7.2; audited 0.7.2; native package adapter | `prime` |
-| Working | [Oh My Pi](https://omp.sh/) | 17.4.0+; adapter contract, install lifecycle, and native role payload verified for 17.4.0 | `omp` |
-| Working | [DeepSeek Harness](https://deepseek.com/harness/en/) | 0.1.0-rc.7+; adapter contract, install lifecycle, and native role payload verified for 0.1.0-rc.7 | `deepseek` |
+| V1 audit; v2 verification pending | [Claude Code](https://code.claude.com/docs/en/setup) | 2.1.219+; audited 2.1.233 | `claude` |
+| Reviewed v2 base | [Codex](https://github.com/openai/codex) | Subagent-capable build; audited 0.148.0 | `codex` |
+| V1 audit; v2 verification pending | [OpenCode](https://opencode.ai/docs/agents) | 1.18.7+; audited 1.18.18 | `opencode` |
+| V1 audit; v2 verification pending | [Kilo Code](https://kilo.ai/docs/customize/custom-subagents) | 7.4.22+; audited 7.4.22 | `kilo` |
+| V1 audit; v2 verification pending | [VS Code](https://code.visualstudio.com/docs/agents/subagents) | 1.133+; audited 1.133.0 with Copilot 0.61.0 | `vscode` |
+| V1 audit; v2 verification pending | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) | 0.7.2; audited 0.7.2; native package adapter | `prime` |
+| V1 audit; v2 verification pending | [Oh My Pi](https://omp.sh/) | 17.4.0+; adapter contract, install lifecycle, and native role payload verified for 17.4.0 | `omp` |
+| V1 audit; v2 verification pending | [DeepSeek Harness](https://deepseek.com/harness/en/) | 0.1.0-rc.7+; adapter contract, install lifecycle, and native role payload verified for 0.1.0-rc.7 | `deepseek` |
 | V2 port | [Reasonix](https://reasonix.io/docs/) | 1.30.0; private runtime and native wire tested; production conformance pending | `reasonix` |
 
 See [support and audit notes](docs/faq/which-coding-agents-are-supported.md).
@@ -125,6 +131,8 @@ Timing and token logs were not retained, so these are planning estimates based o
 
 ## Anatomy of an invocation
 
+The slash-command examples below describe v1 usage. On this branch, use `autoprompt activate PROVIDER --target /absolute/project -- "request"`; the public native entry only launches the explicit controller. Runtime admission remains required.
+
 ```text
 /autoprompt mode=custom max_subs=4 agents=auto <goal>
 ```
@@ -163,6 +171,8 @@ autoprompt activate reasonix --target /absolute/project -- "fix the bug and veri
 Production activation currently returns `PROVIDER_UNSUPPORTED` because an independent signed Reasonix conformance record has not been supplied. Native transport tests cover actual tool output, token accounting, checker write denial, and session continuation; they do not establish complete provider conformance. See the [Reasonix v2 package](agents/reasonix/README.md).
 
 ## Run controls
+
+This table is the v1 control reference, not a statement of v2 runtime readiness. The v2 adapter rejects unverified options and capabilities; see the [v2 verification guide](docs/guides/harness-v2-verification.md).
 
 Use `mode=` to set concurrency. Use `agents=` to route models where the host supports it. [Custom model setup](docs/faq/how-to-add-custom-models.md)
 

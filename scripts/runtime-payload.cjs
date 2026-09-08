@@ -18,6 +18,7 @@ const HASH_PATTERN = /^[a-f0-9]{64}$/
 const CODEX_GENERATION_PATTERN = /^codex-v[0-9]+\.[0-9]+\.[0-9]+-[a-f0-9]{16}$/
 const CODEX_LOGICAL_ROLE_PATTERN = /^ap-[a-z0-9-]+$/
 const CODEX_PACKAGE_REGISTRY_PATH = 'scripts/install/codex-package-registry.json'
+const HARNESS_V2_PROVIDERS = Object.freeze(['claude', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek'])
 const PROVIDERS = {
   claude: {
     topLevel: ['GATES.md', 'MODES.md', 'PLAYBOOKS.md', 'VERSION', 'autoprompt-models.schema.md'],
@@ -404,6 +405,7 @@ function runtimeFiles(provider, root = ROOT) {
   const definition = PROVIDERS[provider]
   if (provider === 'codex') return codexRuntimeFiles(root)
   if (provider === 'reasonix') return allFilesBelow(path.join(root, 'agents', 'reasonix')).filter(file => file !== 'SKILL.md').sort()
+  if (HARNESS_V2_PROVIDERS.includes(provider)) return allFilesBelow(path.join(root, 'agents', provider)).sort()
   const contract = JSON.parse(fs.readFileSync(path.join(root, 'agents', 'contracts', 'autoprompt.contract.json'), 'utf8'))
   const files = [...definition.topLevel]
   const frameworkRoot = definition.frameworkRoot || 'frameworks'
@@ -617,6 +619,26 @@ function renderManifest(provider, root = ROOT) {
     manifest.entrypoints = ['workflow/transport.js']
     manifest.installation = 'private-reasonix-v2-bundle'
   }
+  if (HARNESS_V2_PROVIDERS.includes(provider)) {
+    const policy = JSON.parse(fs.readFileSync(path.join(root, 'agents', provider, 'role-policy.json'), 'utf8'))
+    const projection = JSON.parse(fs.readFileSync(path.join(root, 'agents', provider, 'native-projection.json'), 'utf8'))
+    const roles = Object.keys(policy.physical_roles).sort()
+    if (policy.policy_version !== '2.0.0' || JSON.stringify(Object.keys(projection.roles).sort()) !== JSON.stringify(roles)) {
+      throw new Error(`${provider} v2 native role projection differs from its canonical policy`)
+    }
+    for (const role of Object.values(projection.roles)) {
+      validateRelativePath(role.path)
+      if (!files.includes(role.path)) throw new Error(`${provider} v2 profile is missing: ${role.path}`)
+    }
+    manifest.contractVersion = '2.0.0'
+    manifest.rolePolicy = 'role-policy.json'
+    manifest.logicalRoles = roles
+    manifest.nativeProjection = 'native-projection.json'
+    manifest.entrypoints = []
+    manifest.externalEntrypoints = ['scripts/harness-v2-configure.cjs', 'scripts/harness-v2-transport.cjs']
+    manifest.installation = 'private-harness-v2-bundle'
+    manifest.installer = 'scripts/harness-v2-package.cjs'
+  }
   if (provider === 'codex') {
     const policy = JSON.parse(fs.readFileSync(path.join(root, 'agents', 'codex', 'agents', 'role-policy.json'), 'utf8'))
     manifest.contractVersion = policy.policy_version
@@ -801,8 +823,13 @@ function codexActivationLayout(destination, payloadGeneration) {
   return Object.freeze({ activationRoot, bundleRoot, discoverySkillRoot, skillRoot })
 }
 
-function installationPlan(provider, destination, root = ROOT) {
+function requirePublicPayloadProvider(provider) {
   if (provider === 'reasonix') throw new Error('Reasonix v2 uses scripts/reasonix-package.cjs with --root <provider-config-root>; a public skill-root payload is forbidden')
+  if (HARNESS_V2_PROVIDERS.includes(provider)) throw new Error(`${provider} v2 uses scripts/harness-v2-package.cjs with --root <provider-config-root>; a public skill-root payload is forbidden`)
+}
+
+function installationPlan(provider, destination, root = ROOT) {
+  requirePublicPayloadProvider(provider)
   const manifest = loadManifest(provider, root)
   const codexRegistry = provider === 'codex' ? loadCodexPackageRegistry(root) : null
   verifySource(manifest, root)
@@ -935,6 +962,22 @@ function loadManifest(provider, root = ROOT) {
   }
   if (provider === 'reasonix' && (manifest.contractVersion !== '2.0.0' || manifest.rolePolicy !== 'role-policy.json' ||
       manifest.installation !== 'private-reasonix-v2-bundle')) throw new Error('Reasonix v2 manifest metadata mismatch')
+  if (HARNESS_V2_PROVIDERS.includes(provider)) {
+    const policy = JSON.parse(fs.readFileSync(path.join(root, 'agents', provider, 'role-policy.json'), 'utf8'))
+    const projection = JSON.parse(fs.readFileSync(path.join(root, 'agents', provider, 'native-projection.json'), 'utf8'))
+    if (manifest.contractVersion !== '2.0.0' || manifest.rolePolicy !== 'role-policy.json' ||
+        manifest.nativeProjection !== 'native-projection.json' || manifest.installation !== 'private-harness-v2-bundle' ||
+        manifest.installer !== 'scripts/harness-v2-package.cjs' || JSON.stringify(manifest.entrypoints) !== '[]' ||
+        JSON.stringify(manifest.externalEntrypoints) !== JSON.stringify(['scripts/harness-v2-configure.cjs', 'scripts/harness-v2-transport.cjs']) ||
+        JSON.stringify(manifest.logicalRoles) !== JSON.stringify(Object.keys(policy.physical_roles).sort()) ||
+        JSON.stringify(manifest.logicalRoles) !== JSON.stringify(Object.keys(projection.roles).sort())) {
+      throw new Error(`${provider} v2 manifest metadata mismatch`)
+    }
+    for (const role of Object.values(projection.roles)) {
+      validateRelativePath(role.path)
+      if (!manifest.files.includes(role.path)) throw new Error(`${provider} v2 manifest omits native role: ${role.path}`)
+    }
+  }
   if (provider === 'codex') {
     const policy = JSON.parse(fs.readFileSync(path.join(root, 'agents', 'codex', 'agents', 'role-policy.json'), 'utf8'))
     const expectedRoles = Object.keys(policy.physical_roles).sort()
@@ -1050,7 +1093,7 @@ function removeEmptyDirectories(directory) {
 }
 
 function prunePayload(provider, destination, root = ROOT) {
-  if (provider === 'reasonix') throw new Error('Reasonix v2 uses scripts/reasonix-package.cjs with --root <provider-config-root>; a public skill-root payload is forbidden')
+  requirePublicPayloadProvider(provider)
   if (provider === 'codex') {
     // Codex bundles are immutable and generation-qualified. Installer receipt
     // reconciliation owns retirement of prior generations and preserves drift.
@@ -1073,7 +1116,7 @@ function prunePayload(provider, destination, root = ROOT) {
 }
 
 function installPayload(provider, destination, root = ROOT) {
-  if (provider === 'reasonix') throw new Error('Reasonix v2 uses scripts/reasonix-package.cjs with --root <provider-config-root>; a public skill-root payload is forbidden')
+  requirePublicPayloadProvider(provider)
   const manifest = loadManifest(provider, root)
   verifySource(manifest, root)
   const plan = installationPlan(provider, destination, root)
@@ -1115,7 +1158,7 @@ function installPayload(provider, destination, root = ROOT) {
 }
 
 function verifyPayload(provider, destination, root = ROOT) {
-  if (provider === 'reasonix') throw new Error('Reasonix v2 uses scripts/reasonix-package.cjs with --root <provider-config-root>; a public skill-root payload is forbidden')
+  requirePublicPayloadProvider(provider)
   const manifest = loadManifest(provider, root)
   verifySource(manifest, root)
   const plan = installationPlan(provider, destination, root)
@@ -1205,6 +1248,7 @@ function removeEmptyAncestors(start, stop) {
 }
 
 function uninstallPayload(provider, destination, root = ROOT) {
+  requirePublicPayloadProvider(provider)
   const plan = installationPlan(provider, destination, root)
   assertDirectoryChainUnlinked(plan.activationRoot, plan.activationRoot)
   const removed = []

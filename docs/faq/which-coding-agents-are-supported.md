@@ -1,6 +1,6 @@
 # Which coding agents are supported?
 
-The current public support set contains nine working providers:
+This table records the previous release's nine provider audits. It is not a v2 conformance claim. On the Codex-v2 branch, all nine have native projections, while production execution of the new ports remains gated. See the [v2 verification guide](../guides/harness-v2-verification.md) for current installation paths, tests, and unresolved requirements.
 
 | Coding agent | Audited requirement | Package |
 |---|---|---|
@@ -14,7 +14,7 @@ The current public support set contains nine working providers:
 | [DeepSeek Harness](https://deepseek.com/harness/en/) | 0.1.0-rc.7+; adapter contract, install lifecycle, and native role payload verified for 0.1.0-rc.7 | [Source](../../agents/deepseek/) |
 | [Reasonix](https://reasonix.io/docs/) | V2 port for 1.30.0; native wire tested, independent production conformance pending | [Source](../../agents/reasonix/) |
 
-The installer shows only this vetted set. OMP and DeepSeek Harness are listed because their adapter contracts, install targets, root resolution, recursive wiring, reversible lifecycle, and native `ap-fresh-verifier` payloads are covered by local tests. Use the [custom coding agent compatibility guide](../guides/custom-agent-compatibility.md) to assess another CLI or IDE and define the adapter proof it still needs.
+The installer shows this provider set. The remaining paragraphs describe v1 installation behavior; the v2 verification guide supersedes those paths and dispatch instructions. OMP and DeepSeek Harness are listed because their adapter contracts, install targets, root resolution, recursive wiring, reversible lifecycle, and native `ap-fresh-verifier` payloads are covered by local tests. Use the [custom coding agent compatibility guide](../guides/custom-agent-compatibility.md) to assess another CLI or IDE and define the adapter proof it still needs.
 
 Prime uses a sealed adapter for Autoprompt dispatch. Raw host `rlm` remains available outside Autoprompt, so this is not a global sandbox boundary. The CLI uses `PRIME_AGENT_CODING_AGENT_DIR` when set, otherwise `~/.prime/agent`.
 

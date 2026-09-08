@@ -778,7 +778,7 @@ function validateCompiledRouteExamples(markdown, routes, routesSha256, label) {
   return true
 }
 
-function providerProjectionPlan(contracts, openedProviders = ['codex', 'reasonix']) {
+function providerProjectionPlan(contracts, openedProviders = PUBLIC_PROVIDER_IDS) {
   const records = contracts.providers.providers || []
   requireCondition(sameMembers(records.map(provider => provider.id), PUBLIC_PROVIDER_IDS), 'provider projection consumer mismatch')
   const opened = new Set(openedProviders)
@@ -1827,6 +1827,279 @@ function renderReasonixOutputs(root = ROOT) {
   policy.policy_id = policy.policy_id.replace('codex', 'reasonix')
   outputs.set('agents/reasonix/role-policy.json', `${JSON.stringify(policy, null, 2)}\n`)
   return outputs
+}
+
+// Native files are projections, not provider-conformance attestations. C0 owns
+// physical launches; logical parent/child edges remain in the unchanged policy.
+const HARNESS_V2_PROVIDERS = Object.freeze(['claude', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek'])
+const HARNESS_V2_NATIVE = Object.freeze({
+  claude: { display: 'Claude Code', docs: 'https://code.claude.com/docs/en/sub-agents', format: 'markdown-subagent' },
+  opencode: { display: 'OpenCode', docs: 'https://opencode.ai/docs/agents/', format: 'markdown-subagent-permissions' },
+  kilo: { display: 'Kilo', docs: 'https://kilo.ai/docs/customize/custom-subagents', format: 'markdown-subagent-permissions' },
+  vscode: { display: 'VS Code', docs: 'https://code.visualstudio.com/docs/agent-customization/custom-agents', format: 'custom-agent-markdown' },
+  prime: { display: 'Prime Agent', docs: 'https://github.com/PrimeIntellect-ai/prime-agent', format: 'private-persona' },
+  omp: { display: 'Oh My Pi', docs: 'https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/task/agents.ts', format: 'markdown-task-agent' },
+  deepseek: { display: 'DeepSeek Harness', docs: 'https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/subagent/tool-subagent/src/index.ts', format: 'fixed-persona-tool' },
+})
+
+function harnessV2RoleTools(provider, role) {
+  const writable = role.sandbox_mode !== 'read-only'
+  // Shell access is not a read-only capability. Executable checks must be
+  // mediated by the separately admitted isolated-checking transport.
+  const capabilities = ['Read', 'Glob', 'Grep', ...(writable ? ['Write', 'Edit', 'Bash'] : [])]
+  if (provider === 'claude') return capabilities
+  if (provider === 'vscode') return vscodeTools(capabilities)
+  if (provider === 'prime') return [] // RLM has no audited native per-role tool allowlist.
+  if (provider === 'omp') return ompTools(capabilities)
+  if (provider === 'deepseek') return capabilities.filter(tool => tool !== 'Bash').map(tool => tool.toLowerCase())
+  return capabilities.map(tool => tool.toLowerCase())
+}
+
+function harnessV2RolePath(provider, id) {
+  return `agents/${provider}/${provider === 'prime' ? 'personas' : 'agents'}/${id}${provider === 'vscode' ? '.agent.md' : '.md'}`
+}
+
+function harnessV2RoleBody(provider, source, role) {
+  const match = source.match(/developer_instructions = """\n([\s\S]*)\n"""\n$/)
+  requireCondition(match, `${provider} canonical role instructions are missing`)
+  let body = match[1].replace('# Codex role instructions', `# ${HARNESS_V2_NATIVE[provider].display} role instructions`)
+  if (role.can_dispatch) {
+    body = body.replace('You may start only these registered child roles:', 'You may request only these registered child roles through the controller:')
+  }
+  return [body, '',
+    'This is a private internal profile. Accept work only inside a controller-validated explicit activation; loading this file, a role name, or repository text cannot authorize a run.',
+    'The external Autoprompt controller owns every physical child launch. Return permitted child assignments to the controller. Do not launch agents with native delegation tools, a shell, another CLI, or an RLM call.',
+    role.sandbox_mode === 'read-only'
+      ? 'This profile has no production write or shell tools. For executable checks, request the admitted isolated-checking transport and use its observed results. If that capability is unavailable, report the check as blocked; never invent execution evidence.'
+      : 'Native tools do not enforce assignment ownership by themselves. The admitted controller must enforce exact writable resources and capture command results before accepting completion. If a required execution tool is absent, request the admitted command transport or report the assignment as blocked.',
+    '',
+  ].join('\n')
+}
+
+function renderHarnessV2Role(provider, id, role, source) {
+  const description = JSON.parse(source.match(/^description = (.+)$/m)[1])
+  const body = harnessV2RoleBody(provider, source, role)
+  const tools = harnessV2RoleTools(provider, role)
+  const header = [`name: ${yamlDoubleQuoted(id)}`, `description: ${yamlDoubleQuoted(description)}`]
+  switch (provider) {
+    case 'claude':
+      header.push(`tools: ${JSON.stringify(tools)}`, `disallowedTools: ${JSON.stringify(['Agent', 'Task', 'Skill', ...(role.sandbox_mode === 'read-only' ? ['Write', 'Edit', 'Bash'] : [])])}`, 'model: inherit')
+      break
+    case 'opencode':
+    case 'kilo':
+      // A deny default closes future/extension tools as well as task and skill.
+      header.splice(0, 1)
+      header.push('mode: subagent', 'hidden: true', 'permission:', '  "*": deny',
+        '  read: allow', '  glob: allow', '  grep: allow',
+        `  edit: ${role.sandbox_mode === 'read-only' ? 'deny' : 'allow'}`,
+        `  bash: ${role.sandbox_mode === 'read-only' ? 'deny' : 'allow'}`,
+        '  task: deny', '  skill: deny')
+      break
+    case 'vscode':
+      header.push(`tools: ${JSON.stringify(tools)}`, 'agents: []', 'user-invocable: false', 'disable-model-invocation: true')
+      break
+    case 'omp':
+      // Disable optional native model handoffs as well as task delegation.
+      // Empty spawns alone is not a deny rule: OMP infers '*' from a task tool.
+      header.push(`tools: ${JSON.stringify(tools)}`, 'spawns: []', 'prewalk: false', 'advisor: false')
+      break
+    case 'deepseek':
+      // The fixed-persona tool owns toolFilter, not unsupported prompt fields.
+      break
+    case 'prime':
+      return asciiDashes(body)
+    default: throw new Error(`Unknown v2 provider: ${provider}`)
+  }
+  return asciiDashes(['---', ...header, '---', '', body].join('\n'))
+}
+
+function renderHarnessV2Skill(provider, codexSource) {
+  const native = HARNESS_V2_NATIVE[provider]
+  const marker = '# Autoprompt 2.0 provider-neutral instructions'
+  requireCondition(codexSource.includes(marker), `${provider} canonical entry instructions are missing`)
+  const shared = codexSource.slice(codexSource.indexOf(marker))
+  const references = provider === 'prime' ? '../../' : ''
+  return asciiDashes([
+    '---', 'name: autoprompt',
+    'description: "Run explicitly requested Autoprompt v2 work through the private controller. Ordinary coding and review requests do not activate this skill."',
+    ...(provider === 'claude' || provider === 'vscode' || provider === 'omp'
+      ? ['user-invocable: true', 'disable-model-invocation: true'] : []),
+    '---', '', `# Autoprompt for ${native.display}`, '',
+    `Start only through \`autoprompt activate ${provider} --target <absolute-project> -- <request>\`.`,
+    'The installer exposes a single public manual launcher. This complete entry, internal roles, and supporting instructions belong in the private bundle. A native command or skill entry only explains the launcher; loading a skill never creates or resumes a run.',
+    'The external controller validates explicit activation, chooses the route from evidence, owns dispatch and recovery, and records results. DIRECT and LIGHT do not require a coordinator or manager. ROADMAP uses only the roles admitted by the canonical policy. There is no default route.',
+    'Generated source coverage and runtime admission are distinct. Refuse any required capability without current provider conformance evidence; never treat prompt instructions, installation, or fixture tests as full v2 enforcement. Do not fall back to unrestricted native recursion.',
+    `Read [checks](${references}GATES.md), [work structures](${references}MODES.md), and [procedures](${references}PLAYBOOKS.md) as required by the selected route.`, '',
+    shared,
+  ].join('\n'))
+}
+
+function renderHarnessV2Readme(provider, contracts, frameworkCount) {
+  const native = HARNESS_V2_NATIVE[provider]
+  return [
+    `# ${native.display} v2 package`, '',
+    'This generated package projects the canonical v2 routes, role policy, checks, modes, procedures, and framework instructions. Codex and Reasonix use the same canonical base.', '',
+    `- [Entry](${provider === 'prime' ? 'skills/autoprompt/' : ''}SKILL.md): explicit activation and route instructions.`,
+    `- [Internal roles](${provider === 'prime' ? 'personas' : 'agents'}/): ${Object.keys(contracts.rolePolicy.physical_roles).length} physical profiles, including inactive compatibility aliases.`,
+    `- [Frameworks](${provider === 'prime' ? 'prompts/' : ''}frameworks/): ${frameworkCount} compiled procedure projections.`,
+    '- [Role policy](role-policy.json): exact parents, allowed children, resources, modes, authority, and alias restrictions.',
+    '- [Native projection](native-projection.json): private profile paths and provider tool mapping.', '',
+    '```bash', `autoprompt activate ${provider} --target <absolute-project> -- <request>`, '```', '',
+    'The installer must expose only one public manual launcher. Full instructions and internal profiles remain in the immutable private bundle and are loaded only for a validated explicit activation.', '',
+    'All physical child launches belong to the external controller. Coordinators return only permitted assignments; leaves and retired aliases cannot dispatch. DIRECT and LIGHT have no mandatory coordinator. Model and effort settings are resolved before launch and do not select the task route.', '',
+    'Read-only native profiles omit production write and shell tools. Executable checking requires a separately admitted isolated-checking transport. Native tool restrictions alone do not prove filesystem isolation, resource ownership, identity, continuation, cancellation, usage accounting, or result capture.', '',
+    'Generation parity is not runtime conformance. The provider capability registry and current independent evidence govern runtime admission. Missing required capabilities produce PROVIDER_UNSUPPORTED; there is no unverified fallback advertised as full v2.', '',
+    ...(provider === 'prime' ? ['Prime RLM does not provide an audited per-role tool allowlist in this source contract. Persona text and the declared policy require enforcement by the admitted external transport. The old Python dispatcher and automatic extension activation are retired.', ''] : []),
+    ...(provider === 'vscode' ? ['Private VS Code profiles disable user and model invocation and have empty native child lists. The production transport runs an isolated extension host and an owned BYOK language-model provider with fixed controller tools, exact provider usage receipts, and durable private conversations. These conversations are separate from built-in Chat histories. A graphical session (or an explicitly configured headless display) is required; recursive-subagent editor settings are not an admission check.', '',
+      'Configure the owned connection in `models.json` under the provider root, with `model`, `baseUrl`, and `apiKeyEnv` (`OPENROUTER_API_KEY` or `OPENAI_API_KEY`). The key stays in the named environment variable. Optional `reasoningEffort`, `maxTokens`, `maxSteps`, and `timeoutMs` bound the native session.', ''] : []),
+    ...(provider === 'deepseek' ? ['The production adapter uses the owned sdk-minimal Cordis bridge, which disables native Bash/editor and exposes six controller tools. The official SDK core resumes persisted history; the external controller verifies exact usage, receipts and process drain. Static persona-tool presets are compatibility projections and are never loaded by the production transport.', ''] : []),
+    ...(provider === 'omp' ? ['OMP profiles omit the task tool and disable native prewalk and advisor handoffs. An empty spawns list alone does not close delegation in the native parser. OMP may add its yield control tool; the admitted transport must account for the effective tool set.', ''] : []),
+    `Native format reference: [${native.display} documentation](${native.docs}).`, '',
+  ].join('\n')
+}
+
+function renderHarnessV2DeepSeekTools(roles, outputs) {
+  return Object.entries(roles).sort(([left], [right]) => left.localeCompare(right)).map(([id, role]) => [
+    `- id: autoprompt-${id}`, "  name: '@deepseek-ai/dsh-tool-subagent'", '  config:',
+    '    provider: spawn', `    toolName: ${id.replaceAll('-', '_')}`,
+    '    backgroundMode: continuable', '    maxDepth: 1',
+    '    persona: |-', indentBlock(stripFrontmatter(outputs.get(harnessV2RolePath('deepseek', id))).trim(), 6),
+    '    toolFilter:', `      allow: ${JSON.stringify(harnessV2RoleTools('deepseek', role))}`,
+  ].join('\n')).join('\n')
+}
+
+function renderHarnessV2Outputs(provider, root = ROOT) {
+  requireCondition(HARNESS_V2_PROVIDERS.includes(provider), `Unsupported v2 harness projection: ${provider}`)
+  const contracts = loadCodexV2Contracts(root)
+  const codex = renderCodexOutputs(root)
+  const native = HARNESS_V2_NATIVE[provider]
+  const roles = contracts.rolePolicy.physical_roles
+  const outputs = new Map()
+  for (const [sourcePath, source] of codex) {
+    const relative = sourcePath.slice('agents/codex/'.length)
+    if (relative.startsWith('agents/')) {
+      const id = path.basename(relative, '.toml')
+      outputs.set(harnessV2RolePath(provider, id), renderHarnessV2Role(provider, id, roles[id], source))
+    } else if (relative === 'SKILL.md') {
+      outputs.set(`agents/${provider}/${provider === 'prime' ? 'skills/autoprompt/' : ''}SKILL.md`, renderHarnessV2Skill(provider, source))
+    } else if (relative === 'README.md') {
+      outputs.set(`agents/${provider}/README.md`, renderHarnessV2Readme(provider, contracts, codexFrameworkFiles(root).length))
+    } else {
+      const target = provider === 'prime' && relative.startsWith('frameworks/') ? `prompts/${relative}` : relative
+      outputs.set(`agents/${provider}/${target}`, relative === 'VERSION' ? `${contracts.product.contractVersion}\n`
+        : asciiDashes(source.replaceAll('Codex', native.display)))
+    }
+  }
+  const policy = structuredClone(contracts.rolePolicy)
+  policy.policy_id = policy.policy_id.replace('codex', provider)
+  outputs.set(`agents/${provider}/role-policy.json`, `${JSON.stringify(policy, null, 2)}\n`)
+  const policySchema = structuredClone(contracts.rolePolicySchema)
+  policySchema.$id = policySchema.$id.replace('codex', provider)
+  policySchema.properties.policy_id.const = policy.policy_id
+  outputs.set(`agents/${provider}/role-policy.schema.json`, `${JSON.stringify(policySchema, null, 2)}\n`)
+  outputs.set(`agents/${provider}/native-projection.json`, `${JSON.stringify({
+    schemaVersion: 1, contractVersion: '2.0.0', provider, format: native.format,
+    activationCommand: `autoprompt activate ${provider} --target <absolute-project> -- <request>`,
+    activation: 'explicit-only', internalRoleVisibility: 'private', dispatchOwner: 'external-controller',
+    nativeDispatchAllowed: false, runtimeAdmission: 'independent-capability-evidence-required',
+    canonicalInputs: CODEX_V2_INPUTS,
+    ...(provider === 'deepseek' ? { executionTransport: { kind: 'owned-sdk-plugin', protocol: 'deepseek-json', testedNativeVersion: '0.1.2-rc.1', builtinsEnabled: false, toolNames: ['read', 'list', 'search', 'write', 'edit', 'bash'].map(name => `autoprompt_owned_${name}`), continuation: 'native-core-resume' } } : {}),
+    ...(provider === 'vscode' ? { executionTransport: { kind: 'owned-extension-host', protocol: 'vscode-owned-json', testedNativeVersion: '1.136.1', builtinsEnabled: false, continuation: 'owned-private-conversation', usage: 'provider-receipts-through-language-model-data-parts' } } : {}),
+    sourceRolePolicySha256: sha256Text(read('agents/codex/agents/role-policy.json', root)),
+    roles: Object.fromEntries(Object.entries(roles).sort(([left], [right]) => left.localeCompare(right)).map(([id, role]) => [id, {
+      path: harnessV2RolePath(provider, id).slice(`agents/${provider}/`.length),
+      logicalRole: role.logical_role, logicalVersion: role.logical_version,
+      layer: role.layer, phase: role.phase, mode: role.mode, sandboxMode: role.sandbox_mode,
+      allowedParents: role.allowed_parents, allowedChildren: role.allowed_children,
+      canDispatch: role.can_dispatch, nativeChildRoles: [], tools: harnessV2RoleTools(provider, role),
+      supportedModes: role.supported_modes, activationAllowed: role.activation_allowed,
+      decisionRights: role.decision_rights, mutualExclusionGroup: role.mutual_exclusion_group,
+      telemetryRequired: role.telemetry_required,
+      compatibilityAlias: role.compatibility_alias, resourceSets: role.resource_sets,
+      inputSchemaId: role.input_schema_id, outputSchemaId: role.output_schema_id,
+    }])),
+  }, null, 2)}\n`)
+  if (provider === 'claude' || provider === 'opencode') {
+    outputs.set(`agents/${provider}/agents/README.md`, [
+      `# ${native.display} private v2 roles`, '',
+      'The 32 physical profiles project the canonical role policy: seven active roles and 25 inactive compatibility redirects. Read [the policy](../role-policy.json) for exact parents, children, modes, resources, and schemas.', '',
+      'The external controller owns all physical launches. DIRECT and LIGHT have no mandatory coordinator. Leaves and compatibility aliases cannot dispatch; aliases cannot write or accept new v2 work.', '',
+      'These profiles belong in the private bundle. Use [the explicit launcher](../SKILL.md); role discovery is not activation or runtime admission.', '',
+    ].join('\n'))
+  }
+  if (provider === 'opencode' || provider === 'kilo') {
+    outputs.set(`agents/${provider}/autoprompt.${provider}.json`, `${JSON.stringify({
+      $schema: provider === 'opencode' ? 'https://opencode.ai/config.json' : 'https://app.kilo.ai/config.json',
+      share: 'disabled', permission: { task: 'deny', skill: 'deny' },
+    }, null, 2)}\n`)
+  }
+  if (provider === 'claude') {
+    outputs.set('agents/claude/autoprompt-models.schema.md', [
+      '# Claude Code v2 model settings', '',
+      'Model and effort preferences are resolved by `autoprompt configure claude` and bound by the private launcher before activation. Native role files inherit the configured session model. Model choice never selects DIRECT, LIGHT, or ROADMAP.', '',
+      'Historical v1 role selectors do not reopen compatibility aliases or grant dispatch rights. The v2 role policy and current provider capability evidence govern accepted configuration.', '',
+    ].join('\n'))
+  }
+  if (provider === 'deepseek') {
+    const tools = renderHarnessV2DeepSeekTools(roles, outputs)
+    outputs.set('agents/deepseek/agent-preset/agent.cordis.yml', [
+      '# Private v2 profile definitions; load only through the admitted controller.',
+      '# The transport owns core services, platform shell registration and isolation.',
+      '- id: tool-fs', "  name: '@deepseek-ai/dsh-tool-fs'",
+      '- id: tool-fs-search', "  name: '@deepseek-ai/dsh-tool-fs-search'", tools, '',
+    ].join('\n'))
+    outputs.set('agents/deepseek/headless.patch.yml', [
+      '# Private v2 patch; the controller supplies services and invokes one bound role.',
+      '# Loading this patch is not explicit activation or provider admission.',
+      '- insert:', indentBlock(tools, 2), '',
+    ].join('\n'))
+    outputs.set('agents/deepseek/agent-preset/preset.yml', 'name: Autoprompt v2 (private)\ndescription: Controller-loaded canonical v2 profiles; no automatic activation.\n')
+  }
+  if (provider === 'prime') {
+    // Retain package resource paths without retaining the v1 automatic prompt
+    // injector or its RLM bypass. Native execution lives in the shared transport.
+    outputs.set('agents/prime/extensions/autoprompt.ts', [
+      'import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";', '',
+      '// Private v2 source resource. The external controller binds role prompts.',
+      '// Do not register automatic activation, commands, or unverified RLM dispatch.',
+      'export default function autoprompt(_pi: ExtensionAPI): void {}', '',
+    ].join('\n'))
+    outputs.set('agents/prime/skills/autoprompt/pyproject.toml', renderPrimePyproject('2.0.0')
+      .replace('Topology-enforcing Autoprompt dispatcher for Prime Agent', 'Retired v1 dispatcher entry for the Autoprompt v2 controller'))
+    outputs.set('agents/prime/skills/autoprompt/src/autoprompt/__init__.py', [
+      '"""Compatibility entry: v2 physical dispatch belongs to the external controller."""', '',
+      'ACTIVATION = "autoprompt activate prime --target <absolute-project> -- <request>"', '',
+      'def bind(*args, **kwargs):',
+      '    raise RuntimeError("PROVIDER_UNSUPPORTED: v1 bindings are retired; use " + ACTIVATION)', '',
+      'async def dispatch(*args, **kwargs):',
+      '    raise RuntimeError("PROVIDER_UNSUPPORTED: direct RLM dispatch is retired; use " + ACTIVATION)', '',
+    ].join('\n'))
+  }
+  validateHarnessV2Outputs(provider, outputs, contracts, root)
+  return outputs
+}
+
+// Validate the final provider text, after path and native-format translation.
+// These checks establish source parity only; they never change runtime admission.
+function validateHarnessV2Outputs(provider, outputs, contracts, root = ROOT) {
+  requireCondition(HARNESS_V2_PROVIDERS.includes(provider), `Unsupported v2 harness projection: ${provider}`)
+  contracts ??= loadCodexV2Contracts(root)
+  const prefix = `agents/${provider}/`
+  const registry = loadCodexPackageRegistry(root)
+  const gatesSha256 = sha256Text(read(registry.canonicalInputs.gates, root))
+  const routesSha256 = sha256Text(read('agents/contracts/routes.json', root))
+  validateFullCompiledGates(outputs.get(`${prefix}GATES.md`), contracts.gates, gatesSha256)
+  for (const file of [
+    `${prefix}${provider === 'prime' ? 'skills/autoprompt/' : ''}SKILL.md`,
+    harnessV2RolePath(provider, 'ap-route-analyst'),
+  ]) validateCompiledRouteExamples(outputs.get(file), contracts.routes, routesSha256, file)
+  const frameworks = new Map(Object.keys(registry.frameworkRoutes).map(file => [
+    `agents/codex/frameworks/${file}`,
+    outputs.get(`${prefix}${provider === 'prime' ? 'prompts/' : ''}frameworks/${file}`),
+  ]))
+  validateFrameworkGateProjections(frameworks, contracts.gates, gatesSha256, registry.frameworkRoutes)
+  validateGeneratedPlainLanguage(outputs, contracts.plainLanguage)
+  return true
 }
 
 function opencodePermissionLines(capabilities) {
@@ -2989,12 +3262,11 @@ function renderLegacyOutputs(root = ROOT) {
 }
 
 function renderOutputs(root = ROOT) {
-  const outputs = renderLegacyOutputs(root)
-  for (const relativePath of [...outputs.keys()]) {
-    if (/^agents\/(codex|reasonix)\//.test(relativePath)) outputs.delete(relativePath)
+  const outputs = new Map(renderCodexOutputs(root))
+  for (const [file, content] of renderReasonixOutputs(root)) outputs.set(file, content)
+  for (const provider of HARNESS_V2_PROVIDERS) {
+    for (const [file, content] of renderHarnessV2Outputs(provider, root)) outputs.set(file, content)
   }
-  for (const [relativePath, content] of renderCodexOutputs(root)) outputs.set(relativePath, content)
-  for (const [relativePath, content] of renderReasonixOutputs(root)) outputs.set(relativePath, content)
   return outputs
 }
 
@@ -3012,16 +3284,18 @@ function differingOutputs(outputs, root = ROOT) {
 
 function run(argv, root = ROOT, io = process) {
   const check = argv.includes('--check')
-  const codexOnly = argv.includes('--codex-only')
-  const reasonixOnly = argv.includes('--reasonix-only')
-  if ((codexOnly && reasonixOnly) || argv.some(argument => !['--check', '--codex-only', '--reasonix-only'].includes(argument))) {
-    io.stderr.write('generate-provider-contracts: use --check with at most one of --codex-only or --reasonix-only\n')
+  const selectors = argv.filter(argument => argument.endsWith('-only'))
+  const selectorProviders = PUBLIC_PROVIDER_IDS.map(provider => `--${provider}-only`)
+  if (selectors.length > 1 || argv.some(argument => argument !== '--check' && !selectorProviders.includes(argument))) {
+    io.stderr.write('generate-provider-contracts: use --check with at most one --<provider>-only selector\n')
     return 2
   }
-  const outputs = reasonixOnly ? new Map() : renderCodexOutputs(root)
-  if (!codexOnly) for (const [file, content] of renderReasonixOutputs(root)) outputs.set(file, content)
-  if (!codexOnly && !reasonixOnly) {
-    for (const [relativePath, content] of renderSharedFrameworkOutputs(root)) outputs.set(relativePath, content)
+  const selected = selectors[0]?.slice(2, -5)
+  const outputs = selected === 'codex' ? renderCodexOutputs(root)
+    : selected === 'reasonix' ? renderReasonixOutputs(root)
+      : selected ? renderHarnessV2Outputs(selected, root) : renderOutputs(root)
+  if (!selected) {
+    for (const [file, content] of renderSharedFrameworkOutputs(root)) outputs.set(file, content)
   }
   const differing = differingOutputs(outputs, root)
   if (check) {
@@ -3040,6 +3314,9 @@ function run(argv, root = ROOT, io = process) {
 if (require.main === module) process.exitCode = run(process.argv.slice(2))
 
 module.exports = {
+  HARNESS_V2_PROVIDERS,
+  renderHarnessV2Outputs,
+  validateHarnessV2Outputs,
   CODEX_ACTIVATION_SYNTAX,
   codexFrameworkRoutes,
   codexUserFacingLanguageViolations,

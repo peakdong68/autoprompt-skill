@@ -3032,6 +3032,8 @@ function Copy-IdemCodexStableSource {
 
 function Invoke-IdemRetiredCodexReconciliation {
     param([string]$ConfigRoot, [string[]]$CurrentTargets)
+    $AutopromptCodexV2ReceiptBundleRoots = @(Get-CodexV2ReceiptBundleRoots `
+        -ConfigRoot $ConfigRoot -Files $script:AutopromptReceiptFiles)
     foreach ($file in @($script:AutopromptReceiptFiles)) {
         if ([string]::IsNullOrEmpty($file) -or
             -not (Test-UninstallProviderPath -Name 'codex' `
@@ -4764,7 +4766,7 @@ function Remove-UninstallEmptyDirs {
     [string[]]$candidates = @($CreatedDirectories | Where-Object {
         -not [string]::IsNullOrEmpty($_) -and
         (-not $Name -or (Test-UninstallProviderPath -Name $Name `
-            -ConfigRoot $ConfigRoot -Path $_))
+            -ConfigRoot $ConfigRoot -Path $_ -Directory))
     })
     $comparer = [System.Collections.Generic.Comparer[string]]::Create(
         [System.Comparison[string]]{
@@ -4916,8 +4918,64 @@ function Test-AutopromptCustomProviderPath {
     }
 }
 
+# The operation-local value shadows this empty default. Do not cache receipt
+# authority across roots or operations, and do not consult the current release.
+$AutopromptCodexV2ReceiptBundleRoots = @()
+function Get-CodexV2ReceiptBundleRoots {
+    param([string]$ConfigRoot, [string[]]$Files)
+    $base = Get-IdemNormalizedPath -Path (Join-Path $ConfigRoot '.autoprompt-private/bundles')
+    $prefix = $base + [System.IO.Path]::DirectorySeparatorChar
+    foreach ($file in @($Files)) {
+        $normalized = Get-IdemNormalizedPath -Path $file
+        if (-not $normalized.StartsWith($prefix, (Get-IdemPathComparison))) { continue }
+        $relative = $normalized.Substring($prefix.Length).Replace([char]92, [char]47)
+        $match = [regex]::Match($relative,
+            '^(codex-v2\.0\.0-[a-f0-9]{16})/skills/autoprompt/\.autoprompt-runtime-manifest\.json$')
+        if (-not $match.Success) { continue }
+        # Use the recorded fingerprint, so uninstall can preserve a drifted or
+        # missing manifest without stranding every other receipt-owned file.
+        $hash = Get-IdemManifestHash -ConfigRoot $ConfigRoot -Key $file
+        if ($hash -is [string] -and $hash -cmatch '^[a-f0-9]{64}$') {
+            Join-Path $base $match.Groups[1].Value
+        }
+    }
+}
+
+function Test-CodexV2ReceiptBundlePath {
+    param([string]$ConfigRoot, [string]$Path, [switch]$Directory)
+    if ($Path -match '(^|[\\/])\.{1,2}([\\/]|$)') { return $false }
+    $owned = $false
+    foreach ($bundle in @($AutopromptCodexV2ReceiptBundleRoots)) {
+        if ((Test-IdemPathEqual -Left $Path -Right $bundle) -or
+            (Test-IdemPathUnderRoot -Path $Path -Root $bundle)) { $owned = $true; break }
+        if ($Directory -and (
+            (Test-IdemPathEqual -Left $Path -Right (Join-Path $ConfigRoot '.autoprompt-private')) -or
+            (Test-IdemPathEqual -Left $Path -Right (Join-Path $ConfigRoot '.autoprompt-private/bundles')))) {
+            $owned = $true; break
+        }
+    }
+    if (-not $owned) { return $false }
+    # Never extend ownership through junctions or symlinked private ancestors.
+    # Existing leaf checks retain linked files and any hash-drifted user bytes.
+    $cursor = Get-IdemNormalizedPath -Path $Path
+    if (-not $Directory) { $cursor = Split-Path -Parent $cursor }
+    while (-not [string]::IsNullOrEmpty($cursor)) {
+        $item = Get-Item -LiteralPath $cursor -Force -ErrorAction SilentlyContinue
+        if ($null -ne $item -and $item.Attributes.HasFlag([System.IO.FileAttributes]::ReparsePoint)) { return $false }
+        if (Test-IdemPathEqual -Left $cursor -Right $ConfigRoot) { return $true }
+        $parent = Split-Path -Parent $cursor
+        if ($parent -ceq $cursor) { break }
+        $cursor = $parent
+    }
+    return $false
+}
+
 function Test-UninstallProviderPath {
-    param([string]$Name, [string]$ConfigRoot, [string]$Path)
+    param([string]$Name, [string]$ConfigRoot, [string]$Path, [switch]$Directory)
+    # File callers enumerate the receipt; directory callers enumerate only its
+    # createdDirectories and remove them empty-only, never recursively.
+    if ($Name -ceq 'codex' -and (Test-CodexV2ReceiptBundlePath `
+        -ConfigRoot $ConfigRoot -Path $Path -Directory:$Directory)) { return $true }
     $scopedNames = @(
         'claude', 'codex', 'opencode', 'kilo', 'vscode', 'vibe',
         'cursor', 'dcode', 'roo', 'gemini', 'cline', 'goose',
@@ -5175,7 +5233,7 @@ function Test-UninstallSharedProviderState {
     foreach ($directory in @($Receipt.CreatedDirectories)) {
         if (-not [string]::IsNullOrEmpty($directory) -and
             -not (Test-UninstallProviderPath -Name $Name `
-                -ConfigRoot $ConfigRoot -Path $directory)) {
+                -ConfigRoot $ConfigRoot -Path $directory -Directory)) {
             return $true
         }
     }
@@ -5250,11 +5308,11 @@ function Get-UninstallProviderPlan {
     $providerEdits = Get-UninstallProviderEdits -Name $Name `
         -ConfigRoot $ConfigRoot -Edits ([hashtable[]]$Receipt.Edits)
     $providerDirectories = @($Receipt.CreatedDirectories | Where-Object {
-        Test-UninstallProviderPath -Name $Name -ConfigRoot $ConfigRoot -Path $_
+        Test-UninstallProviderPath -Name $Name -ConfigRoot $ConfigRoot -Path $_ -Directory
     })
     $retainedDirectories = @($Receipt.CreatedDirectories | Where-Object {
         -not (Test-UninstallProviderPath -Name $Name `
-            -ConfigRoot $ConfigRoot -Path $_)
+            -ConfigRoot $ConfigRoot -Path $_ -Directory)
     })
     $retainedEdits = @($Receipt.Edits | Where-Object {
         -not (Test-UninstallProviderPath -Name $Name `
@@ -5418,6 +5476,11 @@ function Uninstall-Client {
     }
     $receipt = Read-UninstallReceipt -ConfigRoot $ConfigRoot
     if ($receipt -is [int]) { return $receipt }
+    $AutopromptCodexV2ReceiptBundleRoots = @()
+    if ($Name -ceq 'codex') {
+        $AutopromptCodexV2ReceiptBundleRoots = @(Get-CodexV2ReceiptBundleRoots `
+            -ConfigRoot $ConfigRoot -Files $receipt.Files)
+    }
     $plan = Get-UninstallProviderPlan -ConfigRoot $ConfigRoot `
         -Name $Name -Receipt $receipt
     $snapshot = New-UninstallSnapshot -ConfigRoot $ConfigRoot -Receipt $receipt

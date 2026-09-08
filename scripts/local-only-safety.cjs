@@ -913,12 +913,34 @@ function verifyReasonixEnforcementProof(repository, environment, proof) {
     // independent attestation and bind it to the actual native executable and
     // every installed runtime byte before reporting an enforced channel.
     const bundle = path.resolve(__dirname, '..')
-    const releaseEvidence = JSON.parse(fs.readFileSync(path.join(bundle, 'agents/contracts/reasonix-live-conformance-evidence.json'), 'utf8'))
-    const ring = JSON.parse(fs.readFileSync(path.join(bundle, 'agents/contracts/reasonix-trusted-public-keys.json'), 'utf8'))
+    const trust = proof.admissionTrust
+    let trustDirectory = bundle, evidenceFile = 'agents/contracts/reasonix-live-conformance-evidence.json', keysFile = 'agents/contracts/reasonix-trusted-public-keys.json'
+    if (trust?.kind === 'explicit-private-import') {
+      const root = path.resolve(bundle, '../../..')
+      const expected = path.join(root, '.autoprompt-private', 'conformance', 'v2', 'reasonix')
+      if (path.resolve(trust.directory || '') !== expected || !/^[a-f0-9]{64}$/.test(trust.evidenceSha256 || '') ||
+          !/^[a-f0-9]{64}$/.test(trust.keyRingSha256 || '') || !/^[a-f0-9]{64}$/.test(trust.conformanceRequestSha256 || '')) {
+        throw new OperationalError('Reasonix imported admission trust binding is invalid')
+      }
+      let current = root
+      for (const component of path.relative(root, expected).split(path.sep)) {
+        current = path.join(current, component)
+        const item = fs.lstatSync(current)
+        if (!item.isDirectory() || item.isSymbolicLink()) throw new OperationalError('Reasonix imported admission trust path is not physical')
+      }
+      trustDirectory = expected; evidenceFile = 'evidence.json'; keysFile = 'trusted-public-keys.json'
+    } else if (trust?.kind !== 'shipped-release' || trust.directory !== bundle) throw new OperationalError('Reasonix admission trust binding is missing')
+    const evidenceBytes = fs.readFileSync(path.join(trustDirectory, evidenceFile)), keyBytes = fs.readFileSync(path.join(trustDirectory, keysFile))
+    const digest = value => crypto.createHash('sha256').update(value).digest('hex')
+    if (digest(evidenceBytes) !== trust.evidenceSha256 || digest(keyBytes) !== trust.keyRingSha256) throw new OperationalError('Reasonix admission trust changed after setup')
+    const releaseEvidence = JSON.parse(evidenceBytes)
+    const ring = JSON.parse(keyBytes)
     const attestation = releaseEvidence.attestation
     const identity = proof.runtimeIdentityBody
-    const key = (ring.keys || []).find(entry => entry.keyId === attestation?.signature?.keyId)
-    if (releaseEvidence.status !== 'passed' || !key || !identity || identity.provider !== 'reasonix' ||
+    const matchingKeys = (ring.keys || []).filter(entry => entry?.keyId === attestation?.signature?.keyId)
+    const key = matchingKeys[0]
+    if (releaseEvidence.status !== 'passed' || matchingKeys.length !== 1 || key.independent !== true || key.issuer !== attestation?.issuer ||
+        !Array.isArray(key.providers) || !key.providers.includes('reasonix') || /autoprompt.*activation/i.test(attestation?.issuer || '') || !identity || identity.provider !== 'reasonix' ||
         identity.platform !== process.platform || identity.architecture !== process.arch ||
         attestation.providerId !== 'reasonix' || attestation.result !== 'supported' ||
         attestation.verificationMethod !== 'live-conformance-suite' || attestation.signature.algorithm !== 'ed25519' ||
@@ -926,6 +948,9 @@ function verifyReasonixEnforcementProof(repository, environment, proof) {
         attestation.runtimeIdentityHash !== crypto.createHash('sha256').update(JSON.stringify(identity)).digest('hex') ||
         !['isolation', 'privateSkillRoot', 'isolatedChecking', 'processOwnership'].every(name => attestation.verifiedCapabilities?.includes(name))) {
       throw new OperationalError('Reasonix enforcement lacks independently verified native capability evidence')
+    }
+    if (trust.kind === 'explicit-private-import' && attestation.providerAdmissionSha256 !== trust.conformanceRequestSha256) {
+      throw new OperationalError('Reasonix imported certificate is not bound to its reviewed request')
     }
     const signed = JSON.parse(JSON.stringify(attestation))
     delete signed.signature.value
@@ -953,6 +978,161 @@ function verifyReasonixEnforcementProof(repository, environment, proof) {
     provider: channel(true, failures.length === 0, evidence, failures),
     shell: channel(true, failures.length === 0, evidence, failures),
   }
+}
+
+const NATIVE_V2_PROVIDERS = Object.freeze(['claude', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek'])
+
+function verifyHarnessV2EnforcementProof(repository, environment, proof) {
+  const evidence = { provider: proof.provider, profilePath: proof.profilePath }
+  const failures = []
+  try {
+    const provider = proof.provider
+    if (proof.schemaVersion !== 1 || !NATIVE_V2_PROVIDERS.includes(provider)) throw new OperationalError('Unsupported native enforcement proof')
+    const profile = path.resolve(proof.profilePath)
+    const privateBytes = file => {
+      const item = fs.lstatSync(file)
+      if (!item.isFile() || item.isSymbolicLink() || item.nlink !== 1 || fs.realpathSync.native(file) !== file) {
+        throw new OperationalError('Native proof resources must be regular files without linked ancestors')
+      }
+      return fs.readFileSync(file)
+    }
+    const item = fs.lstatSync(profile)
+    if (pathEqual(profile, repository.worktreeRoot) || pathWithin(repository.worktreeRoot, profile) ||
+        (process.platform !== 'win32' && ((item.mode & 0o077) !== 0 || (process.getuid && item.uid !== process.getuid())))) {
+      throw new OperationalError('Native enforcement profile must be private, owned, and outside the worktree')
+    }
+    const hash = value => crypto.createHash('sha256').update(value).digest('hex')
+    const bytes = privateBytes(profile)
+    if (hash(bytes) !== proof.profileSha256 || proof.checkerProfilePath !== profile ||
+        proof.checkerProfileSha256 !== proof.profileSha256 || proof.selectedProfile !== 'autoprompt' ||
+        proof.checkerSelectedProfile !== 'autoprompt-checker' || proof.strictConfig !== true) {
+      throw new OperationalError('Native enforcement proof does not bind the exact writer and checker profiles')
+    }
+    const policy = JSON.parse(bytes)
+    const expected = { provider, contractVersion: '2.0.0', commandSandbox: 'enforce', commandNetwork: false,
+      configurationIsolation: 'private-home-and-empty-launch-directory', implicitSkills: false,
+      externalTools: false, nestedDispatch: false }
+    if (Object.keys(policy).length !== Object.keys(expected).length ||
+        Object.entries(expected).some(([key, value]) => policy[key] !== value)) throw new OperationalError('Native enforcement profile omits a required channel')
+    const activationRoot = path.dirname(profile)
+    if (!environment.GH_CONFIG_DIR || !environment.GIT_CONFIG_GLOBAL ||
+        !pathEqual(path.dirname(environment.GH_CONFIG_DIR), activationRoot) ||
+        !pathEqual(path.dirname(environment.GIT_CONFIG_GLOBAL), activationRoot)) {
+      throw new OperationalError('Native profile and isolated credential paths do not share their activation root')
+    }
+
+    // Reopen independently issued release evidence. A profile or a locally
+    // computed hash cannot certify that a native provider enforces a sandbox.
+    // Keep this verifier self-contained: Codex's runtime closure must not gain
+    // a dependency on any other provider's executable transport.
+    const bundle = path.resolve(__dirname, '..')
+    const installRoot = path.resolve(bundle, '../../..')
+    const evidencePath = 'scripts/harness-v2-trust/evidence.json'
+    const keyPath = 'scripts/harness-v2-trust/trusted-public-keys.json'
+    const trust = proof.admissionTrust
+    let trustDirectory = bundle, trustEvidence = evidencePath, trustKeys = keyPath
+    if (trust?.kind === 'explicit-private-import') {
+      const expected = path.join(installRoot, '.autoprompt-private', 'conformance', 'v2', provider)
+      if (typeof trust.directory !== 'string' || path.resolve(trust.directory) !== expected ||
+          !/^[a-f0-9]{64}$/.test(trust.evidenceSha256 || '') || !/^[a-f0-9]{64}$/.test(trust.keyRingSha256 || '') ||
+          !/^[a-f0-9]{64}$/.test(trust.conformanceRequestSha256 || '')) {
+        throw new OperationalError('Imported native conformance trust binding is invalid')
+      }
+      // The imported authority material is deliberately outside the bundle and
+      // below the private provider root. Reopen each component to reject a
+      // source-controlled symlink or a replacement after activation setup.
+      let current = installRoot
+      for (const component of path.relative(installRoot, expected).split(path.sep)) {
+        current = path.join(current, component)
+        const item = fs.lstatSync(current)
+        if (!item.isDirectory() || item.isSymbolicLink()) throw new OperationalError('Imported native conformance trust path is not private and physical')
+      }
+      trustDirectory = expected; trustEvidence = 'evidence.json'; trustKeys = 'trusted-public-keys.json'
+    } else if (trust?.kind !== 'shipped-release' || trust.directory !== bundle ||
+      !/^[a-f0-9]{64}$/.test(trust?.evidenceSha256 || '') || !/^[a-f0-9]{64}$/.test(trust?.keyRingSha256 || '')) {
+      throw new OperationalError('Native admission trust binding is missing or invalid')
+    }
+    const evidenceBytes = privateBytes(path.join(trustDirectory, trustEvidence))
+    const keyBytes = privateBytes(path.join(trustDirectory, trustKeys))
+    if (hash(evidenceBytes) !== trust.evidenceSha256 || hash(keyBytes) !== trust.keyRingSha256) {
+      throw new OperationalError('Native conformance trust changed after admission')
+    }
+    const releaseEvidence = JSON.parse(evidenceBytes)
+    const ring = JSON.parse(keyBytes)
+    const identity = proof.runtimeIdentityBody
+    const required = ['isolation', 'topologyEnforcement', 'privateSkillRoot', 'eventStreaming', 'toolOutputCapture',
+      'stableChildIdentity', 'sameContextContinuation', 'cancellation', 'isolatedChecking', 'processOwnership', 'modelRouting']
+    if (!identity || identity.provider !== provider || identity.platform !== process.platform ||
+        identity.architecture !== process.arch || identity.executablePath !== proof.nativeExecutable ||
+        !path.isAbsolute(proof.nativeExecutable || '') || !identity.files || Array.isArray(identity.files) ||
+        !Object.keys(identity.files).length || !/^[a-f0-9]{64}$/.test(identity.executableSha256 || '') ||
+        releaseEvidence.schemaVersion !== 'harness-v2-live-conformance.v1' || !Array.isArray(releaseEvidence.records) ||
+        ring.schemaVersion !== 'harness-v2-trusted-keys.v1' || !Array.isArray(ring.keys)) {
+      throw new OperationalError('Native enforcement lacks an exact runtime and independent conformance records')
+    }
+    const identityHash = hash(JSON.stringify(identity))
+    const matches = releaseEvidence.records.filter(record => record.provider === provider && record.status === 'passed' &&
+      record.attestation?.runtimeIdentityHash === identityHash)
+    if (matches.length !== 1) throw new OperationalError('Native enforcement requires exactly one matching independent conformance record')
+    const record = matches[0], attestation = record.attestation
+    const keys = ring.keys.filter(key => key.keyId === attestation.signature?.keyId)
+    const key = keys[0]
+    if (keys.length !== 1 || key.independent !== true || key.issuer !== attestation.issuer ||
+        !Array.isArray(key.providers) || !key.providers.includes(provider) || /autoprompt.*activation/i.test(attestation.issuer || '') ||
+        attestation.providerId !== provider || attestation.result !== 'supported' ||
+        attestation.verificationMethod !== 'live-conformance-suite' || attestation.signature?.algorithm !== 'ed25519' ||
+        typeof record.activationNonce !== 'string' || attestation.activationNonce !== record.activationNonce ||
+        !(Date.parse(attestation.issuedAt) <= Date.now()) || !(Date.parse(attestation.expiresAt) > Date.now()) ||
+        !required.every(capability => attestation.verifiedCapabilities?.includes(capability))) {
+      throw new OperationalError('Native capability attestation is incomplete, expired, or from an unauthorized issuer')
+    }
+    if (trust.kind === 'explicit-private-import' && attestation.providerAdmissionSha256 !== trust.conformanceRequestSha256) {
+      throw new OperationalError('Imported native conformance certificate is not bound to its reviewed request')
+    }
+    const signed = JSON.parse(JSON.stringify(attestation)); delete signed.signature.value
+    const stable = value => Array.isArray(value) ? value.map(stable) : value && typeof value === 'object'
+      ? Object.fromEntries(Object.keys(value).sort().map(key => [key, stable(value[key])])) : value
+    if (!crypto.verify(null, Buffer.from(JSON.stringify(stable(signed))), key.publicKeyPem, Buffer.from(attestation.signature.value, 'base64url'))) {
+      throw new OperationalError('Native capability signature is invalid')
+    }
+    const exeBefore = fs.lstatSync(proof.nativeExecutable, { bigint: true })
+    if (!exeBefore.isFile() || exeBefore.isSymbolicLink() || fs.realpathSync.native(proof.nativeExecutable) !== proof.nativeExecutable) {
+      throw new OperationalError('Native executable is not a canonical regular file')
+    }
+    // npm can hard-link a legitimate native executable. Bind its complete bytes
+    // and file identity, while private runtime resources retain the one-link rule.
+    const fd = fs.openSync(proof.nativeExecutable, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0))
+    try {
+      const same = value => ['dev', 'ino', 'size', 'mtimeNs', 'ctimeNs'].every(field => value[field] === exeBefore[field])
+      if (!same(fs.fstatSync(fd, { bigint: true }))) throw new OperationalError('Native executable changed while opening')
+      const digest = crypto.createHash('sha256'), chunk = Buffer.allocUnsafe(1024 * 1024)
+      let length
+      while ((length = fs.readSync(fd, chunk, 0, chunk.length, null))) digest.update(chunk.subarray(0, length))
+      if (digest.digest('hex') !== identity.executableSha256 || !same(fs.fstatSync(fd, { bigint: true })) ||
+          !same(fs.lstatSync(proof.nativeExecutable, { bigint: true }))) throw new OperationalError('Native executable changed')
+    } finally { fs.closeSync(fd) }
+    const root = installRoot
+    const receipt = JSON.parse(privateBytes(path.join(root, `.autoprompt-${provider}-v2.json`)))
+    if (receipt.provider !== provider || receipt.contractVersion !== '2.0.0' || receipt.schemaVersion !== 2 ||
+        hash(JSON.stringify(receipt.files)) !== receipt.payloadDigest ||
+        path.basename(bundle) !== `${provider}-v2.0.0-${receipt.payloadDigest.slice(0, 16)}`) {
+      throw new OperationalError('Native capability evidence is not bound to its installed receipt')
+    }
+    const files = Object.fromEntries(Object.entries(receipt.files).filter(([file]) => file !== evidencePath && file !== keyPath)
+      .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0))
+    if (JSON.stringify(files) !== JSON.stringify(identity.files)) throw new OperationalError('Native runtime identity omits or changes receipt-bound files')
+    for (const [relative, digest] of Object.entries(receipt.files)) {
+      const file = path.resolve(bundle, relative)
+      if (path.isAbsolute(relative) || relative.includes('\\') || relative.includes(':') ||
+          relative.split('/').some(part => !part || part === '.' || part === '..') || !pathWithin(bundle, file) ||
+          !/^[a-f0-9]{64}$/.test(digest) || hash(privateBytes(file)) !== digest) {
+        throw new OperationalError('Native enforcement runtime changed or contains an invalid path')
+      }
+    }
+    evidence.profileSha256 = proof.profileSha256
+    evidence.runtimeIdentityHash = identityHash
+  } catch (error) { failures.push(residual('ENFORCEMENT_PROOF_INVALID', error.message)) }
+  return { provider: channel(true, failures.length === 0, evidence, failures), shell: channel(true, failures.length === 0, evidence, failures) }
 }
 
 function inspect(repository, expectedBranch, environment = process.env, options = {}) {
@@ -1035,7 +1215,9 @@ function inspect(repository, expectedBranch, environment = process.env, options 
   const githubCli = inspectGithubCliBoundary(repository, environment)
   const proof = options.enforcementProof?.provider === 'reasonix'
     ? verifyReasonixEnforcementProof(repository, environment, options.enforcementProof)
-    : verifyCodexEnforcementProof(repository, environment, options.enforcementProof)
+    : NATIVE_V2_PROVIDERS.includes(options.enforcementProof?.provider)
+      ? verifyHarnessV2EnforcementProof(repository, environment, options.enforcementProof)
+      : verifyCodexEnforcementProof(repository, environment, options.enforcementProof)
   const channels = {
     repositoryGitBarrier: channel(true, repositoryOk, {
       checks: checks.map(item => ({ id: item.id, status: item.status })),

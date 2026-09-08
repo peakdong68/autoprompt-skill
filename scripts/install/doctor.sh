@@ -24,6 +24,8 @@ if [ ! -f "$LIB" ]; then
 fi
 # shellcheck source=/dev/null
 . "$LIB"
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/harness-v2.sh"
 
 CLIENTS_ALL=(claude codex opencode kilo vscode prime omp deepseek reasonix)
 
@@ -364,6 +366,7 @@ legacy_codex_installed() {
 # extras completeness (full runtime set for claude/codex).
 probe_client() {
   local client="$1"
+  if is_harness_v2 "$client"; then probe_harness_v2 "$client"; return; fi
   if [ "$client" = reasonix ]; then
     local root detected=no installed=no verifies=no version=- reason=not-installed extras=missing
     root="$(config_root reasonix)"

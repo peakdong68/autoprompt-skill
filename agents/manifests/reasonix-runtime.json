@@ -62,6 +62,7 @@
     "skills/ap-worker/SKILL.md",
     "workflow/admission.js",
     "workflow/native.js",
+    "workflow/package-removal.js",
     "workflow/transport.js"
   ],
   "sha256": {
@@ -122,9 +123,10 @@
     "skills/ap-verifier/SKILL.md": "a9e988145650f07f6bbe72b61518f31608f510f5e32db5fa27e36885fb0321b1",
     "skills/ap-work-group-manager/SKILL.md": "ba65fcda203d31532a38562b8fdf5a61de5925b9bf510d967d17703088ec8220",
     "skills/ap-worker/SKILL.md": "63436a1af7f21bb038bd060351465ec3f0d51499337c60df515b96ac32da192b",
-    "workflow/admission.js": "70df561cdec7360eb8f7d09e70f2f90f8a44f24366bd2e5f2f0f9e9ce42ab4cb",
-    "workflow/native.js": "01b6e4d7bdae56e88a44f6534ba119486140b79f9a8c00135e29607b37a4c51f",
-    "workflow/transport.js": "b380a5b4470bfc036bcbb64ecd9167a27cb1df5dc9585cdc9fe0398255522577"
+    "workflow/admission.js": "9890e7fa1044a6082839d8d2065121949a1f657278663cbdc0e36ecc40c13008",
+    "workflow/native.js": "485d24b9d97cd81d3ff8419a1bdfea318c22fbb0891b9f60bc89b1d26927725f",
+    "workflow/package-removal.js": "80fb09f041c6b774acbe365b3fdd7d787f73559afb132977f937391f2a8267db",
+    "workflow/transport.js": "c3e533ba48a493fc5595bee14402462f47f8678012f8bea981a959e62c9da925"
   },
   "contractVersion": "2.0.0",
   "rolePolicy": "role-policy.json",

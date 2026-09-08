@@ -73,14 +73,14 @@ test('external supervisors are packaged and Codex v2 scope budgets are event-dri
     } else {
       assert.deepEqual(ports, [], `${provider} must not inherit the external scope-budget supervisor`)
       assert.deepEqual(budgetRuntime, [], `${provider} must not package the external scope-budget runtime`)
-      for (const file of manifest.files) {
-        const source = fs.readFileSync(path.join(ROOT, manifest.sourceRoot, file), 'utf8')
-        assert.doesNotMatch(
-          source,
-          /AUTOPROMPT_SCOPE_(?:SOFT|HARD|GRACE)|SCOPE-(?:BUDGET-BREACH|CONVERGE-REQUEST)|MAX_SCOPE_RESETS/,
-          `${provider}:${file}`,
-        )
-      }
+      const skillFile = provider === 'prime' ? 'skills/autoprompt/SKILL.md' : 'SKILL.md'
+      const skill = fs.readFileSync(path.join(ROOT, manifest.sourceRoot, skillFile), 'utf8')
+      assert.match(skill, /durable disk hints, not live steering/, provider)
+      assert.match(skill, /AUTOPROMPT_RESUME=1/, provider)
+      const packaging = provider === 'reasonix' ? require('../../scripts/reasonix-package.cjs') : require('../../scripts/harness-v2-package.cjs')
+      const inventory = provider === 'reasonix' ? packaging.sourceInventory() : packaging.sourceInventory(provider)
+      assert.ok(inventory.files['agents/codex/workflow/phase-budget.js'], provider)
+      assert.ok(inventory.files[`scripts/${provider === 'reasonix' ? 'reasonix' : 'harness-v2'}-configure.cjs`], provider)
     }
   }
 })

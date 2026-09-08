@@ -1,0 +1,5 @@
+{
+  "schemaVersion": "harness-v2-live-conformance.v1",
+  "records": [],
+  "note": "Local parser, installation, and native-wire tests do not issue production capability attestations. Records must bind an independently verified runtime and executable."
+}

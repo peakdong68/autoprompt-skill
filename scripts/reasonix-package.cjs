@@ -6,12 +6,41 @@ const os = require('node:os')
 const path = require('node:path')
 const { RootGuard, acquire, release } = require('./install/operation-lock.cjs')
 const { ReasonixError, readBound, privateDirectory, sha256, writePrivate } = require('../agents/reasonix/workflow/native.js')
+const removal = require('../agents/reasonix/workflow/package-removal.js')
 const ROOT = path.resolve(__dirname, '..')
 const RECEIPT = '.autoprompt-reasonix-v2.json'
 const SHIM = '---\nname: autoprompt\ndescription: "Start explicitly requested Autoprompt v2 work in Reasonix."\ninvocation: manual\n---\n\nRun `autoprompt activate reasonix --target <absolute-project-path> -- <mission>` in a terminal. The launcher starts the private v2 controller. Loading this skill alone never starts or resumes work.\n'
 const TREES = ['agents/reasonix', 'agents/codex', 'agents/contracts', 'node_modules/@iarna/toml']
 const BUNDLE_PACKAGE = '{"name":"@autoprompt-skill/reasonix-runtime","version":"2.0.0","private":true,"type":"commonjs"}\n'
-const FILES = ['scripts/local-only-safety.cjs', 'scripts/reasonix-package.cjs', 'scripts/reasonix-configure.cjs', 'scripts/install/operation-lock.cjs']
+const FILES = ['scripts/local-only-safety.cjs', 'scripts/reasonix-package.cjs', 'scripts/reasonix-configure.cjs', 'scripts/install/operation-lock.cjs',
+  'scripts/harness-v2-tool-boundary.cjs', 'scripts/harness-v2-tool-server.cjs', 'scripts/harness-v2-controlled-tools.cjs',
+  'scripts/harness-v2-conformance.cjs', 'scripts/harness-v2-local-admission.cjs', 'scripts/harness-v2-package.cjs', 'scripts/harness-v2-native.cjs']
+const CONFORMANCE_ASSETS = ['tests/source/reasonix-controlled-native.test.cjs']
+
+function absoluteRoot(root) {
+  if (typeof root !== 'string' || !path.isAbsolute(root) || /[\0\r\n]/.test(root) || path.resolve(root) === path.parse(root).root) {
+    throw new ReasonixError('INSTALL_ROOT_INVALID', 'Use an absolute provider config root below the filesystem root')
+  }
+  return path.resolve(root)
+}
+function exists(file) { try { fs.lstatSync(file); return true } catch (error) { if (error.code === 'ENOENT') return false; throw error } }
+function launcher(root) {
+  root = absoluteRoot(root)
+  const posix = `'${root.replaceAll("'", "'\\''")}'`, powershell = `'${root.replaceAll("'", "''")}'`
+  return `---\nname: autoprompt\ndescription: "Start explicitly requested Autoprompt v2 work in Reasonix."\ninvocation: manual\n---\n\nThis installation is bound to ${JSON.stringify(root)}. Pass that exact config root with --root; never substitute a default directory.\n\nBash:\n\n\`\`\`sh\nautoprompt activate reasonix --root ${posix} --target <absolute-project-path> -- <mission>\n\`\`\`\n\nPowerShell:\n\n\`\`\`powershell\nautoprompt activate reasonix --root ${powershell} --target <absolute-project-path> -- <mission>\n\`\`\`\n\nThe angle-bracket fields are placeholders. Preserve the exact user request as arguments after --, not executable shell text. The launcher starts the private v2 controller. Loading this skill alone never starts or resumes work.\n`
+}
+function assertPrivateDiscovery(root, guard) {
+  const legacy = Object.keys(require('../agents/reasonix/legacy-v1-hashes.json'))
+  const roles = Object.keys(require('../agents/reasonix/role-policy.json').physical_roles)
+  const candidates = new Set([...legacy, ...roles.flatMap(role => [`skills/${role}/SKILL.md`, `skills/autoprompt/skills/${role}/SKILL.md`])])
+  candidates.delete('skills/autoprompt/SKILL.md')
+  for (const relative of candidates) {
+    const file = path.join(root, relative)
+    if (!exists(file)) continue
+    guard.assertExisting(file)
+    throw new ReasonixError('PAYLOAD_INVALID', `Public legacy or controller role was reintroduced: ${relative}`)
+  }
+}
 
 function walk(directory, prefix = '') {
   return fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).flatMap(entry => {
@@ -30,7 +59,11 @@ function sourcePath(root, file) {
 }
 
 function sourceInventory(root = ROOT) {
-  const files = [...FILES, ...TREES.flatMap(tree => walk(sourcePath(root, tree)).map(file => `${tree}/${file}`))].sort()
+  const assets = CONFORMANCE_ASSETS.filter(file => exists(sourcePath(root, file)))
+  if (path.resolve(root) === ROOT && assets.length !== CONFORMANCE_ASSETS.length) {
+    throw new ReasonixError('PAYLOAD_INVALID', 'Published Reasonix runtime is missing a required native conformance asset')
+  }
+  const files = [...FILES, ...assets, ...TREES.flatMap(tree => walk(sourcePath(root, tree)).map(file => `${tree}/${file}`))].sort()
   const hashes = Object.fromEntries(files.map(file => [file, sha256(readBound(sourcePath(root, file)))]))
   const digest = sha256(JSON.stringify(hashes))
   return { schemaVersion: 2, provider: 'reasonix', contractVersion: '2.0.0', payloadGeneration: `reasonix-v2.0.0-${digest.slice(0, 16)}`, payloadDigest: digest, files: hashes }
@@ -45,12 +78,12 @@ function readReceipt(root) {
   const receipt = JSON.parse(readBound(path.join(root, RECEIPT)).toString('utf8'))
   if (receipt.schemaVersion !== 2 || receipt.provider !== 'reasonix' ||
       !/^reasonix-v2\.0\.0-[a-f0-9]{16}$/.test(receipt.payloadGeneration || '') ||
-      !receipt.files || sha256(JSON.stringify(receipt.files)) !== receipt.payloadDigest ||
+      !receipt.files || typeof receipt.files !== 'object' || Array.isArray(receipt.files) || !Object.keys(receipt.files).length || sha256(JSON.stringify(receipt.files)) !== receipt.payloadDigest ||
       receipt.payloadGeneration !== `reasonix-v2.0.0-${receipt.payloadDigest.slice(0, 16)}`) {
     throw new ReasonixError('PAYLOAD_INVALID', 'Reasonix installation receipt is invalid')
   }
-  for (const file of Object.keys(receipt.files)) {
-    if (path.isAbsolute(file) || file.includes('\\') || file.split('/').some(part => !part || part === '.' || part === '..')) {
+  for (const [file, hash] of Object.entries(receipt.files)) {
+    if (path.isAbsolute(file) || /[\\:\0\r\n]/.test(file) || file.split('/').some(part => !part || part === '.' || part === '..') || !/^[a-f0-9]{64}$/.test(hash)) {
       throw new ReasonixError('PAYLOAD_INVALID', 'Reasonix receipt path escapes the bundle')
     }
   }
@@ -59,8 +92,10 @@ function readReceipt(root) {
 
 function bundlePath(root, receipt) { return path.join(root, '.autoprompt-private', 'bundles', receipt.payloadGeneration) }
 
-function verify(root) {
+function verify(root, { allowLegacyShim = false } = {}) {
+  root = absoluteRoot(root)
   const guard = new RootGuard(root)
+  assertPrivateDiscovery(root, guard)
   const receipt = readReceipt(root)
   const bundle = bundlePath(root, receipt)
   guard.assertExisting(bundle, 'directory')
@@ -72,30 +107,42 @@ function verify(root) {
     if (sha256(readBound(target)) !== hash) throw new ReasonixError('PAYLOAD_INVALID', `Reasonix payload changed: ${file}`)
   }
   const shim = guard.assertExisting(path.join(root, 'skills', 'autoprompt', 'SKILL.md'))
-  if (readBound(shim).toString('utf8') !== SHIM) throw new ReasonixError('PAYLOAD_INVALID', 'Reasonix entry skill changed')
-  return { status: 'verified', root, bundle, ...receipt }
+  const bytes = readBound(shim).toString('utf8')
+  const legacyShim = bytes === SHIM
+  if (bytes !== launcher(root) && !(allowLegacyShim && legacyShim)) throw new ReasonixError('PAYLOAD_INVALID', 'Reasonix entry skill changed or lacks its config-root binding; reinstall to migrate the original v2 launcher')
+  return { status: 'verified', root, bundle, ...receipt, ...(legacyShim ? { legacyShim: true } : {}) }
 }
 
 function install(root, sourceRoot = ROOT) {
-  if (root === path.parse(root).root) throw new ReasonixError('INSTALL_ROOT_INVALID', 'Cannot install at a filesystem root')
+  root = absoluteRoot(root)
   privateDirectory(root)
   const guard = new RootGuard(root)
   const lease = acquire(root, 'install-reasonix-v2', { guard })
   try {
+    removal.recover(root)
     const receipt = sourceInventory(sourceRoot)
-    const existing = fs.existsSync(path.join(root, RECEIPT)) ? verify(root) : null
-    if (existing?.payloadDigest === receipt.payloadDigest) return existing
+    const existing = exists(path.join(root, RECEIPT)) ? verify(root, { allowLegacyShim: true }) : null
+    if (existing?.payloadDigest === receipt.payloadDigest && !existing.legacyShim) return existing
     assertNoResumableActivation(root)
     const shim = path.join(root, 'skills', 'autoprompt', 'SKILL.md')
+    if (existing?.payloadDigest === receipt.payloadDigest && existing.legacyShim) {
+      const temporary = `${shim}.migrate-${require('node:crypto').randomUUID()}`
+      try {
+        writePrivate(temporary, launcher(root))
+        if (readBound(guard.assertExisting(shim)).toString('utf8') !== SHIM) throw new ReasonixError('INSTALL_CONFLICT', 'Legacy entry changed during migration')
+        fs.renameSync(temporary, shim)
+      } finally { if (exists(temporary)) fs.unlinkSync(guard.assertExisting(temporary)) }
+      return verify(root)
+    }
     const legacy = require('../agents/reasonix/legacy-v1-hashes.json')
     const migrate = []
     for (const [relative, hash] of Object.entries(legacy)) {
       const file = path.join(root, relative)
-      if (!fs.existsSync(file)) continue
+      if (!exists(file)) continue
       guard.assertExisting(file)
       const bytes = readBound(file).toString('utf8').replaceAll('\r\n', '\n')
-      if (file === shim && bytes === SHIM) continue
-      if (sha256(bytes) !== hash) throw new ReasonixError('INSTALL_CONFLICT', `Changed legacy file requires manual migration: ${file}`)
+      if (existing && file === shim && (bytes === SHIM || bytes === launcher(root))) continue
+      if (sha256(bytes) !== hash && !(file === shim && bytes === SHIM)) throw new ReasonixError('INSTALL_CONFLICT', `Changed legacy file requires manual migration: ${file}`)
       const quarantined = path.join(root, '.autoprompt-private', 'legacy-v1', path.relative(root, file))
       if (fs.existsSync(quarantined)) throw new ReasonixError('INSTALL_CONFLICT', 'Legacy quarantine already exists')
       migrate.push(file)
@@ -105,9 +152,12 @@ function install(root, sourceRoot = ROOT) {
     const stage = `${bundle}.stage-${require('node:crypto').randomUUID()}`
     const temporary = path.join(root, `${RECEIPT}.tmp-${require('node:crypto').randomUUID()}`)
     const previousReceipt = existing ? readBound(path.join(root, RECEIPT)) : null
+    const previousShim = existing ? readBound(shim) : null
+    const temporaryShim = `${shim}.tmp-${require('node:crypto').randomUUID()}`
     const moved = []
     let published = false
     let shimCreated = false
+    let shimReplaced = false
     let receiptPublished = false
     let verified
     try {
@@ -132,7 +182,10 @@ function install(root, sourceRoot = ROOT) {
         fs.renameSync(file, destination)
         moved.push({ file, destination })
       }
-      if (!fs.existsSync(shim)) { writePrivate(shim, SHIM); shimCreated = true }
+      if (existing) {
+        if (!readBound(guard.assertExisting(shim)).equals(previousShim)) throw new ReasonixError('INSTALL_CONFLICT', 'Entry changed during upgrade')
+        writePrivate(temporaryShim, launcher(root)); fs.renameSync(temporaryShim, shim); shimReplaced = true
+      } else if (!exists(shim)) { writePrivate(shim, launcher(root)); shimCreated = true }
       writePrivate(temporary, `${JSON.stringify(receipt, null, 2)}\n`)
       fs.renameSync(temporary, path.join(root, RECEIPT))
       receiptPublished = true
@@ -146,6 +199,8 @@ function install(root, sourceRoot = ROOT) {
           } else fs.unlinkSync(guard.assertExisting(path.join(root, RECEIPT)))
         }
         if (fs.existsSync(temporary)) fs.unlinkSync(guard.assertExisting(temporary))
+        if (exists(temporaryShim)) fs.unlinkSync(guard.assertExisting(temporaryShim))
+        if (shimReplaced) { writePrivate(temporaryShim, previousShim); fs.renameSync(temporaryShim, shim) }
         if (shimCreated) fs.unlinkSync(guard.assertExisting(shim))
         for (const { file, destination } of moved.reverse()) {
           if (fs.existsSync(file)) throw new ReasonixError('INSTALL_CONFLICT', `Cannot restore legacy file over a new file: ${file}`)
@@ -166,7 +221,7 @@ function install(root, sourceRoot = ROOT) {
       }
       throw error
     }
-    if (existing) removeBundle(existing)
+    if (existing) removal.retire(existing)
     return verified
   } finally { release(lease) }
 }
@@ -181,35 +236,21 @@ function assertNoResumableActivation(root) {
     if (!fs.existsSync(recordFile)) continue
     guard.assertExisting(recordFile)
     const record = JSON.parse(readBound(recordFile))
-    if (record.status === 'active' || record.outcome === 'WAITING_USER') throw new ReasonixError('ACTIVE_RUN', 'Finish or cancel the resumable Reasonix run before replacing its runtime')
+    if ((record.providerId || record.provider) && (record.providerId || record.provider) !== 'reasonix') continue
+    if (!record.status || ['active', 'running', 'waiting', 'resumable'].includes(record.status) || record.outcome === 'WAITING_USER') throw new ReasonixError('ACTIVE_RUN', 'Finish or cancel the resumable Reasonix run before replacing its runtime')
   }
-}
-
-function removeBundle(installed) {
-  const guard = new RootGuard(installed.root)
-  for (const [file, hash] of Object.entries(installed.files)) {
-    const target = guard.assertExisting(path.join(installed.bundle, file))
-    if (sha256(readBound(target)) !== hash) throw new ReasonixError('PAYLOAD_INVALID', 'Old bundle changed before removal')
-  }
-  for (const file of Object.keys(installed.files)) fs.unlinkSync(guard.assertExisting(path.join(installed.bundle, file)))
-  fs.unlinkSync(guard.assertExisting(path.join(installed.bundle, 'package.json')))
-  const removeEmpty = directory => {
-    guard.assertExisting(directory, 'directory')
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) if (entry.isDirectory()) removeEmpty(path.join(directory, entry.name))
-    if (!fs.readdirSync(directory).length) fs.rmdirSync(directory)
-  }
-  removeEmpty(installed.bundle)
 }
 
 function uninstall(root) {
-  if (!fs.existsSync(path.join(root, RECEIPT))) return { status: 'not-installed', root }
+  root = absoluteRoot(root)
+  if (!exists(root)) return { status: 'not-installed', root }
   const lease = acquire(root, 'uninstall-reasonix-v2')
   try {
+    removal.recover(root)
+    if (!exists(path.join(root, RECEIPT))) return { status: 'not-installed', root }
     const installed = verify(root)
     assertNoResumableActivation(root)
-    removeBundle(installed)
-    fs.unlinkSync(path.join(root, 'skills', 'autoprompt', 'SKILL.md'))
-    fs.unlinkSync(path.join(root, RECEIPT))
+    removal.retire(installed, { includePublic: true })
     return { status: 'uninstalled', root, runHistoryRetained: true }
   } finally { release(lease) }
 }
@@ -231,4 +272,4 @@ if (require.main === module) {
   try { const result = run(); process.stdout.write(`${JSON.stringify({ status: result.status, root: result.root, payloadGeneration: result.payloadGeneration })}\n`) }
   catch (error) { process.stderr.write(`${error.code || 'RUNTIME_FAILURE'}: ${error.message}\n`); process.exitCode = 1 }
 }
-module.exports = { RECEIPT, ROOT, SHIM, bundlePath, install, readReceipt, resolveRoot, run, sourceInventory, uninstall, verify, walk }
+module.exports = { RECEIPT, ROOT, SHIM, launcher, bundlePath, install, readReceipt, resolveRoot, run, sourceInventory, uninstall, verify, walk }

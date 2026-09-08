@@ -16,6 +16,7 @@ function npmCliPath() {
     process.env.npm_execpath,
     path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
     path.resolve(path.dirname(process.execPath), '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    '/usr/share/nodejs/npm/bin/npm-cli.js',
   ].filter(Boolean)
   const candidate = candidates.find(file => fs.existsSync(file))
   assert.ok(candidate, `could not locate npm CLI; checked ${candidates.join(', ')}`)

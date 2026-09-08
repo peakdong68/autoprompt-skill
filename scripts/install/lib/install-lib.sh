@@ -25,6 +25,10 @@
 
 [ -n "${AUTOPROMPT_INSTALL_LIB_SH:-}" ] && return 0
 AUTOPROMPT_INSTALL_LIB_SH=1
+if ! command -v python >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+  # Python 3 need not have a `python` alias. Do not change the user's PATH.
+  python() { command python3 "$@"; }
+fi
 AUTOPROMPT_INSTALL_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 
 declare -A AUTOPROMPT_CLIENT_BIN=(
@@ -2284,6 +2288,8 @@ _idem_reconcile_retired_codex_files() {
   local recorded_hash live_hash reason
   local -n current_targets_ref="$targets_name"
   local -a prior_files=("${AUTOPROMPT_RECEIPT_FILES[@]:-}")
+  local -a codex_v2_receipt_bundles=()
+  _codex_v2_receipt_bundle_roots "$root" prior_files codex_v2_receipt_bundles || return 94
   for file in "${prior_files[@]}"; do
     [ -n "$file" ] || continue
     _uninstall_provider_owns_path "$root" codex "$file" || continue
@@ -4442,8 +4448,67 @@ _legacy_provider_owned_path() {
   return 1
 }
 
+# Bind private ownership to this operation's receipt, not the checkout's current
+# generation or a directory scan. A missing/drifted embedded manifest still has
+# its recorded fingerprint: per-file removal below preserves the changed bytes.
+_codex_v2_receipt_bundle_roots() {
+  local root="$1" files_name="$2" output_name="$3" prefix file comparable relative generation scope_hash
+  local -n scope_files_ref="$files_name" scope_bundles_ref="$output_name"
+  scope_bundles_ref=()
+  _idem_cached_comparable_path "$root/.autoprompt-private/bundles" prefix || return 1
+  for file in "${scope_files_ref[@]:-}"; do
+    [ -n "$file" ] || continue
+    _idem_cached_comparable_path "$file" comparable || return 1
+    [[ "$comparable" == "$prefix/"* ]] || continue
+    relative="${comparable#"$prefix/"}"
+    [[ "$relative" =~ ^(codex-v2\.0\.0-[a-f0-9]{16})/skills/autoprompt/\.autoprompt-runtime-manifest\.json$ ]] || continue
+    generation="${BASH_REMATCH[1]}"
+    _idem_read_manifest_hash "$root" "$file" scope_hash || return 1
+    [[ "$scope_hash" =~ ^[a-f0-9]{64}$ ]] || continue
+    scope_bundles_ref+=("$prefix/$generation")
+  done
+}
+
+_codex_v2_receipt_owned_path() {
+  local root="$1" path="$2" kind="${3:-file}" comparable bundle private_root owned=0
+  local physical filesystem_root parent
+  # These roots are dynamically scoped by uninstall/update, and frozen before
+  # the manifest is edited. Callers enumerate receipt files/created directories;
+  # recognizing a generation never grants recursive deletion of its contents.
+  case "/${path//\\//}/" in */../*|*/./*) return 1 ;; esac
+  _idem_cached_comparable_path "$path" comparable || return 1
+  for bundle in "${codex_v2_receipt_bundles[@]:-}"; do
+    [ -n "$bundle" ] || continue
+    if [ "$comparable" = "$bundle" ] || [[ "$comparable" == "$bundle/"* ]]; then
+      owned=1; break
+    fi
+    if [ "$kind" = directory ]; then
+      _idem_cached_comparable_path "$root/.autoprompt-private" private_root || return 1
+      [ "$comparable" = "$private_root" ] || [ "$comparable" = "$private_root/bundles" ] || continue
+      owned=1; break
+    fi
+  done
+  [ "$owned" -eq 1 ] || return 1
+  # Do not extend file deletion through a redirected private ancestor. The leaf
+  # itself is left to the existing linked-or-unsafe/hash-drift retention checks.
+  _uninstall_filesystem_path "$path" physical || return 1
+  _uninstall_filesystem_path "$root" filesystem_root || return 1
+  [ "$kind" = directory ] || physical="${physical%/*}"
+  while [ -n "$physical" ]; do
+    [ ! -L "$physical" ] || return 1
+    _idem_paths_equal "$physical" "$filesystem_root" && return 0
+    parent="${physical%/*}"
+    [ "$parent" != "$physical" ] || break
+    physical="$parent"
+  done
+  return 1
+}
+
 _uninstall_provider_owns_path() {
   local root="$1" provider="$2" path="$3"
+  if [ "$provider" = codex ] && _codex_v2_receipt_owned_path "$root" "$path"; then
+    return 0
+  fi
   if autoprompt_install_root_override_present; then
     _custom_install_root_owned_path "$root" "$provider" "$path"
     return $?
@@ -4496,6 +4561,9 @@ _uninstall_provider_owns_directory() {
   local root="$1" provider="$2" path="$3"
   local provider_root="$root/$provider" skills="$root/$provider/skills"
   local skill="$skills/autoprompt" agents="$root/opencode/agents"
+  if [ "$provider" = codex ] && _codex_v2_receipt_owned_path "$root" "$path" directory; then
+    return 0
+  fi
   if _uninstall_provider_owns_path "$root" "$provider" "$path"; then
     return 0
   fi
@@ -4861,6 +4929,10 @@ uninstall_client() {
     return 70
   fi
   _uninstall_read_receipt "$root" || return $?
+  local -a codex_v2_receipt_bundles=()
+  if [ "$client" = codex ]; then
+    _codex_v2_receipt_bundle_roots "$root" UNINSTALL_RC_FILES codex_v2_receipt_bundles || return 74
+  fi
   case "$client" in
     claude|codex|opencode|kilo|vscode|vibe|cursor|dcode|roo|gemini|cline|goose|omp|deepseek|reasonix)
       _uninstall_shared_provider "$root" "$client"

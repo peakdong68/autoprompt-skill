@@ -18,6 +18,8 @@ if [ ! -f "$LIB" ]; then
 fi
 # shellcheck source=/dev/null
 . "$LIB"
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/harness-v2.sh"
 
 CLIENTS_ALL=(prime vscode claude codex opencode kilo omp deepseek reasonix)
 LEGACY_CLEANUP_CLIENTS=(vibe cursor roo gemini cline goose dcode)
@@ -166,7 +168,7 @@ main() {
     local c root
     for c in "${CLIENTS_ALL[@]}"; do
       if [ "$c" = reasonix ]; then uninstall_reasonix_lifecycle
-      elif [ "$c" = prime ]; then uninstall_prime_lifecycle
+      elif is_harness_v2 "$c"; then uninstall_harness_v2_lifecycle "$c"
       else
         root="$(config_root "$c")"
         uninstall_root "$root" "$c"
@@ -184,7 +186,7 @@ main() {
     usage; exit 2
   fi
   if [ "$target" = reasonix ]; then uninstall_reasonix_lifecycle
-  elif [ "$target" = prime ]; then uninstall_prime_lifecycle
+  elif is_harness_v2 "$target"; then uninstall_harness_v2_lifecycle "$target"
   else uninstall_root "$(config_root "$target")" "$target"
   fi
   print_matrix

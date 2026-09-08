@@ -873,7 +873,7 @@ test('configure parser accepts the bounded Codex surface and rejects malformed i
   }
   for (const args of [
     ['configure'],
-    ['configure', 'claude', '--agents', 'off'],
+    ['configure', 'unknown-provider', '--agents', 'off'],
     ['configure', 'codex'],
     ['configure', 'codex', '--agents'],
     ['configure', 'codex', '--agents', 'off', '--agents', 'auto'],

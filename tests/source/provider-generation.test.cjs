@@ -2,7 +2,6 @@
 'use strict'
 
 const assert = require('node:assert/strict')
-const childProcess = require('node:child_process')
 const crypto = require('node:crypto')
 const fs = require('node:fs')
 const os = require('node:os')
@@ -148,14 +147,13 @@ test('the shared contract exposes all personas, levels, and frameworks', () => {
 })
 
 test('Codex v2 prompts are deterministic policy-backed generated views', () => {
-  const completed = childProcess.spawnSync(
-    process.execPath,
-    ['scripts/generate-provider-contracts.cjs', '--check'],
-    { cwd: ROOT, encoding: 'utf8' },
-  )
-
-  assert.equal(completed.status, 0, completed.stderr)
-  assert.match(completed.stdout, /provider contracts are current/)
+  let stdout = '', stderr = ''
+  const status = require('../../scripts/generate-provider-contracts.cjs').run(['--check'], ROOT, {
+    stdout: { write: value => { stdout += value } },
+    stderr: { write: value => { stderr += value } },
+  })
+  assert.equal(status, 0, stderr)
+  assert.match(stdout, /provider contracts are current/)
 
   const contracts = loadCodexV2Contracts(ROOT)
   const packageRegistry = loadCodexPackageRegistry(ROOT)
@@ -188,7 +186,7 @@ test('Codex v2 prompts are deterministic policy-backed generated views', () => {
   })
 })
 
-test('legacy provider views remain present while Codex roles come from v2 policy', () => {
+test('compatibility profiles remain present while every provider uses v2 policy', () => {
   const contract = JSON.parse(fs.readFileSync(CONTRACT_PATH, 'utf8'))
   const { rolePolicy, roles } = loadCodexV2Contracts(ROOT)
 
@@ -650,7 +648,7 @@ test('provider projection stays Codex-first, capability-gated, and plain-languag
   })
   assert.ok(contracts.projectionPlan
     .filter(decision => !['codex', 'reasonix'].includes(decision.provider))
-    .every(decision => decision.projectionMode === 'PORT_CLOSED' && decision.claimsRealBehavior === false))
+    .every(decision => decision.portOpen === true && decision.projectionMode === 'SAFE_DEGRADED' && decision.claimsRealBehavior === false))
 
   const unsafe = structuredClone(contracts)
   const claude = unsafe.providers.providers.find(provider => provider.id === 'claude')
@@ -740,7 +738,7 @@ test('all providers expose the same framework set', () => {
   assert.deepEqual(prime, expected, 'prime')
 })
 
-test('new harness adapters encode their audited native contracts', () => {
+test('new harness adapters encode native v2 profiles without claiming conformance', () => {
   const contract = JSON.parse(fs.readFileSync(CONTRACT_PATH, 'utf8'))
 
   assert.equal(contract.providers.omp.target, '17.4.0')
@@ -751,13 +749,13 @@ test('new harness adapters encode their audited native contracts', () => {
   assert.equal(contract.providers.deepseek.profile.dispatch, 'fixed-persona-subagent-tools')
   assert.equal(contract.providers.deepseek.profile.model, 'inherit')
   const preset = read('agents/deepseek/agent-preset/agent.cordis.yml')
-  const personaCount = contract.personas.length
+  const personaCount = Object.keys(loadCodexV2Contracts(ROOT).rolePolicy.physical_roles).length
   assert.equal((preset.match(/name: '@deepseek-ai\/dsh-tool-subagent'/g) ?? []).length, personaCount)
   assert.equal((preset.match(/^\s+toolName: ap_[a-z0-9_]+$/gm) ?? []).length, personaCount)
   assert.doesNotMatch(preset, /^\s+toolName: subagent(?:_fork)?$/m)
   assert.equal((preset.match(/^\s+persona: \|-$/gm) ?? []).length, personaCount)
-  assert.equal((preset.match(/^        - subagent$/gm) ?? []).length, personaCount)
-  assert.equal((preset.match(/^        - subagent_fork$/gm) ?? []).length, personaCount)
+  assert.equal((preset.match(/^      allow: /gm) ?? []).length, personaCount)
+  assert.doesNotMatch(preset, /^      allow: .*subagent/m)
   const headlessPatch = read('agents/deepseek/headless.patch.yml')
   assert.doesNotMatch(preset, /[ \t]+$/m)
   assert.doesNotMatch(headlessPatch, /[ \t]+$/m)
@@ -767,7 +765,7 @@ test('new harness adapters encode their audited native contracts', () => {
   assert.equal(contract.providers.reasonix.profile.model, 'inherit')
 })
 
-test('the VS Code package records its proven runtime contract and has valid links', () => {
+test('the VS Code package projects private v2 profiles and has valid links', () => {
   const contract = JSON.parse(fs.readFileSync(CONTRACT_PATH, 'utf8'))
   assert.deepEqual(contract.providers.vscode, {
     frontmatter: {
@@ -828,7 +826,7 @@ test('the VS Code package records its proven runtime contract and has valid link
     .sort()
   assert.deepEqual(
     agents,
-    contract.personas.map(persona => `${persona.id}.agent.md`).sort(),
+    Object.keys(loadCodexV2Contracts(ROOT).rolePolicy.physical_roles).map(id => `${id}.agent.md`).sort(),
   )
   for (const absolutePath of packageFiles) {
     const source = fs.readFileSync(absolutePath, 'utf8').replace(/\r\n/g, '\n')
@@ -847,31 +845,14 @@ test('the VS Code package records its proven runtime contract and has valid link
   }
 
   const readme = read('agents/vscode/README.md')
-  assert.match(readme, /VS Code 1\.133/)
-  assert.match(readme, /GitHub Copilot 0\.61/)
-
-  for (const file of ['README.md', 'SKILL.md', 'GATES.md', 'MODES.md']) {
-    const source = read(`agents/vscode/${file}`)
-    assert.match(
-      source,
-      /installer transactionally sets `chat\.subagents\.allowInvocationsFromSubagents=true`/i,
-      `${file} transactional settings edit`,
-    )
-    assert.match(source, /byte-exact backup/i, `${file} settings backup`)
-    assert.match(
-      source,
-      /restores the prior bytes on rollback or uninstall/i,
-      `${file} settings restore`,
-    )
-    assert.match(
-      source,
-      /refuses unsafe JSONC and conflicting state/i,
-      `${file} unsafe settings refusal`,
-    )
-    assert.doesNotMatch(
-      source,
-      /(?:does not|never) (?:edit|mutate) (?:VS Code settings|that setting)|user must enable/i,
-      `${file} stale settings claim`,
-    )
+  assert.match(readme, /Generation parity is not runtime conformance/)
+  assert.match(readme, /recursive-subagent editor settings are not an admission check/)
+  for (const id of Object.keys(loadCodexV2Contracts(ROOT).rolePolicy.physical_roles)) {
+    const { header } = parseFrontmatter(read(`agents/vscode/agents/${id}.agent.md`), id)
+    assertVsCodeSchema(header, id)
+    assert.equal(header['user-invocable'], false)
+    assert.equal(header['disable-model-invocation'], true)
+    assert.deepEqual(header.agents, [])
+    assert.equal(header.tools.includes('agent'), false)
   }
 })

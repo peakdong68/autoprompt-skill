@@ -10,6 +10,47 @@ const generator = require('../../scripts/generate-provider-contracts.cjs')
 const native = require('../../agents/reasonix/workflow/native.js')
 const { ReasonixEventStream } = require('../../agents/reasonix/workflow/transport.js')
 
+test('native preflight refuses a CLI missing the permission-mode flag used at launch', () => {
+  assert.throws(() => native.probeExecutable({ executable: process.execPath, spawnSync: (_file, argv) => ({
+    status: 0, stdout: argv[0] === '--version' ? 'reasonix v1.30.0' : '--output-format --resume --dir --max-steps', stderr: '',
+  }) }), { code: 'PROVIDER_UNSUPPORTED' })
+})
+
+test('native adapter refuses terminal JSON when the owned process failed or was cancelled', async t => {
+  const core = require('../../agents/codex/workflow/phase-budget.js')
+  const { ReasonixExecAdapter } = require('../../agents/reasonix/workflow/transport.js')
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-process-result-'))
+  try {
+    const target = path.join(root, 'target')
+    fs.mkdirSync(target, { mode: 0o700 })
+    // This is a controller regression test with an injected runner, not native conformance.
+    for (const [name, implementation] of Object.entries({
+      validateCanonicalMissionLaunch: () => ({}), codexProviderCanonicalOutputSchema: () => ({ type: 'object' }),
+      codexPrivateWorkspaceProjection: () => [], codexExplicitExternalLocalProjection: () => [], codexCheckerScratchProjection: () => [],
+      modelVisibleDispatch: () => ({}), checkerResultBoundToCommandExecutionEvidence: output => output,
+    })) t.mock.method(core, name, implementation)
+    const schema = path.join(root, 'schema.json')
+    fs.writeFileSync(schema, '{}')
+    const executable = path.join(root, 'test-executable')
+    fs.writeFileSync(executable, 'not a native binary')
+    for (const [index, processResult] of [{ status: 1, signal: null }, { status: 0, signal: 'OWNED_STOP' }, { status: null, signal: 'SIGTERM' }].entries()) {
+      const adapter = new ReasonixExecAdapter({ nativeRoot: path.join(root, `native-${index}`), connection: { providers: [] },
+        executableBinding: { path: executable, sha256: native.sha256(fs.readFileSync(executable)) },
+        outputSchemaResolver: () => schema, rolePrompt: () => 'Return JSON.', targetPath: target,
+        runner: { run: async spec => {
+          spec.onStdoutLine(JSON.stringify({ kind: 'usage', usage: { promptTokens: 10, cacheHitTokens: 0, completionTokens: 2 } }))
+          spec.onStdoutLine(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, session_id: `native-${index}`, result: '{}', usage: { input_tokens: 10, output_tokens: 2, cache_read_input_tokens: 0 } }))
+          return { ...processResult, processOwned: true, exactArgv: true, drained: true }
+        }, stop: async () => ({ drained: true }) },
+      })
+      await assert.rejects(adapter.launch({ sessionId: `session-${index}`, reservationId: `reservation-${index}`,
+        logicalRole: 'worker', providerRole: 'ap-worker', physicalRole: 'ap-worker',
+        physicalExecutionPolicy: { logicalRole: 'worker', providerRole: 'ap-worker', physicalRole: 'ap-worker', sandboxMode: 'read-only' },
+      }), { code: 'CHILD_RUNTIME_FAILURE' })
+    }
+  } finally { t.mock.restoreAll(); fs.rmSync(root, { recursive: true, force: true }) }
+})
+
 test('Reasonix v2 projects every reviewed role and canonical route/check table', () => {
   const outputs = generator.renderReasonixOutputs()
   const policy = JSON.parse(outputs.get('agents/reasonix/role-policy.json'))
@@ -46,6 +87,8 @@ test('native private config excludes user runtime extensions and isolates checke
     assert.equal(parsed.sandbox.bash, 'enforce')
     assert.equal(parsed.sandbox.network, false)
     assert.equal(parsed.skills.disable_implicit_invocation, true)
+    assert.equal(parsed.telemetry.cli_metrics, 'off')
+    assert.equal(parsed.secrets.filter_subprocess_env, true)
     assert.equal(parsed.hooks, undefined)
     assert.ok(parsed.permissions.deny.includes('task'))
     assert.ok(parsed.permissions.deny.includes('write_file'))
@@ -54,7 +97,7 @@ test('native private config excludes user runtime extensions and isolates checke
 
 test('native stream preserves observed commands, session identity and exact usage', () => {
   const observed = []
-  const stream = new ReasonixEventStream({ onUsageDelta: delta => observed.push(delta) })
+  const stream = new ReasonixEventStream({ onUsageDelta: delta => { observed.push(delta); return { continue: true } } })
   const push = value => stream.push(JSON.stringify(value))
   push({ kind: 'tool_dispatch', tool: { id: 'tool-1', name: 'bash', args: JSON.stringify({ command: 'node --test' }), readOnly: true } })
   push({ kind: 'tool_result', tool: { id: 'tool-1', name: 'bash', args: JSON.stringify({ command: 'node --test' }), readOnly: true, output: 'tests 1\npass 1\nfail 0', execution: { exitCode: 0 } } })
@@ -85,9 +128,18 @@ test('Reasonix lifecycle verifies a private closure, rejects tampering and prese
     fs.writeFileSync(path.join(root, 'config.toml'), 'default_model = "personal"\n')
     const first = packaging.install(root)
     assert.equal(first.contractVersion, '2.0.0')
+    for (const name of ['tool-boundary', 'tool-server', 'controlled-tools']) {
+      assert.match(first.files[`scripts/harness-v2-${name}.cjs`], /^[a-f0-9]{64}$/)
+    }
+    // Resolve the installed closure itself; checkout dependencies must not mask
+    // a missing runtime module after installation.
+    const installedTransport = require(path.join(first.bundle, 'agents/reasonix/workflow/transport.js'))
+    const installedControlled = require(path.join(first.bundle, 'scripts/harness-v2-controlled-tools.cjs'))
+    assert.equal(typeof installedTransport.ReasonixExecAdapter, 'function')
+    assert.equal(installedControlled.toolName('reasonix', 'read'), 'mcp__autoprompt_owned__read')
     assert.equal(packaging.install(root).payloadDigest, first.payloadDigest)
     assert.equal(fs.existsSync(path.join(root, 'skills/ap-worker/SKILL.md')), false)
-    assert.equal(fs.readFileSync(path.join(root, 'skills/autoprompt/SKILL.md'), 'utf8'), packaging.SHIM)
+    assert.equal(fs.readFileSync(path.join(root, 'skills/autoprompt/SKILL.md'), 'utf8'), packaging.launcher(root))
     const { verifyAdmission } = require('../../agents/reasonix/workflow/admission.js')
     assert.throws(() => verifyAdmission(first, { sha256: 'a'.repeat(64), version: '1.30.0' }), { code: 'PROVIDER_UNSUPPORTED' })
     const metadata = path.join(first.bundle, 'package.json')

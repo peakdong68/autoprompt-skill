@@ -12,6 +12,15 @@ const { TextDecoder } = require('node:util')
 const zlib = require('node:zlib')
 
 const ROOT = path.resolve(__dirname, '..', '..')
+const CONFORMANCE_FILES = [
+  "tests/source/harness-v2-adapter-native.test.cjs",
+  "tests/source/harness-v2-pi-adapter-native.test.cjs",
+  "tests/source/harness-v2-vscode-owned-native.test.cjs",
+  "tests/source/reasonix-controlled-native.test.cjs",
+  "tests/helpers/harness-native-service.cjs",
+  "tests/helpers/harness-pi-native-service.cjs"
+]
+
 const PACKAGE_PATH = path.join(ROOT, 'package.json')
 const PACKAGE_VERSION = JSON.parse(fs.readFileSync(PACKAGE_PATH, 'utf8')).version
 const CODEX_PUBLIC_EVIDENCE_PATH = 'agents/contracts/codex-live-conformance-evidence.json'
@@ -123,13 +132,18 @@ function packageFilesOnDisk() {
     path.join(ROOT, 'README.md'),
     path.join(ROOT, 'LICENSE'),
     ...filesBelow(path.join(ROOT, 'node_modules', '@iarna', 'toml')),
+    ...filesBelow(path.join(ROOT, 'node_modules', 'yaml')),
     ...filesBelow(path.join(ROOT, 'bin')),
+    ...CONFORMANCE_FILES.map(file => path.join(ROOT, file)),
     path.join(ROOT, 'scripts', 'codex-configure.cjs'),
     path.join(ROOT, 'scripts', 'codex-runtime-identity.cjs'),
     path.join(ROOT, 'scripts', 'local-only-safety.cjs'),
     path.join(ROOT, 'scripts', 'reasonix-package.cjs'),
     path.join(ROOT, 'scripts', 'reasonix-configure.cjs'),
     path.join(ROOT, 'scripts', 'harness-provider-config.cjs'),
+    ...fs.readdirSync(path.join(ROOT, 'scripts')).filter(name => /^harness-v2-.*\.cjs$/.test(name)).map(name => path.join(ROOT, 'scripts', name)),
+    ...filesBelow(path.join(ROOT, 'scripts', 'harness-v2-trust')),
+    ...filesBelow(path.join(ROOT, 'scripts', 'harness-v2-bridge')),
     path.join(ROOT, 'scripts', 'runtime-payload.cjs'),
     ...filesBelow(path.join(ROOT, 'scripts', 'benchmark-evidence')),
     ...filesBelow(path.join(ROOT, 'scripts', 'install')),
@@ -147,6 +161,8 @@ function packageFilesOnDisk() {
   return [...new Set(explicit.map(file => path.relative(ROOT, file).split(path.sep).join('/')))]
     // npm never packs .gitignore control files, even below an allowed directory.
     .filter(file => path.posix.basename(file) !== '.gitignore')
+    // npm's packlist also drops conventional changelog files from bundled dependency trees.
+    .filter(file => file !== 'node_modules/@iarna/toml/CHANGELOG.md')
     .sort()
 }
 
@@ -268,7 +284,7 @@ function expectedPublicCodexEvidence() {
   }
 }
 
-test('package metadata is public-ready under the exact available name and declares its native TOML parser', () => {
+test('package metadata is public-ready under the exact available name and declares its native TOML and YAML parsers', () => {
   const packageJson = JSON.parse(fs.readFileSync(PACKAGE_PATH, 'utf8'))
   assert.equal(packageJson.name, 'autoprompt-skill')
   assert.equal(packageJson.version, PACKAGE_VERSION)
@@ -286,7 +302,7 @@ test('package metadata is public-ready under the exact available name and declar
     autoprompt: 'bin/autoprompt.cjs',
     'autoprompt-skill': 'bin/autoprompt.cjs',
   })
-  assert.deepEqual(packageJson.dependencies, { '@iarna/toml': '2.2.5' })
+  assert.deepEqual(packageJson.dependencies, { '@iarna/toml': '2.2.5', yaml: '2.9.0' })
   assert.equal(packageJson.devDependencies, undefined)
   assert.equal(packageJson.optionalDependencies, undefined)
   assert.equal(packageJson.peerDependencies, undefined)
@@ -357,9 +373,13 @@ test('package metadata is public-ready under the exact available name and declar
     'scripts/codex-runtime-identity.cjs',
     'scripts/local-only-safety.cjs',
     'scripts/harness-provider-config.cjs',
+    'scripts/harness-v2-*.cjs',
+    'scripts/harness-v2-trust/',
+    'scripts/harness-v2-bridge/',
     'scripts/install/',
     'scripts/runtime-payload.cjs',
     'scripts/benchmark-evidence/',
+    'agents/README.md',
     'agents/contracts/',
     'agents/claude/',
     'agents/codex/',
@@ -397,8 +417,10 @@ test('package metadata is public-ready under the exact available name and declar
     'docs/guides/9router-routing.png',
     'docs/guides/codex-v2-local-records.md',
     'docs/guides/custom-agent-compatibility.md',
+    'docs/guides/harness-v2-verification.md',
     'scripts/reasonix-package.cjs',
     'scripts/reasonix-configure.cjs',
+    ...CONFORMANCE_FILES,
   ])
   assert.equal(fs.existsSync(path.join(ROOT, 'package-lock.json')), true)
   assert.equal(fs.existsSync(path.join(ROOT, '.npmignore')), false)
@@ -417,14 +439,14 @@ test('npm dry-run inventory is an exact allowlist and excludes repository-only m
     '.git',
     '.github/',
     'coverage/',
-    'tests/',
     'agents/other/',
     'agents/vibe/',
     'agents/manifests/vibe-runtime.json',
     'scripts/generate-provider-contracts.cjs',
   ]
   for (const file of actual) {
-    if (file.startsWith('node_modules/')) assert.ok(file.startsWith('node_modules/@iarna/toml/'), file)
+    if (file.startsWith('tests/')) assert.ok(CONFORMANCE_FILES.includes(file), file)
+    if (file.startsWith('node_modules/')) assert.ok(['node_modules/@iarna/toml/', 'node_modules/yaml/'].some(prefix => file.startsWith(prefix)), file)
     assert.equal(
       forbiddenPrefixes.some(prefix => file === prefix || file.startsWith(prefix)),
       false,
@@ -660,6 +682,41 @@ test('packed tarball installs offline into an isolated temporary global prefix a
     assert.ok(receipt.files['node_modules/@iarna/toml/lib/toml-parser.js'])
     assert.equal(reasonix.verify(reasonixRoot).payloadDigest, receipt.payloadDigest)
     reasonix.uninstall(reasonixRoot)
+
+    const harnessPackage = require(path.join(installedPackage, 'scripts/harness-v2-package.cjs'))
+    const ompRoot = path.join(temporaryRoot, 'omp-root')
+    const ompReceipt = harnessPackage.install('omp', ompRoot, installedPackage)
+    assert.ok(ompReceipt.files['node_modules/@iarna/toml/package.json'])
+    assert.ok(ompReceipt.files['node_modules/yaml/package.json'])
+    const parserProbe = childProcess.spawnSync(process.execPath, ['-e', `
+      const { createRequire } = require('node:module')
+      const path = require('node:path')
+      const entry = process.argv[1]
+      const local = createRequire(entry)
+      const tomlPath = local.resolve('@iarna/toml/package.json')
+      const yamlPath = local.resolve('yaml/package.json')
+      const toml = local('@iarna/toml').parse('value = 7')
+      const yaml = local('yaml').parse('value: 9')
+      process.stdout.write(JSON.stringify({ tomlPath, yamlPath, toml, yaml }))
+    `, path.join(ompReceipt.bundle, 'scripts/harness-v2-pi-config.cjs')], {
+      cwd: temporaryRoot,
+      encoding: 'utf8',
+      env: {
+        HOME: path.join(temporaryRoot, 'isolated-home'),
+        NODE_PATH: '',
+        PATH: path.dirname(process.execPath),
+        USERPROFILE: path.join(temporaryRoot, 'isolated-home'),
+      },
+    })
+    assert.equal(parserProbe.status, 0, parserProbe.stderr)
+    const resolved = JSON.parse(parserProbe.stdout)
+    const privateNodeModules = path.join(ompReceipt.bundle, 'node_modules') + path.sep
+    assert.equal(resolved.tomlPath.startsWith(privateNodeModules), true, resolved.tomlPath)
+    assert.equal(resolved.yamlPath.startsWith(privateNodeModules), true, resolved.yamlPath)
+    assert.deepEqual(resolved.toml, { value: 7 })
+    assert.deepEqual(resolved.yaml, { value: 9 })
+    assert.equal(harnessPackage.verify('omp', ompRoot).payloadDigest, ompReceipt.payloadDigest)
+    harnessPackage.uninstall('omp', ompRoot)
   } finally {
     fs.rmSync(temporaryRoot, { recursive: true, force: true })
   }

@@ -38,6 +38,8 @@ if [ ! -f "$LIB" ]; then
 fi
 # shellcheck source=/dev/null
 . "$LIB"
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/harness-v2.sh"
 
 CLIENTS_ALL=(claude codex opencode kilo vscode prime omp deepseek reasonix)
 
@@ -1834,7 +1836,7 @@ main() {
     local -a ordinary=()
     for c in "${present[@]}"; do
       if [ "$c" = reasonix ]; then install_reasonix_lifecycle || true
-      elif [ "$c" = prime ]; then install_prime_lifecycle || true
+      elif is_harness_v2 "$c"; then install_harness_v2_lifecycle "$c" || true
       else ordinary+=("$c")
       fi
     done
@@ -1870,8 +1872,8 @@ main() {
     print_matrix
     exit "$(install_exit_code)"
   fi
-  if [ "$target" = prime ]; then
-    install_prime_lifecycle || true
+  if is_harness_v2 "$target"; then
+    install_harness_v2_lifecycle "$target" || true
     print_matrix
     exit "$(install_exit_code)"
   fi
