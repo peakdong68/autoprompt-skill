@@ -2180,7 +2180,10 @@ function createTempGitTarget(directory) {
 function strictLocalProfile() {
   return [
     'sandbox_mode = "workspace-write"', 'web_search = "disabled"', '',
-    '[sandbox_workspace_write]', 'network_access = false', '', '[features]',
+    '[sandbox_workspace_write]', 'network_access = false', '',
+    '[shell_environment_policy]', 'inherit = "core"', 'ignore_default_excludes = false',
+    'exclude = ["*AUTH*", "*COOKIE*", "*CREDENTIAL*", "*KEY*", "*PASSWORD*", "*PROXY*", "*SECRET*", "*TOKEN*"]',
+    'set = {}', '', '[features]',
     'apps = false', 'enable_mcp_apps = false', 'plugins = false',
     'remote_plugin = false', 'browser_use = false', 'browser_use_external = false',
     'in_app_browser = false', 'computer_use = false', 'image_generation = false',
@@ -17973,12 +17976,16 @@ test('AP-CODEX-V2-036 concrete runtime repairs a checker FAIL in a bounded fresh
   const profilePath = path.join(activationRoot, 'autoprompt.config.toml')
   const profile = strictLocalProfile()
   fs.writeFileSync(profilePath, profile, { mode: 0o600 })
+  const checkerProfilePath = path.join(activationRoot, 'autoprompt-checker.config.toml')
+  const checkerProfile = profile.replace('sandbox_mode = "workspace-write"', 'sandbox_mode = "read-only"')
+  fs.writeFileSync(checkerProfilePath, checkerProfile, { mode: 0o600 })
   const configIsolationPath = path.join(activationRoot, 'empty.gitconfig')
   const ghConfigDir = path.join(activationRoot, 'gh-config')
   fs.writeFileSync(configIsolationPath, '', { mode: 0o600 })
   fs.mkdirSync(ghConfigDir, { mode: 0o700 })
   const enforcementProof = {
-    schemaVersion: 1, provider: 'codex', profilePath,
+    schemaVersion: 1, provider: 'codex', profilePath, checkerProfilePath,
+    checkerProfileSha256: crypto.createHash('sha256').update(checkerProfile).digest('hex'),
     profileSha256: crypto.createHash('sha256').update(profile).digest('hex'),
     selectedProfile: 'autoprompt', strictConfig: true,
   }
@@ -18084,6 +18091,7 @@ test('AP-CODEX-V2-036 concrete runtime repairs a checker FAIL in a bounded fresh
     modelRegistry: null,
     modelSelection,
     profilePath,
+    checkerProfilePath,
     requestArgv,
     runId,
     supervisorRuntime: {
@@ -18299,12 +18307,16 @@ test('AP-RUN-037 production supervisor resumes a crashed worker with a fresh gen
   const profilePath = path.join(activationRoot, 'autoprompt.config.toml')
   const profile = strictLocalProfile()
   fs.writeFileSync(profilePath, profile, { mode: 0o600 })
+  const checkerProfilePath = path.join(activationRoot, 'autoprompt-checker.config.toml')
+  const checkerProfile = profile.replace('sandbox_mode = "workspace-write"', 'sandbox_mode = "read-only"')
+  fs.writeFileSync(checkerProfilePath, checkerProfile, { mode: 0o600 })
   const configIsolationPath = path.join(activationRoot, 'empty.gitconfig')
   const ghConfigDir = path.join(activationRoot, 'gh-config')
   fs.writeFileSync(configIsolationPath, '', { mode: 0o600 })
   fs.mkdirSync(ghConfigDir, { mode: 0o700 })
   const enforcementProof = {
-    schemaVersion: 1, provider: 'codex', profilePath,
+    schemaVersion: 1, provider: 'codex', profilePath, checkerProfilePath,
+    checkerProfileSha256: crypto.createHash('sha256').update(checkerProfile).digest('hex'),
     profileSha256: crypto.createHash('sha256').update(profile).digest('hex'),
     selectedProfile: 'autoprompt', strictConfig: true,
   }
@@ -18387,6 +18399,7 @@ test('AP-RUN-037 production supervisor resumes a crashed worker with a fresh gen
     modelRegistry: null,
     modelSelection,
     profilePath,
+    checkerProfilePath,
     requestArgv,
     runId,
     supervisorRuntime: {

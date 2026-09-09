@@ -2,6 +2,7 @@
 'use strict'
 
 const fs = require('node:fs')
+const crypto = require('node:crypto')
 const path = require('node:path')
 
 const AGENT_FILE_PATTERN = /^ap-[a-z0-9-]+\.toml$/
@@ -253,6 +254,75 @@ function verifyProfile(options, agents) {
   rejectProjectRoleCollisions(options, agents)
 }
 
+// Native Codex resolves named profiles below mutable CODEX_HOME. Project the
+// verified authority profile into argv instead. This accepts only the one-line
+// grammar emitted by this package; Codex remains the parser for TOML values.
+function sealedProfileOverrides(profilePath, expectedSha256) {
+  const reject = message => {
+    const error = new Error(`sealed Codex profile: ${message}`)
+    error.code = 'CODEX_SEALED_PROFILE_INVALID'
+    throw error
+  }
+  if (typeof profilePath !== 'string' || !path.isAbsolute(profilePath) ||
+      !/^[a-f0-9]{64}$/.test(expectedSha256 || '')) reject('missing authority binding')
+  const resolved = path.resolve(profilePath)
+  if (fs.realpathSync.native(resolved) !== resolved) reject('linked authority path')
+  const descriptor = fs.openSync(resolved, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0))
+  let bytes
+  try {
+    const before = fs.fstatSync(descriptor, { bigint: true })
+    if (!before.isFile() || before.nlink !== 1n || before.size > 262144n) reject('unsafe authority file')
+    bytes = fs.readFileSync(descriptor)
+    const after = fs.fstatSync(descriptor, { bigint: true })
+    if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size ||
+        before.mtimeNs !== after.mtimeNs ||
+        crypto.createHash('sha256').update(bytes).digest('hex') !== expectedSha256) reject('authority bytes changed')
+  } finally { fs.closeSync(descriptor) }
+  const arguments_ = []
+  const keys = new Set()
+  const sections = new Set()
+  let section = ''
+  for (const sourceLine of bytes.toString('utf8').split(/\r?\n/)) {
+    const line = sourceLine.trim()
+    if (!line || line.startsWith('#')) continue
+    const header = /^\[(sandbox_workspace_write|shell_environment_policy|features|agents(?:\.(?:[a-zA-Z0-9_-]+|"[a-zA-Z0-9_-]+"))?)\]$/.exec(line)
+    if (header) {
+      section = header[1].replaceAll('"', '')
+      if (sections.has(section)) reject('duplicate section')
+      sections.add(section)
+      continue
+    }
+    const assignment = /^([a-zA-Z0-9_-]+)\s*=\s*(.+)$/.exec(line)
+    if (!assignment || /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(line) ||
+        line.includes('"""') || line.includes("'''")) reject('unsupported generated syntax')
+    const key = section ? `${section}.${assignment[1]}` : assignment[1]
+    if (keys.has(key)) reject('duplicate key')
+    keys.add(key)
+    let value = assignment[2]
+    if (assignment[1] === 'config_file') {
+      if (!/^agents\.[a-zA-Z0-9_-]+$/.test(section)) reject('role config outside an agent')
+      let relative
+      try { relative = JSON.parse(value) } catch { reject('invalid role config path') }
+      if (typeof relative !== 'string' || path.isAbsolute(relative) ||
+          !/^skills\/autoprompt\/agents-runtime\/[a-zA-Z0-9_-]+\.toml$/.test(relative)) {
+        reject('role config escapes the authority payload')
+      }
+      const target = path.resolve(path.dirname(resolved), relative)
+      const role = fs.lstatSync(target)
+      if (!role.isFile() || role.isSymbolicLink() || role.nlink !== 1 ||
+          fs.realpathSync.native(target) !== target) reject('linked role config')
+      value = JSON.stringify(target)
+    }
+    arguments_.push('-c', `${key}=${value}`)
+  }
+  for (const key of ['sandbox_mode', 'web_search', 'shell_environment_policy.inherit',
+    'shell_environment_policy.ignore_default_excludes', 'shell_environment_policy.exclude',
+    'shell_environment_policy.set']) {
+    if (!keys.has(key)) reject('security policy is incomplete')
+  }
+  return Object.freeze(arguments_)
+}
+
 function main(argv) {
   const options = parseArgs(argv)
   const agents = loadManifest(options.agentsDirectory)
@@ -276,6 +346,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  sealedProfileOverrides,
   loadManifest,
   main,
   parseArgs,

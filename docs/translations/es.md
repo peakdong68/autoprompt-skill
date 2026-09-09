@@ -27,12 +27,10 @@
 
 Usa la CLI siguiente o descarga un instalador desde [GitHub Releases](https://github.com/Spielewoy/autoprompt-skill/releases/latest).
 
-Para esta beta de v2, usa **Instalar desde el código fuente** más abajo.
-
 ### 1. Instala la CLI
 
 ```bash
-npm install -g autoprompt-skill
+npm install -g https://github.com/Spielewoy/autoprompt-skill/releases/download/v2.0.0/autoprompt-skill-2.0.0.tgz
 ```
 
 ### 2. Inicia el instalador
@@ -51,7 +49,7 @@ Para otra CLI o IDE, elige `Custom coding agent` y usa la [guía de compatibilid
 <summary><strong>Instalar desde el código fuente</strong></summary>
 
 ```bash
-git clone --branch codex/v2-final-merge https://github.com/Spielewoy/autoprompt-skill
+git clone https://github.com/Spielewoy/autoprompt-skill
 cd autoprompt-skill
 npm install -g .
 autoprompt
@@ -239,3 +237,7 @@ Porque cambia el coste, el tiempo y el flujo de trabajo. Inícialo explícitamen
 [MIT](../../LICENSE). Copyright 2026 [Spielewoy](https://github.com/Spielewoy).
 
 Comunidad: [Colaboradores](../CONTRIBUTORS.md), [Contribuir](../CONTRIBUTING.md), [Código de conducta](../CODE_OF_CONDUCT.md), [Seguridad](../SECURITY.md) y [Soporte](../SUPPORT.md).
+
+### Colaboradores
+
+[johnatag](https://github.com/johnatag) · [rollingdice](https://github.com/rollingdice) · [AincradBot](https://github.com/AincradBot) · [lunar-me](https://github.com/lunar-me) · [fatinghenji](https://github.com/fatinghenji) · [c8dhjp4tyv-bit](https://github.com/c8dhjp4tyv-bit) · [Alexis-Fiolleau-LaPoste-BGPN](https://github.com/Alexis-Fiolleau-LaPoste-BGPN)

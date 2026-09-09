@@ -27,12 +27,10 @@
 
 아래 CLI를 사용하거나 [GitHub Releases](https://github.com/Spielewoy/autoprompt-skill/releases/latest)에서 설치 프로그램을 받으세요.
 
-이 v2 베타는 아래 **소스에서 설치** 절차를 사용하세요.
-
 ### 1. CLI 설치
 
 ```bash
-npm install -g autoprompt-skill
+npm install -g https://github.com/Spielewoy/autoprompt-skill/releases/download/v2.0.0/autoprompt-skill-2.0.0.tgz
 ```
 
 ### 2. 설치 프로그램 실행
@@ -51,7 +49,7 @@ autoprompt
 <summary><strong>소스에서 설치</strong></summary>
 
 ```bash
-git clone --branch codex/v2-final-merge https://github.com/Spielewoy/autoprompt-skill
+git clone https://github.com/Spielewoy/autoprompt-skill
 cd autoprompt-skill
 npm install -g .
 autoprompt
@@ -239,3 +237,7 @@ autoprompt configure claude --agents provider/model --effort low
 [MIT](../../LICENSE). 저작권 2026 [Spielewoy](https://github.com/Spielewoy).
 
 커뮤니티: [기여자](../CONTRIBUTORS.md), [기여 안내](../CONTRIBUTING.md), [행동 강령](../CODE_OF_CONDUCT.md), [보안](../SECURITY.md), [지원](../SUPPORT.md).
+
+### 기여자
+
+[johnatag](https://github.com/johnatag) · [rollingdice](https://github.com/rollingdice) · [AincradBot](https://github.com/AincradBot) · [lunar-me](https://github.com/lunar-me) · [fatinghenji](https://github.com/fatinghenji) · [c8dhjp4tyv-bit](https://github.com/c8dhjp4tyv-bit) · [Alexis-Fiolleau-LaPoste-BGPN](https://github.com/Alexis-Fiolleau-LaPoste-BGPN)

@@ -54,7 +54,7 @@ test('generated release notes contain no unsupported numeric benchmark claim', {
   const bootstrapEnv = { ...process.env, AUTOPROMPT_PYTHON: python.stdout.trim(), PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH}` }
   const psRun = childProcess.spawnSync(RELEASE_POWERSHELL, ['-NoProfile', '-NonInteractive', '-Command', psScript], { env: bootstrapEnv, encoding: 'utf8', timeout: 15000 })
   assert.equal(psRun.status, 0, psRun.stderr)
-  assert.deepEqual(JSON.parse(fs.readFileSync(npmLog, 'utf8').replace(/^\uFEFF/, '')), ['install', '--global', '--ignore-scripts', '--no-audit', '--no-fund', `autoprompt-skill@${version}`])
+  assert.deepEqual(JSON.parse(fs.readFileSync(npmLog, 'utf8').replace(/^\uFEFF/, '')), ['install', '--global', '--ignore-scripts', '--no-audit', '--no-fund', `https://github.com/Spielewoy/autoprompt-skill/releases/download/v${version}/autoprompt-skill-${version}.tgz`])
   if (process.platform !== 'win32') {
     const bin = path.join(sandbox, 'bootstrap bin'); fs.mkdirSync(bin)
     fs.symlinkSync(process.execPath, path.join(bin, 'node'))
@@ -63,7 +63,7 @@ test('generated release notes contain no unsupported numeric benchmark claim', {
       env: { ...bootstrapEnv, PATH: `${bin}:${bootstrapEnv.PATH}`, AUTOPROMPT_NO_LAUNCH: '1', AUTOPROMPT_TEST_GLOBAL_MODULES: modules, AUTOPROMPT_TEST_NPM_LOG: npmLog }, encoding: 'utf8', timeout: 15000,
     })
     assert.equal(shellRun.status, 0, shellRun.stderr)
-    assert.deepEqual(fs.readFileSync(npmLog, 'utf8').trim().split('\n'), ['install', '--global', '--ignore-scripts', '--no-audit', '--no-fund', `autoprompt-skill@${version}`])
+    assert.deepEqual(fs.readFileSync(npmLog, 'utf8').trim().split('\n'), ['install', '--global', '--ignore-scripts', '--no-audit', '--no-fund', `https://github.com/Spielewoy/autoprompt-skill/releases/download/v${version}/autoprompt-skill-${version}.tgz`])
   }
   const notes = fs.readFileSync(path.join(output, 'RELEASE_NOTES.md'), 'utf8')
   assert.match(notes, /Benchmark claims remain withheld until a preregistered run has complete independently verifiable evidence/)

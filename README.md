@@ -27,12 +27,10 @@
 
 Use the CLI below, or download an installer from [GitHub Releases](https://github.com/Spielewoy/autoprompt-skill/releases/latest).
 
-For this v2 beta, use **Install from source** below.
-
 ### 1. Install the CLI
 
 ```bash
-npm install -g autoprompt-skill
+npm install -g https://github.com/Spielewoy/autoprompt-skill/releases/download/v2.0.0/autoprompt-skill-2.0.0.tgz
 ```
 
 ### 2. Launch the installer
@@ -51,7 +49,7 @@ For another CLI or IDE, choose `Custom coding agent` and use the [compatibility 
 <summary><strong>Install from source</strong></summary>
 
 ```bash
-git clone --branch codex/v2-final-merge https://github.com/Spielewoy/autoprompt-skill
+git clone https://github.com/Spielewoy/autoprompt-skill
 cd autoprompt-skill
 npm install -g .
 autoprompt
@@ -125,7 +123,7 @@ DeepSeek's 82.7% used its own test setup, so it is a reference point, not a comp
 <details>
 <summary><strong>Expected trade-off:</strong> about 3x the time and 2x the tokens.</summary>
 
-Timing and token logs were not retained, so these are planning estimates based on user experience reports, not measured benchmark results. The measured result was 29 to 16 failures (45% fewer) in this run, which translates to about 2x fewer mistakes. Note: for very small tasks, this may differ heavily.
+Timing and token logs were not retained, so these are planning estimates based on user experience reports, not measured benchmark results. The measured result was 29 to 16 failures (45% fewer) in this run, which translates to about 2x fewer mistakes. Note: for very small tasks, this may differ significantly.
 
 </details>
 
@@ -239,3 +237,7 @@ Because it changes cost, time, and workflow. Start it explicitly with `autopromp
 [MIT](LICENSE). Copyright 2026 [Spielewoy](https://github.com/Spielewoy).
 
 Community: [Contributors](docs/CONTRIBUTORS.md), [Contributing](docs/CONTRIBUTING.md), [Code of Conduct](docs/CODE_OF_CONDUCT.md), [Security](docs/SECURITY.md), and [Support](docs/SUPPORT.md).
+
+### Contributors
+
+[johnatag](https://github.com/johnatag) · [rollingdice](https://github.com/rollingdice) · [AincradBot](https://github.com/AincradBot) · [lunar-me](https://github.com/lunar-me) · [fatinghenji](https://github.com/fatinghenji) · [c8dhjp4tyv-bit](https://github.com/c8dhjp4tyv-bit) · [Alexis-Fiolleau-LaPoste-BGPN](https://github.com/Alexis-Fiolleau-LaPoste-BGPN)

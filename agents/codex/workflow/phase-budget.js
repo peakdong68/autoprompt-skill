@@ -98,7 +98,7 @@ const {
 } = require('./process-owner.js')
 const { CleanupRegistry, Finalizer } = require('./finalizer.js')
 const { assertGenerationControlAuthority } = require('./generation-control.js')
-const { deriveProfileLimits } = require('./codex-agent-profile.js')
+const { deriveProfileLimits, sealedProfileOverrides } = require('./codex-agent-profile.js')
 const {
   executeAdmittedCodex,
   openCodexExecutableAdmission,
@@ -8470,6 +8470,10 @@ class CodexExecAdapter {
         'Codex exec adapter cumulative quota proxy factory is invalid',
       )
     }
+    if (options.profileOverrides !== undefined && typeof options.profileOverrides !== 'function') {
+      throw new SupervisorIntegrationError('PROVIDER_UNSUPPORTED', 'Codex profile projection must be authority-bound')
+    }
+    this.profileOverrides = options.profileOverrides || null
     this.checkerScratchVerifier = typeof options.checkerScratchVerifier === 'function'
       ? options.checkerScratchVerifier : null
   }
@@ -8524,6 +8528,9 @@ class CodexExecAdapter {
     const transportSandboxMode = checkerScratchBoundary ? 'workspace-write' : executionPolicy.sandboxMode
     const rolloutBudgetConfig = codexChildRolloutBudgetConfig(record)
     const common = [
+      ...(this.profileOverrides ? [
+        '--ignore-user-config', ...this.profileOverrides(CHECKER_ROLES.has(record.logicalRole)),
+      ] : []),
       '--json', '--output-schema', schemaPath, '--strict-config',
       '--disable', 'multi_agent', '--disable', 'multi_agent_v2',
       '--disable', 'code_mode', '--disable', 'code_mode_only',
@@ -32390,6 +32397,12 @@ function createDefaultRuntimeOptions(input) {
         providerSchemaRoot: path.join(activation.activationRoot, 'provider-output-schemas'),
         checkerScratchVerifier: runtimeOptions.checkerScratchFactory.verify,
         ...(context.executionAdapterOptions || {}),
+        // Reopen sealed authority on every worker/checker dispatch. Native
+        // state contains no authoritative profile copies.
+        profileOverrides: checker => sealedProfileOverrides(
+          checker ? activation.checkerProfilePath : activation.profilePath,
+          checker ? activation.enforcementProof.checkerProfileSha256 : activation.enforcementProof.profileSha256,
+        ),
       })
       if (pendingCrashResume) {
         const checkpoint = pendingCrashResume.checkpointEvidence.record.checkpoint

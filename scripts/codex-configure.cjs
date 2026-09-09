@@ -9,6 +9,7 @@ const path = require('node:path')
 const operationLock = require('./install/operation-lock.cjs')
 const { detectLegacyCodexInstall } = require('./install/legacy-compat.cjs')
 const safeRunRoot = require('../agents/codex/workflow/safe-run-root.js')
+const { sealedProfileOverrides } = require('../agents/codex/workflow/codex-agent-profile.js')
 const {
   admitCodexExecutable,
   bindAdmittedCodexExecutable,
@@ -2358,6 +2359,7 @@ function probeCodexCommandNetwork(options, spawn) {
       '--sandbox-state-disable-network',
       '--profile', PROFILE_NAME,
       '--cd', options.target,
+      ...sealedProfileOverrides(options.profilePath, options.profileSha256),
       process.execPath, '-e', clientScript, String(endpoint.port), address, sandboxToken,
       sandboxResultPath,
     ], {
@@ -2406,6 +2408,8 @@ function probeCodexProfile(options) {
   const executable = options.codexRuntime?.executable || 'codex'
   const validation = spawn(executable, [
     'exec', '--strict-config', '--profile', PROFILE_NAME, '--cd', options.target,
+    '--ignore-user-config',
+    ...sealedProfileOverrides(options.profilePath, options.profileSha256),
     '--skip-git-repo-check', '--output-schema', missingSchema,
     'AUTOPROMPT_CONFIG_PROBE_MUST_NOT_RUN',
   ], {
@@ -2430,6 +2434,7 @@ function probeCodexProfile(options) {
     '--sandbox-state-disable-network',
     '--profile', PROFILE_NAME,
     '--cd', options.target,
+    ...sealedProfileOverrides(options.profilePath, options.profileSha256),
     process.execPath, '-e',
     'require("node:fs").writeFileSync(process.argv[1],process.argv[2],{flag:"wx",mode:0o600})',
     sandboxMarker, sandboxToken,
@@ -3836,6 +3841,7 @@ function prepareActivation(options = {}) {
       : rawProbeEnvironment
     const profileProbe = spawnWithPrivateActivationUmask(() => probeCodexProfile({
       ...options, codexRuntime, env: probeEnvironment, target: target.realpath,
+      profilePath, profileSha256,
     }))
     removeInactiveCodexProbeHelpers(
       nativeCodexHomePath(activationRoot), codexRuntime.executable, record.darwinRuntimeClosure,

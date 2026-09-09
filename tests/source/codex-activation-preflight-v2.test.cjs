@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict')
 const childProcess = require('node:child_process')
 const fs = require('node:fs')
+const crypto = require('node:crypto')
 const Module = require('node:module')
 const os = require('node:os')
 const path = require('node:path')
@@ -11,6 +12,18 @@ const test = require('node:test')
 const activation = require('../../scripts/codex-configure.cjs')
 const rolePolicy = require('../../agents/codex/agents/role-policy.json')
 const runtime = require('../../agents/codex/workflow/phase-budget.js')
+
+function sealedProfileFixture(root) {
+  const profilePath = path.join(root, 'autoprompt.config.toml')
+  const source = [
+    'sandbox_mode = "workspace-write"', 'web_search = "disabled"',
+    '[shell_environment_policy]', 'inherit = "core"',
+    'ignore_default_excludes = false', 'exclude = ["*KEY*", "*TOKEN*"]',
+    'set = { GIT_ALLOW_PROTOCOL = "file" }', '',
+  ].join('\n')
+  fs.writeFileSync(profilePath, source, { mode: 0o600 })
+  return { profilePath, profileSha256: crypto.createHash('sha256').update(source).digest('hex') }
+}
 
 function sandboxProbeSpawn(mode) {
   return (command, args, options) => {
@@ -59,6 +72,7 @@ test('Codex dynamic preflight distinguishes permitted loopback from denied non-l
   const address = activation.controlledNetworkProbeAddress()
   assert.doesNotMatch(address, /^(?:127\.|0\.0\.0\.0$)/)
   const options = {
+    ...sealedProfileFixture(root),
     env: { ...process.env, CODEX_HOME: codexHome },
     // The real network controls write receipts in the target. The checkout
     // need not be writable by the caller running this isolated fixture.
@@ -86,6 +100,7 @@ test('Codex network probe publishes its endpoint only after the ready bytes are 
   const delayed = activationWithDelayedReadyPublication()
   assert.match(
     delayed.probeCodexCommandNetwork({
+      ...sealedProfileFixture(root),
       env: { ...process.env, CODEX_HOME: codexHome },
       target,
     }, sandboxProbeSpawn('denied')),

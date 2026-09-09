@@ -239,11 +239,11 @@ try {
     }
 }
 
-# Standalone downloads have no bundled archive. Bind their registry fallback
-# to this build instead of allowing npm's latest tag to select another version.
+# Standalone downloads install this exact release archive, including when
+# the npm registry has not published this version yet.
 $standaloneSources = @(
-    @{ Name = 'install.sh'; Marker = "package='autoprompt-skill'"; Pinned = "package='autoprompt-skill@$version'" },
-    @{ Name = 'install.ps1'; Marker = "else { 'autoprompt-skill' }"; Pinned = "else { 'autoprompt-skill@$version' }" }
+    @{ Name = 'install.sh'; Marker = "package='autoprompt-skill'"; Pinned = "package='https://github.com/Spielewoy/autoprompt-skill/releases/download/v$version/autoprompt-skill-$version.tgz'" },
+    @{ Name = 'install.ps1'; Marker = "else { 'autoprompt-skill' }"; Pinned = "else { 'https://github.com/Spielewoy/autoprompt-skill/releases/download/v$version/autoprompt-skill-$version.tgz' }" }
 )
 foreach ($bootstrap in $standaloneSources) {
     $source = [IO.File]::ReadAllText((Join-Path $repoRoot "scripts/release/$($bootstrap.Name)"))
@@ -273,7 +273,7 @@ Autoprompt turns one explicit goal into a closed plan, build, test, review, repa
 - Older Codex installs are detected and updated in place
 - Explicit invocation keeps the orchestration loop isolated from ordinary coding requests
 - Native provider packages for Claude Code, Codex, OpenCode, Kilo Code, VS Code, Prime Agent, Oh My Pi, DeepSeek Harness, Hermes Agent, Grok Build, and Reasonix
-- Current v2 installation and verification instructions; translated v1 documentation is labeled historical
+- Current v2 instructions and diagrams in English, Chinese, Korean, Spanish, and Arabic
 
 ## Install
 

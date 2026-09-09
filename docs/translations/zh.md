@@ -27,12 +27,10 @@
 
 使用下面的 CLI，或从 [GitHub Releases](https://github.com/Spielewoy/autoprompt-skill/releases/latest) 下载安装程序。
 
-安装此 v2 测试版，请使用下方的**从源码安装**步骤。
-
 ### 1. 安装 CLI
 
 ```bash
-npm install -g autoprompt-skill
+npm install -g https://github.com/Spielewoy/autoprompt-skill/releases/download/v2.0.0/autoprompt-skill-2.0.0.tgz
 ```
 
 ### 2. 启动安装程序
@@ -51,7 +49,7 @@ autoprompt
 <summary><strong>从源码安装</strong></summary>
 
 ```bash
-git clone --branch codex/v2-final-merge https://github.com/Spielewoy/autoprompt-skill
+git clone https://github.com/Spielewoy/autoprompt-skill
 cd autoprompt-skill
 npm install -g .
 autoprompt
@@ -239,3 +237,7 @@ autoprompt configure claude --agents provider/model --effort low
 [MIT](../../LICENSE)。版权所有 2026 [Spielewoy](https://github.com/Spielewoy)。
 
 社区：[贡献者](../CONTRIBUTORS.md)、[贡献指南](../CONTRIBUTING.md)、[行为准则](../CODE_OF_CONDUCT.md)、[安全](../SECURITY.md)和[支持](../SUPPORT.md)。
+
+### 贡献者
+
+[johnatag](https://github.com/johnatag) · [rollingdice](https://github.com/rollingdice) · [AincradBot](https://github.com/AincradBot) · [lunar-me](https://github.com/lunar-me) · [fatinghenji](https://github.com/fatinghenji) · [c8dhjp4tyv-bit](https://github.com/c8dhjp4tyv-bit) · [Alexis-Fiolleau-LaPoste-BGPN](https://github.com/Alexis-Fiolleau-LaPoste-BGPN)

@@ -29,12 +29,10 @@
 
 استخدم CLI أدناه أو نزّل أحد المثبتات من [GitHub Releases](https://github.com/Spielewoy/autoprompt-skill/releases/latest).
 
-لتثبيت الإصدار التجريبي v2، اتبع قسم **التثبيت من المصدر** أدناه.
-
 ### 1. تثبيت CLI
 
 ```bash
-npm install -g autoprompt-skill
+npm install -g https://github.com/Spielewoy/autoprompt-skill/releases/download/v2.0.0/autoprompt-skill-2.0.0.tgz
 ```
 
 ### 2. تشغيل المثبت
@@ -53,7 +51,7 @@ autoprompt
 <summary><strong>التثبيت من المصدر</strong></summary>
 
 ```bash
-git clone --branch codex/v2-final-merge https://github.com/Spielewoy/autoprompt-skill
+git clone https://github.com/Spielewoy/autoprompt-skill
 cd autoprompt-skill
 npm install -g .
 autoprompt
@@ -244,5 +242,9 @@ autoprompt configure claude --agents provider/model --effort low
 [MIT](../../LICENSE). حقوق النشر 2026 [Spielewoy](https://github.com/Spielewoy).
 
 المجتمع: [المساهمة](../CONTRIBUTING.md)، [قواعد السلوك](../CODE_OF_CONDUCT.md)، [الأمان](../SECURITY.md)، و[الدعم](../SUPPORT.md).
+
+### المساهمون
+
+[johnatag](https://github.com/johnatag) · [rollingdice](https://github.com/rollingdice) · [AincradBot](https://github.com/AincradBot) · [lunar-me](https://github.com/lunar-me) · [fatinghenji](https://github.com/fatinghenji) · [c8dhjp4tyv-bit](https://github.com/c8dhjp4tyv-bit) · [Alexis-Fiolleau-LaPoste-BGPN](https://github.com/Alexis-Fiolleau-LaPoste-BGPN)
 
 </div>

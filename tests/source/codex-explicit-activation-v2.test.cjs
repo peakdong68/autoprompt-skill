@@ -9,12 +9,14 @@ const path = require('node:path')
 const test = require('node:test')
 const childProcess = require('node:child_process')
 const net = require('node:net')
+const http = require('node:http')
 
 const ROOT = path.resolve(__dirname, '..', '..')
 const CLI = path.join(ROOT, 'bin', 'autoprompt.cjs')
 const HOST_CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), '.codex')
 const CODEX_RUNTIME = require('../../agents/manifests/codex-runtime.json')
 const activation = require('../../scripts/codex-configure.cjs')
+const { sealedProfileOverrides } = require('../../agents/codex/workflow/codex-agent-profile.js')
 const localSafety = require('../../scripts/local-only-safety.cjs')
 const { parseArgs } = require('../../bin/autoprompt.cjs')
 const safeRunRoot = require('../../agents/codex/workflow/safe-run-root.js')
@@ -525,6 +527,40 @@ test('ordinary Codex discovery is identical before, during, and after private ac
   assert.deepEqual(afterRevocation, beforeInstall)
 })
 
+test('sealed profile argv preserves policy and refuses changed or escaping authority', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-sealed-profile-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const file = path.join(root, 'autoprompt.config.toml')
+  const relative = 'skills/autoprompt/agents-runtime/ap-worker.toml'
+  fs.mkdirSync(path.dirname(path.join(root, relative)), { recursive: true })
+  fs.writeFileSync(path.join(root, relative), 'name = "ap-worker"\n')
+  const source = [
+    'sandbox_mode = "workspace-write"', 'web_search = "disabled"',
+    '[shell_environment_policy]', 'inherit = "core"',
+    'ignore_default_excludes = false', 'exclude = ["*KEY*", "*TOKEN*"]',
+    'set = { GIT_ALLOW_PROTOCOL = "file" }',
+    '[agents."ap-worker"]', `config_file = "${relative}"`, '',
+  ].join('\n')
+  fs.writeFileSync(file, source)
+  const expected = sha256(file)
+  const args = sealedProfileOverrides(file, expected)
+  assert.ok(args.includes('shell_environment_policy.exclude=["*KEY*", "*TOKEN*"]'))
+  assert.ok(args.includes(`agents.ap-worker.config_file=${JSON.stringify(path.join(root, relative))}`))
+  assert.ok(Object.isFrozen(args))
+  assert.throws(() => sealedProfileOverrides(file), error => error.code === 'CODEX_SEALED_PROFILE_INVALID')
+  fs.appendFileSync(file, '# changed\n')
+  assert.throws(() => sealedProfileOverrides(file, expected), error => error.code === 'CODEX_SEALED_PROFILE_INVALID')
+  for (const invalid of [
+    source.replace(relative, '../outside.toml'),
+    source.replace('[shell_environment_policy]', 'sandbox_mode = "read-only"\n[shell_environment_policy]'),
+    source.replace('exclude = ["*KEY*", "*TOKEN*"]\n', ''),
+  ]) {
+    fs.writeFileSync(file, invalid)
+    assert.throws(() => sealedProfileOverrides(file, sha256(file)),
+      error => error.code === 'CODEX_SEALED_PROFILE_INVALID')
+  }
+})
+
 test('clean-home activation isolates skills, versions physical roles, binds one capability, and revokes it', async t => {
   const context = makeCleanInstall()
   t.after(() => fs.rmSync(context.sandbox, { recursive: true, force: true }))
@@ -563,9 +599,11 @@ test('clean-home activation isolates skills, versions physical roles, binds one 
       }
       return executeSandboxMarker(args, options)
     }
-    const activationRoot = options.env.CODEX_HOME
+    const nativeHome = options.env.CODEX_HOME
     const recordPath = options.env.AUTOPROMPT_ACTIVATION_RECORD
     const record = JSON.parse(fs.readFileSync(recordPath, 'utf8'))
+    const activationRoot = record.activationRoot
+    assert.equal(nativeHome, activation.nativeCodexHomePath(activationRoot))
     const profile = fs.readFileSync(path.join(activationRoot, 'autoprompt.config.toml'), 'utf8')
     const supervisorSh = fs.readFileSync(
       path.join(activationRoot, 'skills', 'autoprompt', 'workflow', 'supervisor.sh'), 'utf8',
@@ -573,11 +611,11 @@ test('clean-home activation isolates skills, versions physical roles, binds one 
     const supervisorPs = fs.readFileSync(
       path.join(activationRoot, 'skills', 'autoprompt', 'workflow', 'supervisor.ps1'), 'utf8',
     )
-    launchObservation = { activationRoot, args, options, record, profile }
+    launchObservation = { activationRoot, nativeHome, args, options, record, profile }
     assert.equal(command, process.execPath)
     assert.notEqual(activationRoot, context.root)
-    assert.equal(options.env.HOME, activationRoot)
-    assert.equal(options.env.USERPROFILE, activationRoot)
+    assert.equal(options.env.HOME, nativeHome)
+    assert.equal(options.env.USERPROFILE, nativeHome)
     assert.equal(options.env.GIT_ALLOW_PROTOCOL, 'file')
     assert.equal(options.env.GIT_PROTOCOL_FROM_USER, '0')
     assert.equal(options.env.GIT_CONFIG_NOSYSTEM, '1')
@@ -702,7 +740,7 @@ test('clean-home activation isolates skills, versions physical roles, binds one 
     if (process.platform === 'win32') {
       assert.equal(record.activationBoundary.sandboxIdentity.kind, 'windows-cap-sid-v1')
       assert.equal(record.activationBoundary.sandboxIdentity.path,
-        path.join(launchObservation.activationRoot, 'cap_sid'))
+        path.join(nativeHome, 'cap_sid'))
       assert.equal(record.activationBoundary.sandboxIdentity.sha256,
         sha256(record.activationBoundary.sandboxIdentity.path))
       assert.match(record.activationBoundary.sandboxIdentity.sourceSha256, /^[a-f0-9]{64}$/)
@@ -753,7 +791,8 @@ test('clean-home activation isolates skills, versions physical roles, binds one 
     assert.match(supervisorSh, /exec node "\$RUNTIME" --supervisor "\$@"/)
     assert.match(supervisorPs, /@\(\$runtime, '--supervisor'\)/)
     assert.equal(fs.existsSync(path.join(activationRoot, '.capability')), false)
-    assert.equal(fs.existsSync(path.join(activationRoot, 'auth.json')), true)
+    assert.equal(fs.existsSync(path.join(activationRoot, 'auth.json')), false)
+    assert.equal(fs.existsSync(path.join(nativeHome, 'auth.json')), true)
     return { status: 0 }
   }
 
@@ -774,6 +813,7 @@ test('clean-home activation isolates skills, versions physical roles, binds one 
   assert.deepEqual(finalRecord.supervisorRuntime, launchObservation.record.supervisorRuntime)
   assert.equal(fs.existsSync(path.join(launchObservation.activationRoot, '.capability')), false)
   assert.equal(fs.existsSync(path.join(launchObservation.activationRoot, 'auth.json')), false)
+  assert.equal(fs.existsSync(path.join(launchObservation.nativeHome, 'auth.json')), false)
 
   const strictConfig = childProcess.spawnSync(REAL_CODEX_COMMAND, [
     'exec', '--strict-config', '--profile', 'autoprompt', '--cd', context.target,
@@ -808,40 +848,137 @@ test('clean-home activation isolates skills, versions physical roles, binds one 
   assert.doesNotMatch(modelVisible, /ambient-noise/)
   assert.doesNotMatch(modelVisible, /problem-finder/)
 
-  const sandboxEnvironmentPath = path.join(context.target, '.autoprompt-sandbox-environment.json')
-  const sandboxEnvironment = childProcess.spawnSync(REAL_CODEX_COMMAND, [
-    'sandbox',
-    '--permission-profile', ':workspace',
-    '--sandbox-state-disable-network',
-    '--profile', 'autoprompt',
-    '--cd', context.target,
-    process.execPath, '-e', [
-      'require("node:fs").writeFileSync(process.argv[1],JSON.stringify({',
-      'git:process.env.GIT_ALLOW_PROTOCOL,',
-      'gh:process.env.GH_CONFIG_DIR,',
-      'token:Object.hasOwn(process.env,"GITHUB_TOKEN"),',
-      'modelKey:Object.hasOwn(process.env,"OPENAI_API_KEY")',
-      '}),{flag:"wx",mode:0o600})',
-    ].join(''), sandboxEnvironmentPath,
-  ], {
-    cwd: context.target,
-    encoding: 'utf8',
-    env: realCodexEnvironment(launchObservation.options.env),
-    shell: false,
-    timeout: 15_000,
+  // The diagnostic `codex sandbox` command inherits its caller's environment.
+  // Exercise the actual model shell tool, which applies shell_environment_policy,
+  // through a local fake Responses endpoint with synthetic transport credentials.
+  const copiedRuntime = require(path.join(
+    launchObservation.activationRoot, 'skills', 'autoprompt', 'workflow', 'phase-budget.js',
+  ))
+  const environmentProbePath = path.join(context.target, '.autoprompt-environment-probe.cjs')
+  fs.writeFileSync(environmentProbePath, [
+    'console.log(JSON.stringify({',
+    'git:process.env.GIT_ALLOW_PROTOCOL,',
+    'gh:process.env.GH_CONFIG_DIR,',
+    'token:Object.hasOwn(process.env,"GITHUB_TOKEN"),',
+    'modelKey:Object.hasOwn(process.env,"OPENAI_API_KEY")',
+    '}))',
+  ].join(''), { flag: 'wx', mode: 0o600 })
+  const quote = value => "'" + value.replaceAll("'", process.platform === 'win32' ? "''" : "'\\''") + "'"
+  const command = (process.platform === 'win32' ? '& ' : '') +
+    [process.execPath, environmentProbePath].map(quote).join(' ')
+  const transport = copiedRuntime.materializeCodexControlledTransport(
+    path.join(context.sandbox, 'shell-environment-transport'),
+    { logicalRole: 'worker', assignment: { model: 'gpt-5.6-sol' } },
+  )
+  let requestCount = 0
+  let nativeShellResult = null
+  let fixtureError = null
+  const probeServer = http.createServer((request, response) => {
+    let body = ''
+    request.setEncoding('utf8')
+    request.on('data', chunk => { body += chunk })
+    request.on('end', () => {
+      try {
+        assert.equal(request.method, 'POST')
+        assert.equal(request.url, '/v1/responses')
+        assert.equal(request.headers.authorization, 'Bearer synthetic-model-transport-key')
+        const input = JSON.parse(body)
+        requestCount += 1
+        assert.ok(requestCount <= 2, 'one shell call and one terminal response only')
+        if (requestCount === 2) {
+          nativeShellResult = input.input.find(item => item.type === 'function_call_output' &&
+            item.call_id === 'environment-probe')
+          assert.ok(nativeShellResult, 'native shell result must return to the provider')
+        }
+        const item = requestCount === 1
+          ? { type: 'function_call', id: 'shell-environment-probe', call_id: 'environment-probe',
+              name: 'shell_command', arguments: JSON.stringify({ command, timeout_ms: 10000 }) }
+          : { type: 'message', role: 'assistant', id: 'environment-complete',
+              content: [{ type: 'output_text', text: 'Environment probe complete.' }] }
+        const id = `environment-response-${requestCount}`
+        const events = [
+          { type: 'response.created', response: { id } },
+          { type: 'response.output_item.done', item },
+          { type: 'response.completed', response: { id,
+            usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } } },
+        ]
+        response.writeHead(200, { 'content-type': 'text/event-stream' })
+        response.end(events.map(event =>
+          `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''))
+      } catch (error) {
+        fixtureError = error
+        response.writeHead(500, { 'content-type': 'application/json' })
+        response.end('{"error":{"message":"local environment fixture failed"}}')
+      }
+    })
   })
+  await new Promise((resolve, reject) => {
+    probeServer.once('error', reject)
+    probeServer.listen(0, '127.0.0.1', resolve)
+  })
+  let sandboxEnvironment
+  const unboundProfile = path.join(launchObservation.nativeHome, 'autoprompt.config.toml')
+  fs.writeFileSync(unboundProfile, 'unexpected_unbound_native_configuration = true\n', { flag: 'wx', mode: 0o600 })
+  try {
+    const provider = 'model_providers.autoprompt-environment-probe=' +
+      `{name="local environment probe",base_url="http://127.0.0.1:${probeServer.address().port}/v1",` +
+      'env_key="OPENAI_API_KEY",wire_api="responses",requires_openai_auth=false,' +
+      'supports_websockets=false,request_max_retries=0,stream_max_retries=0}'
+    sandboxEnvironment = await new Promise((resolve, reject) => {
+      const child = childProcess.spawn(REAL_CODEX_COMMAND, [
+        'exec', '--json', '--ephemeral', '--strict-config', '--profile', 'autoprompt',
+        '--ignore-user-config',
+        ...sealedProfileOverrides(
+          path.join(launchObservation.activationRoot, 'autoprompt.config.toml'),
+          launchObservation.record.activationBoundary.enforcementProof.profileSha256,
+        ),
+        '--skip-git-repo-check', '--disable', 'unified_exec',
+        '--disable', 'code_mode', '--disable', 'code_mode_only',
+        '--disable', 'enable_request_compression',
+        '-c', 'allow_login_shell=false',
+        '-c', `model_catalog_json=${JSON.stringify(transport.modelCatalogPath)}`,
+        '-c', `model_instructions_file=${JSON.stringify(transport.instructionsPath)}`,
+        '-c', 'model_provider="autoprompt-environment-probe"', '-c', provider,
+        '-m', 'gpt-5.6-sol', '--cd', context.target,
+        'Run the supplied environment probe once, then finish.',
+      ], {
+        cwd: context.target,
+        env: realCodexEnvironment(launchObservation.options.env),
+        shell: false,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+      let stdout = '', stderr = '', timedOut = false
+      const timeout = setTimeout(() => { timedOut = true; child.kill('SIGKILL') }, 30000)
+      child.stdout.on('data', chunk => { stdout += chunk })
+      child.stderr.on('data', chunk => { stderr += chunk })
+      child.once('error', error => { clearTimeout(timeout); reject(error) })
+      child.once('close', status => {
+        clearTimeout(timeout)
+        resolve({ status, stdout, stderr, timedOut })
+      })
+    })
+  } finally {
+    fs.unlinkSync(unboundProfile)
+    probeServer.closeAllConnections()
+    await new Promise(resolve => probeServer.close(resolve))
+  }
+  assert.ifError(fixtureError)
+  assert.equal(sandboxEnvironment.timedOut, false, 'native environment probe timed out')
   assert.equal(sandboxEnvironment.status, 0,
-    `${sandboxEnvironment.stderr || ''}\n${sandboxEnvironment.error?.stack || ''}`)
-  const sandboxObserved = JSON.parse(fs.readFileSync(sandboxEnvironmentPath, 'utf8'))
-  fs.unlinkSync(sandboxEnvironmentPath)
+    `${sandboxEnvironment.stderr}\n${sandboxEnvironment.stdout}`)
+  assert.equal(requestCount, 2)
+  const commands = sandboxEnvironment.stdout.trim().split('\n').map(line => JSON.parse(line))
+    .filter(event => event.type === 'item.completed' && event.item.type === 'command_execution')
+  assert.equal(commands.length, 1, `expected one native shell execution: ${sandboxEnvironment.stdout}`)
+  assert.equal(commands[0].item.exit_code, 0,
+    `native shell failed: ${JSON.stringify(nativeShellResult)}\n${commands[0].item.aggregated_output}`)
+  const sandboxObserved = JSON.parse(commands[0].item.aggregated_output.trim())
+  fs.unlinkSync(environmentProbePath)
   assert.equal(sandboxObserved.git, 'file')
   assert.equal(sandboxObserved.gh, path.join(launchObservation.activationRoot, 'gh-config'))
   assert.equal(sandboxObserved.token, false)
   assert.equal(sandboxObserved.modelKey, false, 'model transport auth must not enter command shells')
 
-  const copiedRuntime = require(path.join(
-    launchObservation.activationRoot, 'skills', 'autoprompt', 'workflow', 'phase-budget.js',
-  ))
   const proof = JSON.parse(fs.readFileSync(
     path.join(launchObservation.activationRoot, 'enforcement-proof.json'), 'utf8',
   ))
@@ -1543,8 +1680,11 @@ test('a pre-spawn failure revokes capability state and removes activation auth m
     target: context.target,
     ttlSeconds: 60,
   })
-  const privateAuth = path.join(prepared.activationRoot, 'auth.json')
-  fs.writeFileSync(privateAuth, '{"stale":true}\n', { mode: 0o600 })
+  const legacyAuth = path.join(prepared.activationRoot, 'auth.json')
+  const privateAuth = path.join(activation.nativeCodexHomePath(prepared.activationRoot), 'auth.json')
+  for (const file of [legacyAuth, privateAuth]) {
+    fs.writeFileSync(file, '{"stale":true}\n', { mode: 0o600 })
+  }
   let supervisorLaunches = 0
   const probesOnly = (command, args, options) => {
     if (command === 'git' || isCodexProbeCommand(command) || isNetworkBaselineProbe(command, args)) {
@@ -1561,9 +1701,10 @@ test('a pre-spawn failure revokes capability state and removes activation auth m
     spawnSync: probesOnly,
     target: context.target,
     ttlSeconds: 60,
-  }))
+  }), error => error.code === 'EEXIST' && error.path === privateAuth)
   assert.equal(supervisorLaunches, 0)
   assert.equal(fs.existsSync(privateAuth), false)
+  assert.equal(fs.existsSync(legacyAuth), false)
   const record = JSON.parse(fs.readFileSync(prepared.recordPath, 'utf8'))
   assert.equal(record.status, 'revoked')
   assert.equal(record.capability.status, 'revoked')

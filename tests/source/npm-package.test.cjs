@@ -439,6 +439,7 @@ test('package metadata is public-ready under the exact available name and declar
     'docs/CODE_OF_CONDUCT.md',
     'docs/CONTRIBUTING.md',
     'docs/CONTRIBUTORS.md',
+    'docs/translations/',
     'docs/lima-runtime.md',
     'docs/SECURITY.md',
     'docs/SUPPORT.md',

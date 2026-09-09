@@ -9,7 +9,7 @@
       "status": "reviewed",
       "releaseScope": {
         "provider": "claude",
-        "reviewedRuntimeDigest": "1d262afcc2dcfb5a4f4b2b10f9126e0699773aec18c6b75f5582bc13c69dd944",
+        "reviewedRuntimeDigest": "dddc1a88a5a0f39ee304332aedb6b99b82935bde0183bd4ebd34aedce95a8671",
         "platform": "linux",
         "architecture": "x64",
         "executableReviewSha256": "26d020351e8112f4006790f3cfce43b4c9df0c1bb1d0e542364d64151b81d5ba",
@@ -20,7 +20,7 @@
           "packageCount": 2
         }
       },
-      "releaseIdentityHash": "13201b50d939dfca6f444727d15c6c4b03f9e0d31086d82d124d3b0986f412a6",
+      "releaseIdentityHash": "edc02b753ad46fa6c68b621376950f0adcd9dc289d71fbff83f7efde5e2cce93",
       "protocol": {
         "source": "scripts/harness-v2-transport.cjs",
         "sha256": "40b47c16e0dec3c48c7dfacb690e0aa26d588d529ffb4a522d522cd1a184e034"
@@ -104,9 +104,9 @@
         "issuer": "autoprompt-maintainer-release-review",
         "reviewId": "claude-v2.0.0-beta.1-maintainer-review-20260909"
       },
-      "issuedAt": "2026-09-09T18:19:38.890Z",
+      "issuedAt": "2026-09-09T21:00:07.718Z",
       "expiresAt": "2027-03-09T23:59:59.000Z",
-      "reviewDigest": "2bbe74a68008c51ded2e436088fe9ccf93590fd6fbf521431a7da124c1ff223f"
+      "reviewDigest": "56e8875b54dc25960bbb075621af864e05823707825d9faf19309184902e9b04"
     },
     {
       "schemaVersion": "harness-v2-reviewed-local-canary.v1",
@@ -115,7 +115,7 @@
       "status": "reviewed",
       "releaseScope": {
         "provider": "deepseek",
-        "reviewedRuntimeDigest": "f6e347442aff9932398841d8c7ea1319614fb3742b3ed713d55058b6f3ff9602",
+        "reviewedRuntimeDigest": "544487de902613c919dcb828fbacedd3e0a233c8a68981a3d920305611d3134f",
         "platform": "linux",
         "architecture": "x64",
         "executableReviewSha256": "dc23f6c5dd7df8834e3e38bdb9609d77b459834681ae9b7133b417b0c35f3166",
@@ -126,7 +126,7 @@
           "packageCount": 522
         }
       },
-      "releaseIdentityHash": "e513901357ebcc9ef767f31ccac3895ca6d162d0b44041f0b371967d78149025",
+      "releaseIdentityHash": "8ee72976446e0e0f830c9bbf19f5b471b1fe73dde849dac489830900fcfccc1a",
       "protocol": {
         "source": "scripts/harness-v2-transport.cjs",
         "sha256": "40b47c16e0dec3c48c7dfacb690e0aa26d588d529ffb4a522d522cd1a184e034"
@@ -210,9 +210,9 @@
         "issuer": "autoprompt-maintainer-release-review",
         "reviewId": "deepseek-v2.0.0-beta.1-maintainer-review-20260909"
       },
-      "issuedAt": "2026-09-09T18:19:38.890Z",
+      "issuedAt": "2026-09-09T21:00:07.718Z",
       "expiresAt": "2027-03-09T23:59:59.000Z",
-      "reviewDigest": "3102385f2a2472d83f5ed5b52e5b56ddf96105093e0fd3adb6b516fcda933f3c"
+      "reviewDigest": "d429cbff47150aa9a228207824638c3ea39f8e91cb18a17fb982d6ba581ad7d4"
     },
     {
       "schemaVersion": "harness-v2-reviewed-local-canary.v1",
@@ -221,7 +221,7 @@
       "status": "reviewed",
       "releaseScope": {
         "provider": "grok",
-        "reviewedRuntimeDigest": "b4b15acfc843303cc9cb97e5b9630bb61c77b2abf95e7278a09f2a0d04d97b70",
+        "reviewedRuntimeDigest": "1ea32da605b6c83517dd716c2ba2c3209ddf9e871780c033d02c4f1def88bfe7",
         "platform": "linux",
         "architecture": "x64",
         "executableReviewSha256": "edf79521581bb5e6b95abef848491a6a742e860da3e237ebe86a280d30dce4c1",
@@ -232,7 +232,7 @@
           "packageCount": 0
         }
       },
-      "releaseIdentityHash": "a55901e7b63e2c2d3819736df9cf85a478d54bbff024d9bb90c12084c9a41b70",
+      "releaseIdentityHash": "25366ff528785be095bbeeef0731a61d27ac836061384586d612beecb53b733d",
       "protocol": {
         "source": "scripts/harness-v2-transport.cjs",
         "sha256": "40b47c16e0dec3c48c7dfacb690e0aa26d588d529ffb4a522d522cd1a184e034"
@@ -312,9 +312,9 @@
         "issuer": "autoprompt-maintainer-release-review",
         "reviewId": "grok-v2.0.0-beta.1-maintainer-review-20260909"
       },
-      "issuedAt": "2026-09-09T18:19:38.890Z",
+      "issuedAt": "2026-09-09T21:00:07.718Z",
       "expiresAt": "2027-03-09T23:59:59.000Z",
-      "reviewDigest": "64f9f6a9cae04c8d0202843e811ecf2b168750ea252495d87cbdaff9b583d731"
+      "reviewDigest": "09569cb4d2d91fe6435e016dba4b9c5f2dd08d9f5df1a88672392b1a0f3c8a01"
     },
     {
       "schemaVersion": "harness-v2-reviewed-local-canary.v1",
@@ -323,7 +323,7 @@
       "status": "reviewed",
       "releaseScope": {
         "provider": "hermes",
-        "reviewedRuntimeDigest": "49a87ea153a20ba0aca9e945d8ceb7ace97bc0571b88200db4df16bf36c56e99",
+        "reviewedRuntimeDigest": "d1c72123de7dee08ad6df6056201a30a713828d1aed58b466f23437a91688f7e",
         "platform": "linux",
         "architecture": "x64",
         "executableReviewSha256": "c214aa576f019bc82754571152b1eef908b785aa059c0a79ec6a1ce7df157601",
@@ -334,7 +334,7 @@
           "packageCount": 79
         }
       },
-      "releaseIdentityHash": "c8211bf456b52501e5be3d54ea51d18d7dc002c5dd6d4acc213cef94646dc158",
+      "releaseIdentityHash": "378862bd4e42cb88e9ef2becfd85af871b303326149f0e786ee2d3d2123014bf",
       "protocol": {
         "source": "scripts/harness-v2-transport.cjs",
         "sha256": "40b47c16e0dec3c48c7dfacb690e0aa26d588d529ffb4a522d522cd1a184e034"
@@ -418,9 +418,9 @@
         "issuer": "autoprompt-maintainer-release-review",
         "reviewId": "hermes-v2.0.0-beta.1-maintainer-review-20260909"
       },
-      "issuedAt": "2026-09-09T18:19:38.890Z",
+      "issuedAt": "2026-09-09T21:00:07.718Z",
       "expiresAt": "2027-03-09T23:59:59.000Z",
-      "reviewDigest": "99c67c8cd245ef45cccfb1eb0e66eec3082d9ed35a108eea37b174aa8544e646"
+      "reviewDigest": "facd058410612e0dc1a5cb53b02eaffc08f77536252650f5d83e37f4a82af745"
     },
     {
       "schemaVersion": "harness-v2-reviewed-local-canary.v1",
@@ -429,7 +429,7 @@
       "status": "reviewed",
       "releaseScope": {
         "provider": "kilo",
-        "reviewedRuntimeDigest": "5abfab4f0a6d436be754fa5c2ec7ca1f300b7e8423c3bb844f55558494c48519",
+        "reviewedRuntimeDigest": "9394a5457f3cd6326831fcf42aa6089a269a4efaa7a19c3690cf9759a2e9c048",
         "platform": "linux",
         "architecture": "x64",
         "executableReviewSha256": "2dd7a1ec0a5a56fc925f30c3a107a0e52dce6c6b18216a86a3ebaffe1643d594",
@@ -440,7 +440,7 @@
           "packageCount": 3
         }
       },
-      "releaseIdentityHash": "95a2c4c74c8a15159d71d0a8663d5c069000c7567032e1096881e09927bdd722",
+      "releaseIdentityHash": "e6703fd53297d3787f1e68158b2ef58a7e2bbe5dec1b6021718987237a71929a",
       "protocol": {
         "source": "scripts/harness-v2-transport.cjs",
         "sha256": "40b47c16e0dec3c48c7dfacb690e0aa26d588d529ffb4a522d522cd1a184e034"
@@ -520,9 +520,9 @@
         "issuer": "autoprompt-maintainer-release-review",
         "reviewId": "kilo-v2.0.0-beta.1-maintainer-review-20260909"
       },
-      "issuedAt": "2026-09-09T18:19:38.890Z",
+      "issuedAt": "2026-09-09T21:00:07.718Z",
       "expiresAt": "2027-03-09T23:59:59.000Z",
-      "reviewDigest": "72f43db14c526f914876f69838d8063026c56e3c141a71a15d3ae29e05687e45"
+      "reviewDigest": "53c4c18b6c33f714bb5d99a1452a28af07fc323a0e29e95923f4a2e5af6e906f"
     },
     {
       "schemaVersion": "harness-v2-reviewed-local-canary.v1",
@@ -531,7 +531,7 @@
       "status": "reviewed",
       "releaseScope": {
         "provider": "omp",
-        "reviewedRuntimeDigest": "17e03757d4fa0498b509dfb3d73776a83ad934204a93347373933ffaf174f0ea",
+        "reviewedRuntimeDigest": "3c897358c65f38e03bcbdcf628055533de9ae7e7a118ee1488c536df4b98d392",
         "platform": "linux",
         "architecture": "x64",
         "executableReviewSha256": "3952b49e821e7f7d28925a9fdbd68b40051225a1468e4c0b55bee65a152288e0",
@@ -542,7 +542,7 @@
           "packageCount": 155
         }
       },
-      "releaseIdentityHash": "dc0377fd92dc56eefc2378653c911bdd2f8c91379df2790ff5715ef74d3bdc4f",
+      "releaseIdentityHash": "80fd99bb019a3ebb44186040a38536ee2a725e0f1b61627fe009ecaf3957df53",
       "protocol": {
         "source": "scripts/harness-v2-transport.cjs",
         "sha256": "40b47c16e0dec3c48c7dfacb690e0aa26d588d529ffb4a522d522cd1a184e034"
@@ -626,9 +626,9 @@
         "issuer": "autoprompt-maintainer-release-review",
         "reviewId": "omp-v2.0.0-beta.1-maintainer-review-20260909"
       },
-      "issuedAt": "2026-09-09T18:19:38.890Z",
+      "issuedAt": "2026-09-09T21:00:07.718Z",
       "expiresAt": "2027-03-09T23:59:59.000Z",
-      "reviewDigest": "4292f0e31f73edcdbc11ac154d0bb92b64e40731792c8081e226c3cf5fa35421"
+      "reviewDigest": "8abe225e2c6c1cdf2914096c570769f647138e3a39565776d3bbedb18e36ab49"
     },
     {
       "schemaVersion": "harness-v2-reviewed-local-canary.v1",
@@ -637,7 +637,7 @@
       "status": "reviewed",
       "releaseScope": {
         "provider": "opencode",
-        "reviewedRuntimeDigest": "54c09934eab6bd903dd26b03ea88b10510d6a504f7a6e5c40502e4a17a010fda",
+        "reviewedRuntimeDigest": "d76a49a017a3121a3de51775a6edd7fb3ce58a21043ec819d3caeadeb81a8863",
         "platform": "linux",
         "architecture": "x64",
         "executableReviewSha256": "ca6c0e1f42be3120595bf6848937e7586ec862c87fa7aa111e89c7cc6e9a4650",
@@ -648,7 +648,7 @@
           "packageCount": 3
         }
       },
-      "releaseIdentityHash": "984df37ab6f2f2c8961fca58b9edd15d88b17743398b7e42b833d84b78ce9c8a",
+      "releaseIdentityHash": "737ef53430bb94d857b154cdf51d5408a015bffc835f06330be25361ccc52c1d",
       "protocol": {
         "source": "scripts/harness-v2-transport.cjs",
         "sha256": "40b47c16e0dec3c48c7dfacb690e0aa26d588d529ffb4a522d522cd1a184e034"
@@ -728,9 +728,9 @@
         "issuer": "autoprompt-maintainer-release-review",
         "reviewId": "opencode-v2.0.0-beta.1-maintainer-review-20260909"
       },
-      "issuedAt": "2026-09-09T18:19:38.890Z",
+      "issuedAt": "2026-09-09T21:00:07.718Z",
       "expiresAt": "2027-03-09T23:59:59.000Z",
-      "reviewDigest": "3ccde859c3ad5b0065a48136b5422af3ccb8fcc9621d7fae3e3685b7a223d024"
+      "reviewDigest": "5eff8f11bcbf521cd0295c8b84be0e9fa126f2e91c77d1f185e0233a55e867d1"
     },
     {
       "schemaVersion": "harness-v2-reviewed-local-canary.v1",
@@ -739,7 +739,7 @@
       "status": "reviewed",
       "releaseScope": {
         "provider": "prime",
-        "reviewedRuntimeDigest": "e6d7462c695f3cd1b7d0e34e500c7903b19cce0e4424c3814ccb789b58687f45",
+        "reviewedRuntimeDigest": "f3e62d934815c37d3804920742440c4f5e7e313545c556e3eab5f1c709437c75",
         "platform": "linux",
         "architecture": "x64",
         "executableReviewSha256": "a6144570af2554b537530372cb3080b4f7713875e8d9d4677e453bb1040f1ec5",
@@ -750,7 +750,7 @@
           "packageCount": 192
         }
       },
-      "releaseIdentityHash": "f08221790ef6c2f7fbdfe5fbe7f21cc24847b597c537a640b1b5d22dfc60790e",
+      "releaseIdentityHash": "0f8cb1ac0c862b11f757fa6cfc6c4e77f8c7169a5c4f9257f46818aaf73d55be",
       "protocol": {
         "source": "scripts/harness-v2-transport.cjs",
         "sha256": "40b47c16e0dec3c48c7dfacb690e0aa26d588d529ffb4a522d522cd1a184e034"
@@ -830,9 +830,9 @@
         "issuer": "autoprompt-maintainer-release-review",
         "reviewId": "prime-v2.0.0-beta.1-maintainer-review-20260909"
       },
-      "issuedAt": "2026-09-09T18:19:38.890Z",
+      "issuedAt": "2026-09-09T21:00:07.718Z",
       "expiresAt": "2027-03-09T23:59:59.000Z",
-      "reviewDigest": "17e0f24b50fd44849bbfc5d864952b0d396e00ffee63969eb07d45287bd039a6"
+      "reviewDigest": "e8c2c79b3b8b6d6bb1ec299780a6bce569e1c3ef12c2dec9070bb77ecd0a6cdf"
     },
     {
       "schemaVersion": "harness-v2-reviewed-local-canary.v1",
@@ -841,7 +841,7 @@
       "status": "reviewed",
       "releaseScope": {
         "provider": "reasonix",
-        "reviewedRuntimeDigest": "997f7b54106cbf833e39cde7a28c1b242fc3c4b7c87cb9787e95f65f4a2e8c2e",
+        "reviewedRuntimeDigest": "6beb4c2d1b0d93146ed0df1de33227d938605627aca7807dc31ae512054a9c3c",
         "platform": "linux",
         "architecture": "x64",
         "executableReviewSha256": "d0864586ef4808a6645bbab6018db19279629573e46e01b3fd0d8aa6b71c0508",
@@ -852,7 +852,7 @@
           "packageCount": 0
         }
       },
-      "releaseIdentityHash": "0ab6fcd1cf5f0ab22d6b91a05662e55a724f36cc143af267cec3cae41de23ee3",
+      "releaseIdentityHash": "f4cbdce63878f5befd15110de3c52e873f28f7bca4aeff5102a29768e0810aba",
       "protocol": {
         "source": "agents/reasonix/workflow/transport.js",
         "sha256": "0a1886d2abd2ec0c4b7d555211067b3ae52b05e503231ecba912e7d591dc3fca"
@@ -940,9 +940,9 @@
         "issuer": "autoprompt-maintainer-release-review",
         "reviewId": "reasonix-v2.0.0-beta.1-maintainer-review-20260909"
       },
-      "issuedAt": "2026-09-09T18:19:38.890Z",
+      "issuedAt": "2026-09-09T21:00:07.718Z",
       "expiresAt": "2027-03-09T23:59:59.000Z",
-      "reviewDigest": "51cceda763daeed78abca778f7c85c7502f793a71fa016c9762dbb7f6b43aa73"
+      "reviewDigest": "79a713bcce3a6e34ba9dfb1094988e0e291ec0df2f93e7e4e3992543acf41568"
     },
     {
       "schemaVersion": "harness-v2-reviewed-local-canary.v1",
@@ -951,7 +951,7 @@
       "status": "reviewed",
       "releaseScope": {
         "provider": "vscode",
-        "reviewedRuntimeDigest": "1aaa3bc9c02c42619016320956c86532adde1fee70cde0dab7fd46f19728cb93",
+        "reviewedRuntimeDigest": "ea966795d5cfc8f1b3f49ff8c944005a6a813fd9545cc9962ed9b2f63ea7c835",
         "platform": "linux",
         "architecture": "x64",
         "executableReviewSha256": "34912494509486296a3bd9aecb512694c98523d0f6f23cfceb5a95b5088c721b",
@@ -962,7 +962,7 @@
           "packageCount": 1
         }
       },
-      "releaseIdentityHash": "e714eba3fac8fb1725c569fca17d5d930d79c8a0664c3f7f61f3c1e94dec3738",
+      "releaseIdentityHash": "4f6a69aed45ff44b3aa80f7673d660e47eb4a1d62a530f156197a5b8c567620b",
       "protocol": {
         "source": "scripts/harness-v2-transport.cjs",
         "sha256": "40b47c16e0dec3c48c7dfacb690e0aa26d588d529ffb4a522d522cd1a184e034"
@@ -1050,9 +1050,9 @@
         "issuer": "autoprompt-maintainer-release-review",
         "reviewId": "vscode-v2.0.0-beta.1-maintainer-review-20260909"
       },
-      "issuedAt": "2026-09-09T18:19:38.890Z",
+      "issuedAt": "2026-09-09T21:00:07.718Z",
       "expiresAt": "2027-03-09T23:59:59.000Z",
-      "reviewDigest": "7c79183cb440f2cd402923bd59ff9b04f6039be43a7bc61bdfc24cadbd1f2fea"
+      "reviewDigest": "d722f94b8f461d29e9f3e46f9003807ae6913d257c3060f915f4aea276810b48"
     }
   ],
   "note": "Maintainer-authenticated exact-release reviews under reviewed-local-release-v1; each activation still requires a fresh closed native canary. No independent signature claim."
