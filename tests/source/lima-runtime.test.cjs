@@ -103,7 +103,11 @@ test('Lima preserves a nonzero activation CLI failure before any activation rece
 })
 
 test('Lima non-Codex receipt binds the provider-normalized connection identity, not a Codex endpoint field', () => {
-  const record = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'lima-runtime', 'omp-activation.json'), 'utf8'))
+  const record = {
+    target: { realpath: '/guest/project' },
+    connectionSha256: 'b'.repeat(64),
+    activationBoundary: {},
+  }
   const configuration = { provider: 'omp', endpoint: 'https://gateway.example.invalid/v1', connectionIdentitySha256: record.connectionSha256 }
   assert.equal(record.activationBoundary.providerApiBaseUrl, undefined)
   assert.doesNotThrow(() => lifecycle.validateActivationBinding(record, configuration, record.target.realpath))
