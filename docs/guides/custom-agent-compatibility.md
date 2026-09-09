@@ -18,7 +18,7 @@ Read the Autoprompt repository and the tool's official documentation or source. 
 Check every requirement:
 1. Explicit entry: Autoprompt starts only when the user explicitly invokes it. An ordinary task must not start it automatically.
 2. Native discovery: the host loads a stable skill, instruction, plugin, or package entry path.
-3. Named workers: it can expose and dispatch 25 isolated roles, return each result, and support recursion to depth 4 directly or through an adapter.
+3. Named workers: it can expose the provider's declared role set, return each result, and enforce the declared hierarchy directly or through an adapter.
 4. Run controls: it can enforce tokensaver, wide, and custom concurrency plus a harness-specific agent cap.
 5. Worker tools: scoped filesystem access, shell commands, and real test execution are available to workers.
 6. Durable state: run plans, evidence, failures, and resumable state can be stored in the workspace.
@@ -51,13 +51,15 @@ A copied `SKILL.md` is not enough. The host needs a native adapter and a safe li
 | Prime Agent | 0.7.2; checked on 0.7.2 | Native package, personas, framework prompts, guarded recursion | Inherits selected parent model |
 | Oh My Pi | 17.4.0+; adapter contract, install lifecycle, and native role payload verified for 17.4.0 | Skill, Markdown agents, native `spawns` allowlists | Inherits selected parent model |
 | DeepSeek Harness | 0.1.0-rc.7+; adapter contract, install lifecycle, and native role payload verified for 0.1.0-rc.7 | Skill, user preset, fixed-persona tools, headless patch | Inherits selected parent model |
-| Reasonix | 1.30.0+; adapter contract, install lifecycle, and native role payload verified for 1.30.0 | Skill and 25 manual native subagent profiles | Inherits selected parent model |
+| Hermes Agent | 0.21.1; v2 package and native session adapter; verification in progress | Skill, controller-owned native sessions, private tool-receipt projection | Explicit selected model and effort |
+| Grok Build | 1.0.13; v2 package and controller model proxy; verification in progress | Skill, controller model proxy, isolated native process | Explicit selected model and effort |
+| Reasonix | V2 port for 1.30.0; production conformance pending | Private controller and 32 manual profiles; one public launcher | Inheritance, explicit model/effort, measured registry selection |
 
 See the [support notes](../faq/which-coding-agents-are-supported.md).
 
 ## Build and check an adapter
 
-1. Map the entry, 25 roles, 18 frameworks, and runtime to native formats.
+1. Map the entry, canonical logical roles, compatibility bindings, 18 frameworks, and runtime to native formats. Do not copy Codex's physical-role count into another provider without proving the same isolation and dispatch semantics.
 2. Validate default and custom roots. Never trust a folder name.
 3. Fail closed when version or capability checks fail.
 4. Add transactional install, strict doctor, repair, update, receipt-scoped uninstall, collision checks, and rollback.

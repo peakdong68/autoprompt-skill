@@ -1,12 +1,7 @@
-# Claude custom agents
+# Claude Code private v2 roles
 
-These 25 `ap-*` files are the native Claude Code roles used by Autoprompt.
+The 32 physical profiles project the canonical role policy: seven active roles and 25 inactive compatibility redirects. Read [the policy](../role-policy.json) for exact parents, children, modes, resources, and schemas.
 
-| Layer | Agents |
-|---|---|
-| L1 | `ap-scope-coordinator`, `ap-feature-coordinator`, `ap-sweep-coordinator` |
-| L2 | `ap-manager` |
-| L3 | `ap-scoper`, `ap-synthesizer`, `ap-researcher`, `ap-planner`, `ap-reviewer`, `ap-implementer`, `ap-verifier`, `ap-sweeper`, `ap-framework-generator`, `ap-execharness-resolver`, `ap-intake` |
-| L4 | `ap-fresh-verifier`, `ap-depth-prober`, `ap-framework-validator`, `ap-juror`, `ap-goal-checker`, `ap-arbiter`, `ap-re-anchor`, `ap-scribe`, `ap-janitor`, `ap-preflight-probe` |
+The external controller owns all physical launches. DIRECT and LIGHT have no mandatory coordinator. Leaves and compatibility aliases cannot dispatch; aliases cannot write or accept new v2 work.
 
-L0 is [`../SKILL.md`](../SKILL.md), the provider skill running in the parent session.
+These profiles belong in the private bundle. Use [the explicit launcher](../SKILL.md); role discovery is not activation or runtime admission.

@@ -8,6 +8,25 @@
 
 set -u
 
+# macOS ships Bash 3.2, while install-lib.sh requires Bash 4.3 features.
+# Re-exec before sourcing it; this block itself stays Bash 3.2 compatible.
+if [[ "$(uname -s 2>/dev/null || true)" == Darwin ]] && (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 3) )); then
+  autoprompt_modern_bash=''
+  for autoprompt_bash_candidate in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+    if [[ -x "$autoprompt_bash_candidate" ]] && "$autoprompt_bash_candidate" -c '(( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 3) ))' >/dev/null 2>&1; then
+      autoprompt_modern_bash="$autoprompt_bash_candidate"; break
+    fi
+  done
+  if [[ -z "$autoprompt_modern_bash" ]] && command -v brew >/dev/null 2>&1; then
+    autoprompt_bash_prefix="$(brew --prefix bash 2>/dev/null || true)"
+    autoprompt_bash_candidate="$autoprompt_bash_prefix/bin/bash"
+    if [[ -x "$autoprompt_bash_candidate" ]] && "$autoprompt_bash_candidate" -c '(( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 3) ))' >/dev/null 2>&1; then autoprompt_modern_bash="$autoprompt_bash_candidate"; fi
+  fi
+  if [[ -n "$autoprompt_modern_bash" ]]; then exec "$autoprompt_modern_bash" "$0" "$@"; fi
+  printf 'Error: Bash 4.3 or newer is required on macOS. Install it with: brew install bash\n' >&2
+  exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB="$SCRIPT_DIR/lib/install-lib.sh"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -18,8 +37,10 @@ if [ ! -f "$LIB" ]; then
 fi
 # shellcheck source=/dev/null
 . "$LIB"
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/harness-v2.sh"
 
-CLIENTS_ALL=(prime vscode claude codex opencode kilo omp deepseek reasonix)
+CLIENTS_ALL=(prime vscode claude codex opencode kilo omp deepseek hermes grok reasonix)
 LEGACY_CLEANUP_CLIENTS=(vibe cursor roo gemini cline goose dcode)
 RESULT_ROWS=()
 UNINSTALL_EXIT_CODE=0
@@ -34,12 +55,38 @@ config_root() {
   autoprompt_config_root "$client"
 }
 
+codex_maintenance() {
+  local root="$1" action="$2" helper output rc
+  [ -d "$root" ] || return 0
+  helper="$REPO_ROOT/scripts/codex-configure.cjs"
+  if ! command -v node >/dev/null 2>&1 || [ ! -f "$helper" ]; then
+    printf '%s\n' \
+      'Autoprompt uninstall (codex): unresolved activation state; node/helper unavailable.' >&2
+    return 1
+  fi
+  output="$(AUTOPROMPT_INSTALL_ROOT="$root" node "$helper" "$action" 2>&1)"; rc=$?
+  if [ "$rc" -ne 0 ]; then printf '%s\n' "$output" >&2; fi
+  return "$rc"
+}
+
 # uninstall_root <root> <label>: drive uninstall_client for one config-root. The <label>
 # is the client name passed to the library (used only in its summary line). Emits a
 # RESULT=/SKIP= row. The no-receipt case (library code 71) is a SKIP, not a failure.
 uninstall_root() {
   local root="$1" label="$2"
+  if [ "$label" = codex ] && ! codex_maintenance "$root" --revoke-all; then
+    RESULT_ROWS+=("RESULT=FAIL client=$label code=1")
+    UNINSTALL_EXIT_CODE=1
+    return 0
+  fi
   if [ ! -f "$root/$AUTOPROMPT_RECEIPT_NAME" ]; then
+    if [ "$label" = codex ] && ! codex_maintenance "$root" --has-known-residue; then
+      printf 'Autoprompt uninstall (codex): unresolved residue remains under %s categories=managed,known-legacy,unresolved-collision.\n' \
+        "$root" >&2
+      RESULT_ROWS+=("RESULT=FAIL client=$label code=3")
+      UNINSTALL_EXIT_CODE=1
+      return 0
+    fi
     printf 'Autoprompt uninstall (%s): SKIP - no install receipt under %s.\n' "$label" "$root" >&2
     RESULT_ROWS+=("SKIP=skip client=$label reason=no-receipt")
     return 0
@@ -61,10 +108,30 @@ uninstall_root() {
     return 0
   fi
   rm -f "$output" "$errors"
+  if [ "$label" = codex ] && ! codex_maintenance "$root" --has-known-residue; then
+    printf 'Autoprompt uninstall (codex): unresolved residue remains under %s categories=managed,known-legacy,unresolved-collision.\n' \
+      "$root" >&2
+    RESULT_ROWS+=("RESULT=FAIL client=$label code=3")
+    UNINSTALL_EXIT_CODE=1
+    return 0
+  fi
   local removed="${rec#*uninstall=ok removed=}"; removed="${removed%% *}"
   printf 'Autoprompt uninstall (%s): OK - %s\n' "$label" "$rec" >&2
   RESULT_ROWS+=("RESULT=OK client=$label removed=$removed")
   return 0
+}
+
+uninstall_reasonix_lifecycle() {
+  local root
+  root="$(config_root reasonix)"
+  if [ ! -f "$root/.autoprompt-reasonix-v2.json" ]; then
+    uninstall_root "$root" reasonix
+  elif node "$REPO_ROOT/scripts/reasonix-package.cjs" uninstall --root "$root"; then
+    RESULT_ROWS+=("RESULT=OK client=reasonix removed=private-v2")
+  else
+    RESULT_ROWS+=("RESULT=FAIL client=reasonix code=1")
+    UNINSTALL_EXIT_CODE=1
+  fi
 }
 
 uninstall_prime_lifecycle() {
@@ -119,7 +186,8 @@ main() {
   if [ "$target" = "all" ]; then
     local c root
     for c in "${CLIENTS_ALL[@]}"; do
-      if [ "$c" = prime ]; then uninstall_prime_lifecycle
+      if [ "$c" = reasonix ]; then uninstall_reasonix_lifecycle
+      elif is_harness_v2 "$c"; then uninstall_harness_v2_lifecycle "$c"
       else
         root="$(config_root "$c")"
         uninstall_root "$root" "$c"
@@ -136,7 +204,8 @@ main() {
     printf 'Autoprompt uninstall: unknown client %s.\n' "$target" >&2
     usage; exit 2
   fi
-  if [ "$target" = prime ]; then uninstall_prime_lifecycle
+  if [ "$target" = reasonix ]; then uninstall_reasonix_lifecycle
+  elif is_harness_v2 "$target"; then uninstall_harness_v2_lifecycle "$target"
   else uninstall_root "$(config_root "$target")" "$target"
   fi
   print_matrix

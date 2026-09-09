@@ -9,7 +9,7 @@ const path = require('node:path')
 const test = require('node:test')
 
 const ROOT = path.resolve(__dirname, '..', '..')
-const GIT_BASH = 'C:\\Program Files\\Git\\bin\\bash.exe'
+const GIT_BASH = require('../helpers/resolve-bash.cjs').resolveBash()
 
 function bashPath(value) {
   return value.replaceAll('\\', '/').replace(
@@ -18,8 +18,34 @@ function bashPath(value) {
   )
 }
 
+test('POSIX atomic bundle copies skip redundant mkdir while preserving copy and hash validation', () => {
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-posix-copy-'))
+  const source = path.join(sandbox, 'source.md'), root = path.join(sandbox, 'root')
+  const atomicParent = path.join(root, 'atomic'), codexParent = path.join(root, 'codex')
+  fs.writeFileSync(source, 'immutable source\n')
+  fs.mkdirSync(atomicParent, { recursive: true })
+  fs.mkdirSync(codexParent, { recursive: true })
+  const expected = require('node:crypto').createHash('sha256').update(fs.readFileSync(source)).digest('hex')
+  const probe = [
+    'set -eu',
+    `cd '${ROOT.replaceAll("'", "'\\''")}'`,
+    'source scripts/install/lib/install-lib.sh',
+    'mkdir_calls=0',
+    'mkdir() { mkdir_calls=$((mkdir_calls + 1)); command mkdir "$@"; }',
+    `_idem_atomic_copy '${source.replaceAll("'", "'\\''")}' '${path.join(atomicParent, 'one.md').replaceAll("'", "'\\''")}'`,
+    `_idem_codex_stable_source_copy '${root.replaceAll("'", "'\\''")}' '${source.replaceAll("'", "'\\''")}' '${path.join(codexParent, 'two.md').replaceAll("'", "'\\''")}' '${expected}'`,
+    'test "$mkdir_calls" -eq 0',
+    `cmp -s '${source.replaceAll("'", "'\\''")}' '${path.join(atomicParent, 'one.md').replaceAll("'", "'\\''")}'`,
+    `cmp -s '${source.replaceAll("'", "'\\''")}' '${path.join(codexParent, 'two.md').replaceAll("'", "'\\''")}'`,
+  ].join('\n')
+  try {
+    const result = childProcess.spawnSync('/bin/bash', ['--noprofile', '--norc', '-ceu', probe], { cwd: ROOT, encoding: 'utf8', timeout: 10000 })
+    assert.equal(result.status, 0, result.stderr)
+  } finally { fs.rmSync(sandbox, { recursive: true, force: true }) }
+})
+
 test('POSIX receipt path validation is bounded and rejects traversal', {
-  skip: process.platform !== 'win32' || !fs.existsSync(GIT_BASH),
+  skip: process.platform !== 'win32' || !Boolean(GIT_BASH),
   timeout: 12000,
 }, () => {
   const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-posix-paths-'))

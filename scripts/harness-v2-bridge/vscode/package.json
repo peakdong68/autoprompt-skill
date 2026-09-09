@@ -1,0 +1,28 @@
+{
+  "name": "autoprompt-native-bridge",
+  "displayName": "Autoprompt Native Transport Bridge",
+  "publisher": "autoprompt",
+  "version": "2.0.0",
+  "private": true,
+  "engines": {
+    "vscode": "^1.104.0"
+  },
+  "main": "./extension.cjs",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "autoprompt.native.capabilities",
+        "title": "Autoprompt: Inspect Native Transport Capabilities"
+      }
+    ],
+    "languageModelChatProviders": [
+      {
+        "vendor": "autoprompt-owned",
+        "displayName": "Autoprompt Owned BYOK"
+      }
+    ]
+  }
+}

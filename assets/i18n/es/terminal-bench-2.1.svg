@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1672 941" role="img" aria-labelledby="title desc">
   <title id="title">OpenCode 1.18.7 en Terminal-Bench 2.1</title>
-  <desc id="desc">Benchmark de Autoprompt que compara 60 de 89 tareas resueltas como referencia con 73 de 89 al usar Autoprompt.</desc>
+  <desc id="desc">Autoprompt · Benchmark de la versión 1 que compara 60 de 89 tareas resueltas como referencia con 73 de 89 al usar Autoprompt.</desc>
   <defs>
     <style>
       text { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Malgun Gothic", "Noto Sans Arabic", sans-serif; }
@@ -18,7 +18,7 @@
     </style>
   </defs>
   <rect width="1672" height="941" fill="#ffffff"/>
-  <text x="78" y="66" class="eyebrow">Benchmark de Autoprompt</text>
+  <text x="78" y="66" class="eyebrow">Autoprompt · Benchmark de la versión 1</text>
   <text x="78" y="126" class="title">OpenCode 1.18.7 en Terminal-Bench 2.1</text>
   <g class="grid">
     <line x1="170" y1="250" x2="1590" y2="250"/><line x1="170" y1="362" x2="1590" y2="362"/>
@@ -32,7 +32,7 @@
     <text x="138" y="481">60</text><text x="138" y="369">80</text><text x="138" y="257">100</text>
   </g>
   <rect x="350" y="432.448" width="360" height="377.552" fill="#c9c9ce"/>
-  <rect x="962" y="350.688" width="360" height="459.312" fill="#255c60"/>
+  <rect x="962" y="350.688" width="360" height="459.312" fill="#965477"/>
   <text x="530" y="490.448" class="value-dark" text-anchor="middle">67.42%</text>
   <text x="530" y="526.448" class="bar-copy-dark" text-anchor="middle">60/89 resueltas</text>
   <text x="530" y="858" class="category" text-anchor="middle">Referencia de OpenCode</text>

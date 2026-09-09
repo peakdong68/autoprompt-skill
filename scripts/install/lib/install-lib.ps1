@@ -31,18 +31,18 @@ $AutopromptClientBin = @{
     claude = 'claude'; codex = 'codex'; cursor = 'cursor-agent'; roo = 'roo';
     opencode = 'opencode'; kilo = 'kilo'; vscode = 'code';
     prime = 'prime-agent';
-    omp = 'omp'; deepseek = 'dsh'; reasonix = 'reasonix';
+    omp = 'omp'; deepseek = 'dsh'; hermes = 'hermes'; grok = 'grok'; reasonix = 'reasonix';
     dcode = 'dcode'; gemini = 'gemini'; cline = 'cline'; goose = 'goose'
 }
 $AutopromptVersionFlag = '--version'
 $AutopromptProbeTimeout = 30
 
-# Public install compatibility is a closed nine-provider registry. Historical
+# Public install compatibility is a closed public provider registry. Historical
 # path resolvers remain below only for receipt-owned cleanup of earlier installs.
 $AutopromptProviderStatus = @{
     claude = 'supported'; codex = 'supported'; opencode = 'supported';
     kilo = 'supported'; vscode = 'supported'; prime = 'supported'
-    omp = 'supported'; deepseek = 'supported'; reasonix = 'supported'
+    omp = 'supported'; deepseek = 'supported'; hermes = 'supported'; grok = 'supported'; reasonix = 'supported'
 }
 $AutopromptProviderBlockReason = @{}
 
@@ -506,6 +506,14 @@ function Get-AutopromptConfigRoot {
         'omp' {
             return (Get-AutopromptOmpInstallRoot)
         }
+        'grok' {
+            if ($env:GROK_HOME) { return $env:GROK_HOME }
+            return (Join-Path $userHome '.grok')
+        }
+        'hermes' {
+            if ($env:HERMES_HOME) { return $env:HERMES_HOME }
+            return (Join-Path $userHome '.hermes')
+        }
         'deepseek' {
             if ($env:DSH_HOME) { return $env:DSH_HOME }
             return (Join-Path $userHome '.dsh')
@@ -556,12 +564,38 @@ function Get-AutopromptRuntimeRoot {
     return (Get-AutopromptSkillRoot -Name $Name)
 }
 
+function Get-AutopromptCodexPayloadGeneration {
+    $manifestPath = Join-Path $AutopromptInstallRepoRoot `
+        'agents/manifests/codex-runtime.json'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return '' }
+    try { $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json }
+    catch { return '' }
+    $generation = [string]$manifest.payloadGeneration
+    if ($generation -cnotmatch '^codex-v[0-9]+\.[0-9]+\.[0-9]+-[a-f0-9]{16}$') {
+        return ''
+    }
+    return $generation
+}
+
+function Get-AutopromptCodexBundleSkillRoot {
+    $generation = Get-AutopromptCodexPayloadGeneration
+    if ([string]::IsNullOrEmpty($generation)) { return '' }
+    return (Join-Path (Get-AutopromptConfigRoot -Name 'codex') `
+        (Join-Path '.autoprompt-private/bundles' `
+            (Join-Path $generation 'skills/autoprompt')))
+}
+
+function Get-AutopromptCodexGeneratedAgentsRoot {
+    $skillRoot = Get-AutopromptCodexBundleSkillRoot
+    if ([string]::IsNullOrEmpty($skillRoot)) { return '' }
+    return (Join-Path $skillRoot 'agents-runtime')
+}
+
 function Get-AutopromptNativeAgentsRoot {
     param([string]$Name)
     if (Test-AutopromptInstallRootOverridePresent) {
         if ($Name -ceq 'codex') {
-            return (Join-Path (Get-AutopromptSkillRoot -Name $Name) `
-                'agents-runtime')
+            return (Get-AutopromptCodexGeneratedAgentsRoot)
         }
         return (Join-Path (Get-AutopromptNormalizedInstallRoot) 'agents')
     }
@@ -569,8 +603,7 @@ function Get-AutopromptNativeAgentsRoot {
     switch ($Name) {
         'claude' { return (Join-Path $userHome '.claude/agents') }
         'codex' {
-            return (Join-Path (Get-AutopromptSkillRoot -Name 'codex') `
-                'agents-runtime')
+            return (Get-AutopromptCodexGeneratedAgentsRoot)
         }
         'opencode' {
             return (Join-Path (Get-AutopromptConfigRoot -Name 'opencode') `
@@ -724,16 +757,24 @@ function Format-JoinLines {
     return (($Lines -join "`n") + "`n")
 }
 
-# Emit md + YAML frontmatter (name + description) over the body. $Token selects
-# only the description rendering: md-codex single-quotes it (INSTALL.md:24); the
-# other md-family tokens use a double-quoted scalar so a ':' in the description
-# stays a scalar and never reads as a nested mapping. No other key is emitted.
+# Emit md + YAML frontmatter over the body. Codex receives an exact explicit-only
+# discovery contract in addition to name + description; other md-family formats
+# retain their existing provider-specific keys.
 function Format-MdYaml {
     param([string]$Token, [string]$Name, [string]$Description, [string]$Body)
     if ($Token -eq 'md-codex') {
         $single = $Description -replace "'", "''"
         $descLine = "description: '$single'"
-        return (Format-JoinLines @('---', "name: $Name", $descLine, '---', '', $Body))
+        return (Format-JoinLines @(
+            '---',
+            "name: $Name",
+            $descLine,
+            'activation: explicit-only',
+            'allow-implicit-invocation: false',
+            '---',
+            '',
+            $Body
+        ))
     }
 
     $double = $Description -replace '\\', '\\' -replace '"', '\"'
@@ -908,7 +949,7 @@ $AutopromptVersionFloor = @{
     claude = '2.1.219'; cursor = '2.5'; cline = '3.58'; opencode = '1.18.7';
     kilo = '7.4.22';
     vscode = '1.133.0'; prime = '0.7.2'
-    omp = '17.4.0'; deepseek = '0.1.0-rc.7'; reasonix = '1.30.0'
+    omp = '17.4.0'; deepseek = '0.1.2-rc.1'; hermes = '0.21.1'; grok = '1.0.13'; reasonix = '1.30.0'
 }
 $AutopromptPrecheckMarkerPrefix = '.autoprompt-precheck'
 
@@ -1229,7 +1270,9 @@ function New-ReceiptDocument {
         [string[]]$CreatedDirectories,
         [bool]$OmpManaged,
         [string]$OmpDetachedRoot,
-        [hashtable[]]$Edits
+        [hashtable[]]$Edits,
+        [AllowNull()][string]$PriorManifestSha256 = $null,
+        [string[]]$FileSha256 = @()
     )
     $backupJson = if ([string]::IsNullOrEmpty($Backup)) {
         'null'
@@ -1243,6 +1286,10 @@ function New-ReceiptDocument {
     }
     return '{' + "`n" +
         '  "nonce": "' + (Format-ReceiptJsonEscape -Value $Nonce) + '",' + "`n" +
+        '  "priorManifestSha256": ' + $(if ([string]::IsNullOrEmpty($PriorManifestSha256)) {
+            'null'
+        } else { '"' + $PriorManifestSha256 + '"' }) + ',' + "`n" +
+        '  "fileSha256": ' + (Format-ReceiptFilesArray -Files $FileSha256) + ',' + "`n" +
         '  "backup": ' + $backupJson + ',' + "`n" +
         '  "files": ' + (Format-ReceiptFilesArray -Files $Files) + ',' + "`n" +
         '  "createdDirectories": ' + (
@@ -1305,9 +1352,30 @@ function Write-Receipt {
             return 21
         }
     }
+    # Parse and canonicalize the ownership manifest once for this receipt.
+    # Get-IdemManifestHash is intentionally retained for one-off callers, but
+    # invoking it for every installed file rereads and reparses the full
+    # manifest repeatedly. The local index preserves its filesystem-equivalent
+    # key comparison and never outlives this receipt write.
+    $manifestEntries = Read-IdemManifestEntries -ConfigRoot $ConfigRoot
+    $manifestIndex = New-Object System.Collections.Hashtable (Get-IdemPathComparer)
+    foreach ($manifestKey in $manifestEntries.Keys) {
+        $identity = Get-IdemManifestKeyIdentity -ConfigRoot $ConfigRoot -Key ([string]$manifestKey)
+        if (-not [string]::IsNullOrEmpty($identity) -and -not $manifestIndex.ContainsKey($identity)) {
+            $manifestIndex.Add($identity, [string]$manifestEntries[$manifestKey])
+        }
+    }
+    $fileSha256 = @($Files | ForEach-Object {
+        $identity = Get-IdemManifestKeyIdentity -ConfigRoot $ConfigRoot -Key $_
+        if (-not [string]::IsNullOrEmpty($identity) -and $manifestIndex.ContainsKey($identity)) {
+            "$_=$($manifestIndex[$identity])"
+        }
+    })
     $document = New-ReceiptDocument -Nonce $Nonce -Backup $Backup `
         -Files $Files -CreatedDirectories $CreatedDirectories `
-        -OmpManaged $OmpManaged -OmpDetachedRoot $OmpDetachedRoot -Edits $Edits
+        -OmpManaged $OmpManaged -OmpDetachedRoot $OmpDetachedRoot -Edits $Edits `
+        -PriorManifestSha256 $script:AutopromptReceiptPriorManifestSha256 `
+        -FileSha256 $fileSha256
     $final = Join-Path $ConfigRoot $AutopromptReceiptName
     $writeCode = Write-ReceiptDocument -Path $final -Document $document
     if ($writeCode -ne 0) { return $writeCode }
@@ -1358,6 +1426,33 @@ if ($null -eq $script:AutopromptReceiptFiles) {
 }
 if ($null -eq $script:AutopromptReceiptCreatedDirectories) {
     $script:AutopromptReceiptCreatedDirectories = @()
+}
+
+# Codex v2 keeps durable activation records and quarantined historical bytes below
+# a non-discovery root. Provider-global skill/agent load paths must never point here.
+function Get-AutopromptPrivateStateRoot {
+    param([string]$Name)
+    if ($Name -cne 'codex') { return '' }
+    return (Join-Path (Get-AutopromptConfigRoot -Name 'codex') `
+        '.autoprompt-private')
+}
+
+function Get-AutopromptProviderActivationCapabilities {
+    param([string]$Name)
+    if ($Name -cne 'codex') { return $null }
+    return [ordered]@{
+        Isolation = 'strict'
+        TopologyEnforcement = 'prompt-guarded'
+        PrivateSkillRoot = $true
+        ProcessOwnership = $false
+        EventStreaming = $false
+        ToolOutputCapture = $false
+        StableChildIdentity = $false
+        SameContextContinuation = $false
+        Cancellation = $false
+        IsolatedChecking = $false
+        ModelRouting = $true
+    }
 }
 if ($null -eq $script:AutopromptReceiptOmpManaged) {
     $script:AutopromptReceiptOmpManaged = $false
@@ -1632,14 +1727,72 @@ function Remove-IdemReceiptCreatedDirectory {
         }
     )
 }
+$codexRegistryPath = Join-Path $AutopromptInstallRepoRoot `
+    'scripts/install/codex-package-registry.json'
+try {
+    $codexRegistry = Get-Content -LiteralPath $codexRegistryPath -Raw | ConvertFrom-Json
+    if ([string]$codexRegistry.compatibility.cliMinimum -cnotmatch `
+        '^\d+\.\d+\.\d+$') { throw 'invalid Codex floor' }
+    $AutopromptVersionFloor.codex = [string]$codexRegistry.compatibility.cliMinimum
+} catch {
+    $AutopromptVersionFloor.codex = 'registry-invalid'
+}
+
+function Test-IdemPortableManifestKey {
+    param([string]$Key)
+    if ([string]::IsNullOrWhiteSpace($Key) -or
+        $Key -match '[:\x00-\x1f]' -or
+        $Key -match '[\\/]$') {
+        return $false
+    }
+    try {
+        if ([System.IO.Path]::IsPathRooted($Key)) { return $false }
+    } catch {
+        return $false
+    }
+    $parts = [regex]::Split($Key, '[\\/]')
+    return @($parts | Where-Object {
+        [string]::IsNullOrEmpty($_) -or $_ -in @('.', '..')
+    }).Count -eq 0
+}
+
+function Get-IdemManifestKeyIdentity {
+    param([string]$ConfigRoot, [string]$Key)
+    if ([string]::IsNullOrWhiteSpace($Key)) { return '' }
+    try {
+        if ([System.IO.Path]::IsPathRooted($Key)) {
+            return Get-IdemNormalizedPath -Path $Key
+        }
+    } catch {
+        return ''
+    }
+    $root = Get-IdemNormalizedPath -Path $ConfigRoot
+    if ([string]::IsNullOrEmpty($root) -or
+        -not (Test-IdemPortableManifestKey -Key $Key)) {
+        return ''
+    }
+    $candidate = Get-IdemNormalizedPath -Path (Join-Path $root `
+        ($Key -replace '/', [System.IO.Path]::DirectorySeparatorChar))
+    if ([string]::IsNullOrEmpty($candidate) -or
+        -not (Test-IdemPathUnderRoot -Path $candidate -Root $root)) {
+        return ''
+    }
+    return $candidate
+}
 
 function Get-IdemManifestMatchingKeys {
-    param([System.Collections.IDictionary]$Entries, [string]$Key)
-    $normalizedKey = Get-IdemNormalizedPath -Path $Key
+    param(
+        [System.Collections.IDictionary]$Entries,
+        [string]$Key,
+        [string]$ConfigRoot = ''
+    )
+    $normalizedKey = Get-IdemManifestKeyIdentity -ConfigRoot $ConfigRoot `
+        -Key $Key
     if ([string]::IsNullOrEmpty($normalizedKey)) { return @() }
     $comparison = Get-IdemPathComparison
     return [string[]]@($Entries.Keys | Where-Object {
-        $normalizedEntry = Get-IdemNormalizedPath -Path ([string]$_)
+        $normalizedEntry = Get-IdemManifestKeyIdentity `
+            -ConfigRoot $ConfigRoot -Key ([string]$_)
         -not [string]::IsNullOrEmpty($normalizedEntry) -and
             $normalizedEntry.Equals($normalizedKey, $comparison)
     })
@@ -1652,9 +1805,45 @@ function Get-IdemManifestHash {
     $manifest = Join-Path $ConfigRoot $AutopromptHashManifestName
     if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { return '' }
     $entries = Read-IdemManifestEntries -ConfigRoot $ConfigRoot
-    $matches = @(Get-IdemManifestMatchingKeys -Entries $entries -Key $Key)
+    $matches = @(Get-IdemManifestMatchingKeys -Entries $entries -Key $Key `
+        -ConfigRoot $ConfigRoot)
     if ($matches.Count -eq 0) { return '' }
     return [string]$entries[$matches[0]]
+}
+
+# Build one operation-local lookup before an uninstall mutates its ownership
+# manifest. Manifest entries are already strict and ordered; preserve the
+# existing first matching key behavior for callers using equivalent spellings.
+function Get-IdemManifestHashIndex {
+    param([string]$ConfigRoot)
+    $index = New-Object 'System.Collections.Generic.Dictionary[string,string]' `
+        (Get-IdemPathComparer)
+    $manifest = Join-Path $ConfigRoot $AutopromptHashManifestName
+    if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { return $index }
+    $entries = Read-IdemManifestEntries -ConfigRoot $ConfigRoot
+    foreach ($key in $entries.Keys) {
+        $identity = Get-IdemManifestKeyIdentity -ConfigRoot $ConfigRoot `
+            -Key ([string]$key)
+        if (-not [string]::IsNullOrEmpty($identity) -and
+            -not $index.ContainsKey($identity)) {
+            $index.Add($identity, [string]$entries[$key])
+        }
+    }
+    return $index
+}
+
+function Get-IdemManifestHashFromIndex {
+    param(
+        [System.Collections.Generic.Dictionary[string,string]]$Index,
+        [string]$ConfigRoot,
+        [string]$Key
+    )
+    if ($null -eq $Index) { return '' }
+    $identity = Get-IdemManifestKeyIdentity -ConfigRoot $ConfigRoot -Key $Key
+    if ([string]::IsNullOrEmpty($identity) -or -not $Index.ContainsKey($identity)) {
+        return ''
+    }
+    return [string]$Index[$identity]
 }
 
 function ConvertFrom-ReceiptJsonEscape {
@@ -1710,8 +1899,11 @@ function Read-IdemManifestDocument {
         -not $document.EndsWith("`n") -or $document.EndsWith("`n`n")) {
         throw "invalid ownership manifest grammar: $Path"
     }
+    # The default split is unlimited in both Windows PowerShell and PowerShell
+    # 7. A negative count means right-to-left splitting in PowerShell 7, not
+    # unlimited splitting, and -1 leaves the entire receipt on one line.
     $lines = @($document.Substring(0, $document.Length - 1) `
-        -split "`n", -1)
+        -split "`n")
     if ($lines.Count -lt 2 -or $lines[0] -cne '{' -or
         $lines[$lines.Count - 1] -cne '}') {
         throw "invalid ownership manifest grammar: $Path"
@@ -1874,7 +2066,8 @@ function Set-IdemManifestHash {
         [Console]::Error.WriteLine("error=hash-manifest-read-failed path=$(Join-Path $ConfigRoot $AutopromptHashManifestName)")
         return $false
     }
-    $matches = @(Get-IdemManifestMatchingKeys -Entries $entries -Key $Key)
+    $matches = @(Get-IdemManifestMatchingKeys -Entries $entries -Key $Key `
+        -ConfigRoot $ConfigRoot)
     if ($matches.Count -gt 0) {
         $retainedKey = $matches[0]
         $isUnchanged = $matches.Count -eq 1 -and
@@ -1891,24 +2084,105 @@ function Set-IdemManifestHash {
 }
 
 function Set-IdemManifestHashes {
-    param([string]$ConfigRoot, [object[]]$Hashes)
+    param(
+        [string]$ConfigRoot,
+        [object[]]$Hashes,
+        [switch]$UseIdentityIndex
+    )
     $manifest = Join-Path $ConfigRoot $AutopromptHashManifestName
     try { $entries = Read-IdemManifestEntries -ConfigRoot $ConfigRoot }
     catch {
         [Console]::Error.WriteLine("error=hash-manifest-read-failed path=$manifest")
         return $false
     }
+    $identityKeys = $null
+    $identityHashes = $null
+    $incomingHashes = $null
+    $incomingKeys = $null
+    $incomingOrder = @()
+    if ($UseIdentityIndex) {
+        $identityKeys = New-Object `
+            'System.Collections.Generic.Dictionary[string,object]' `
+            (Get-IdemPathComparer)
+        $identityHashes = New-Object `
+            'System.Collections.Generic.Dictionary[string,string]' `
+            (Get-IdemPathComparer)
+        $incomingHashes = New-Object `
+            'System.Collections.Generic.Dictionary[string,string]' `
+            (Get-IdemPathComparer)
+        $incomingKeys = New-Object `
+            'System.Collections.Generic.Dictionary[string,string]' `
+            (Get-IdemPathComparer)
+        foreach ($existingKey in $entries.Keys) {
+            $existingIdentity = Get-IdemManifestKeyIdentity `
+                -ConfigRoot $ConfigRoot -Key ([string]$existingKey)
+            $existingHash = [string]$entries[$existingKey]
+            if ([string]::IsNullOrEmpty($existingIdentity)) {
+                [Console]::Error.WriteLine(
+                    "error=hash-manifest-invalid-entry path=$manifest key=$existingKey"
+                )
+                return $false
+            }
+            if ($identityKeys.ContainsKey($existingIdentity)) {
+                if ($identityHashes[$existingIdentity] -cne $existingHash) {
+                    [Console]::Error.WriteLine(
+                        "error=hash-manifest-invalid-entry path=$manifest key=$existingKey"
+                    )
+                    return $false
+                }
+                $identityKeys[$existingIdentity] = [string[]]@(
+                    @($identityKeys[$existingIdentity]) + [string]$existingKey
+                )
+            } else {
+                $identityKeys.Add(
+                    $existingIdentity,
+                    [string[]]@([string]$existingKey)
+                )
+                $identityHashes.Add($existingIdentity, $existingHash)
+            }
+        }
+    }
     foreach ($item in $Hashes) {
         $key = [string]$item.Key
         $hash = [string]$item.Hash
-        if ([string]::IsNullOrEmpty((Get-IdemNormalizedPath -Path $key)) -or
+        if ($UseIdentityIndex) {
+            $key = ConvertTo-IdemPortableManifestKey `
+                -ConfigRoot $ConfigRoot -Target $key
+        }
+        $keyIdentity = Get-IdemManifestKeyIdentity `
+            -ConfigRoot $ConfigRoot -Key $key
+        if ([string]::IsNullOrEmpty($keyIdentity) -or
             -not (Test-IdemSha256 -Hash $hash)) {
             [Console]::Error.WriteLine(
                 "error=hash-manifest-invalid-entry path=$manifest key=$key"
             )
             return $false
         }
-        $matches = @(Get-IdemManifestMatchingKeys -Entries $entries -Key $key)
+        if ($UseIdentityIndex -and
+            $identityHashes.ContainsKey($keyIdentity) -and
+            $identityHashes[$keyIdentity] -cne $hash) {
+            [Console]::Error.WriteLine(
+                "error=hash-manifest-invalid-entry path=$manifest key=$key"
+            )
+            return $false
+        }
+        if ($UseIdentityIndex -and $incomingHashes.ContainsKey($keyIdentity)) {
+            if ($incomingHashes[$keyIdentity] -cne $hash) {
+                [Console]::Error.WriteLine(
+                    "error=hash-manifest-invalid-entry path=$manifest key=$key"
+                )
+                return $false
+            }
+            continue
+        }
+        if ($UseIdentityIndex) {
+            $incomingHashes.Add($keyIdentity, $hash)
+            $incomingKeys.Add($keyIdentity, $key)
+            $incomingOrder += $keyIdentity
+            continue
+        }
+        $matches = @(Get-IdemManifestMatchingKeys -Entries $entries -Key $key `
+            -ConfigRoot $ConfigRoot)
         if ($matches.Count -gt 0) {
             $retainedKey = $matches[0]
             $entries[$retainedKey] = $hash
@@ -1919,7 +2193,47 @@ function Set-IdemManifestHashes {
             $entries.Add($key, $hash)
         }
     }
+    if ($UseIdentityIndex) {
+        foreach ($keyIdentity in $incomingOrder) {
+            $key = $incomingKeys[$keyIdentity]
+            $hash = $incomingHashes[$keyIdentity]
+            $matches = if ($identityKeys.ContainsKey($keyIdentity)) {
+                [string[]]@($identityKeys[$keyIdentity])
+            } else { @() }
+            if ($matches.Count -eq 1 -and $matches[0] -ceq $key) {
+                $entries[$key] = $hash
+                continue
+            }
+            foreach ($match in $matches) { $entries.Remove($match) }
+            $entries.Add($key, $hash)
+        }
+    }
     return Write-IdemManifestEntries -ConfigRoot $ConfigRoot -Entries $entries
+}
+
+function ConvertTo-IdemPortableManifestKey {
+    param([string]$ConfigRoot, [string]$Target)
+    $rootSpelling = $ConfigRoot.TrimEnd([char]92, [char]47)
+    if ([string]::IsNullOrEmpty($rootSpelling) -or
+        $Target.Length -le $rootSpelling.Length -or
+        -not $Target.Substring(0, $rootSpelling.Length).Equals(
+            $rootSpelling, (Get-IdemPathComparison)
+        ) -or $Target[$rootSpelling.Length] -notin @([char]92, [char]47)) {
+        return ''
+    }
+    $relativeSpelling = $Target.Substring($rootSpelling.Length + 1)
+    if (-not (Test-IdemPortableManifestKey -Key $relativeSpelling)) {
+        return ''
+    }
+    $root = Get-IdemNormalizedPath -Path $ConfigRoot
+    $targetPath = Get-IdemNormalizedPath -Path $Target
+    if ([string]::IsNullOrEmpty($root) -or
+        [string]::IsNullOrEmpty($targetPath) -or
+        -not (Test-IdemPathUnderRoot -Path $targetPath -Root $root)) {
+        return ''
+    }
+    $prefix = $root + [System.IO.Path]::DirectorySeparatorChar
+    return ($relativeSpelling -replace '\\', '/')
 }
 
 function Remove-IdemManifestHash {
@@ -1929,7 +2243,8 @@ function Remove-IdemManifestHash {
         [Console]::Error.WriteLine("error=hash-manifest-read-failed path=$(Join-Path $ConfigRoot $AutopromptHashManifestName)")
         return $false
     }
-    $matches = @(Get-IdemManifestMatchingKeys -Entries $entries -Key $Key)
+    $matches = @(Get-IdemManifestMatchingKeys -Entries $entries -Key $Key `
+        -ConfigRoot $ConfigRoot)
     if ($matches.Count -eq 0) { return $true }
     foreach ($match in $matches) { $entries.Remove($match) }
     return (Write-IdemManifestEntries -ConfigRoot $ConfigRoot -Entries $entries)
@@ -2046,7 +2361,10 @@ function New-IdemManagedSnapshot {
         $files += @{
             Path = $path
             Exists = $exists
-            Bytes = if ($exists) { [System.IO.File]::ReadAllBytes($path) } else { $null }
+            # Preserve a byte[] as one pipeline value, including byte[0] for an
+            # empty existing file. Without the unary comma, PowerShell expands
+            # the array into Object[] (or $null), corrupting the snapshot type.
+            Bytes = if ($exists) { ,([System.IO.File]::ReadAllBytes($path)) } else { $null }
             LastWriteTimeUtc = if ($exists) {
                 (Get-Item -LiteralPath $path).LastWriteTimeUtc
             } else {
@@ -2480,7 +2798,8 @@ function Get-IdemManagedPendingMappings {
         (Get-IdemPathComparer)
     $manifestEntries = Read-IdemManifestEntries -ConfigRoot $ConfigRoot
     foreach ($key in $manifestEntries.Keys) {
-        $keyIdentity = Get-IdemNormalizedPath -Path ([string]$key)
+        $keyIdentity = Get-IdemManifestKeyIdentity `
+            -ConfigRoot $ConfigRoot -Key ([string]$key)
         if (-not [string]::IsNullOrEmpty($keyIdentity)) {
             $manifestHashes[$keyIdentity] = [string]$manifestEntries[$key]
         }
@@ -2546,7 +2865,9 @@ function Install-IdemManagedFiles {
     param(
         [string]$ConfigRoot,
         [object[]]$Mappings,
-        [switch]$RefuseUnownedTarget
+        [switch]$RefuseUnownedTarget,
+        [switch]$UseCodexBatchIndex,
+        [scriptblock]$BeforeCodexCopy
     )
     if ([string]::IsNullOrEmpty((Get-IdemNormalizedPath -Path $ConfigRoot))) {
         return 44
@@ -2561,11 +2882,21 @@ function Install-IdemManagedFiles {
         -Paths @($pending | ForEach-Object { $_.Target })
     if ($null -eq $snapshot) { return 39 }
     foreach ($mapping in $pending) {
-        if (-not (Copy-IdemAtomic -Source $mapping.Source `
-            -Target $mapping.Target)) {
+        $copyCode = if ($UseCodexBatchIndex) {
+            Copy-IdemCodexStableSource -Source $mapping.Source `
+                -Target $mapping.Target `
+                -ExpectedSourceHash $mapping.Hash `
+                -BeforeCopy $BeforeCodexCopy
+        } elseif (Copy-IdemAtomic -Source $mapping.Source `
+            -Target $mapping.Target) {
+            0
+        } else {
+            39
+        }
+        if ($copyCode -ne 0) {
             Restore-IdemMutationSnapshot -Snapshot $snapshot `
                 -Context 'install-batch-copy' | Out-Null
-            return 39
+            return $copyCode
         }
         $targetHash = Get-IdemSha256 -Path $mapping.Target
         if ($targetHash -is [int] -or $targetHash -cne $mapping.Hash) {
@@ -2580,7 +2911,8 @@ function Install-IdemManagedFiles {
         @{ Key = $_.Target; Hash = $_.Hash }
     })
     if ($hashes.Count -gt 0 -and
-        -not (Set-IdemManifestHashes -ConfigRoot $ConfigRoot -Hashes $hashes)) {
+        -not (Set-IdemManifestHashes -ConfigRoot $ConfigRoot -Hashes $hashes `
+            -UseIdentityIndex:$UseCodexBatchIndex)) {
         Restore-IdemMutationSnapshot -Snapshot $snapshot `
             -Context 'install-batch-register' | Out-Null
         return 40
@@ -2593,11 +2925,52 @@ function Install-IdemManagedFiles {
             Add-IdemReceiptCreatedDirectory -Path $directory
         }
     }
-    foreach ($mapping in $tracked) {
-        Add-IdemReceiptFile -Path $mapping.Target
-    }
-    if ($tracked.Count -gt 0) {
-        Add-IdemReceiptFile -Path (Join-Path $ConfigRoot $AutopromptHashManifestName)
+    if ($UseCodexBatchIndex) {
+        $receiptIdentities = New-Object `
+            'System.Collections.Generic.HashSet[string]' (Get-IdemPathComparer)
+        foreach ($ownedPath in @($script:AutopromptReceiptFiles)) {
+            $ownedIdentity = Get-IdemNormalizedPath -Path $ownedPath
+            if ([string]::IsNullOrEmpty($ownedIdentity)) {
+                Restore-IdemMutationSnapshot -Snapshot $snapshot `
+                    -Context 'install-batch-receipt-index' | Out-Null
+                return 40
+            }
+            [void]$receiptIdentities.Add($ownedIdentity)
+        }
+        $receiptAdditions = @()
+        foreach ($mapping in $tracked) {
+            $targetIdentity = Get-IdemNormalizedPath -Path $mapping.Target
+            if ([string]::IsNullOrEmpty($targetIdentity)) {
+                Restore-IdemMutationSnapshot -Snapshot $snapshot `
+                    -Context 'install-batch-receipt-index' | Out-Null
+                return 40
+            }
+            if ($receiptIdentities.Add($targetIdentity)) {
+                $receiptAdditions += $mapping.Target
+            }
+        }
+        if ($tracked.Count -gt 0) {
+            $manifestPath = Join-Path $ConfigRoot $AutopromptHashManifestName
+            $manifestIdentity = Get-IdemNormalizedPath -Path $manifestPath
+            if ([string]::IsNullOrEmpty($manifestIdentity)) {
+                Restore-IdemMutationSnapshot -Snapshot $snapshot `
+                    -Context 'install-batch-receipt-index' | Out-Null
+                return 40
+            }
+            if ($receiptIdentities.Add($manifestIdentity)) {
+                $receiptAdditions += $manifestPath
+            }
+        }
+        $script:AutopromptReceiptFiles = @(
+            $script:AutopromptReceiptFiles
+        ) + @($receiptAdditions)
+    } else {
+        foreach ($mapping in $tracked) {
+            Add-IdemReceiptFile -Path $mapping.Target
+        }
+        if ($tracked.Count -gt 0) {
+            Add-IdemReceiptFile -Path (Join-Path $ConfigRoot $AutopromptHashManifestName)
+        }
     }
     Add-IdemManagedUndo -Snapshot $snapshot
     return 0
@@ -2608,7 +2981,9 @@ function Install-IdemManagedFile {
         [string]$ConfigRoot,
         [string]$Source,
         [string]$Target,
-        [switch]$RefuseUnownedTarget
+        [switch]$RefuseUnownedTarget,
+        [switch]$UseCodexStableSource,
+        [scriptblock]$BeforeCodexCopy
     )
     if ($RefuseUnownedTarget -and
         (Test-IdemUnownedTargetCollision -Target $Target)) { return 43 }
@@ -2624,10 +2999,18 @@ function Install-IdemManagedFile {
 
     $snapshot = New-IdemManagedSnapshot -ConfigRoot $ConfigRoot -Paths @($Target)
     if ($null -eq $snapshot) { return 39 }
-    if (-not (Copy-IdemAtomic -Source $Source -Target $Target)) {
+    $copyCode = if ($UseCodexStableSource) {
+        Copy-IdemCodexStableSource -Source $Source -Target $Target `
+            -ExpectedSourceHash $sourceHash -BeforeCopy $BeforeCodexCopy
+    } elseif (Copy-IdemAtomic -Source $Source -Target $Target) {
+        0
+    } else {
+        39
+    }
+    if ($copyCode -ne 0) {
         Restore-IdemMutationSnapshot -Snapshot $snapshot -Context 'install-copy' |
             Out-Null
-        return 39
+        return $copyCode
     }
     foreach ($directory in @($snapshot.Directories.Keys)) {
         if (-not $snapshot.Directories[$directory] -and
@@ -2660,6 +3043,119 @@ function Remove-IdemManagedFile {
     }
     Add-IdemManagedUndo -Snapshot $snapshot
     return $true
+}
+
+function Copy-IdemCodexStableSource {
+    param(
+        [string]$Source,
+        [string]$Target,
+        [string]$ExpectedSourceHash,
+        [scriptblock]$BeforeCopy
+    )
+    $parent = Split-Path -Parent $Target
+    $temporary = "$Target.autoprompt.codex.tmp"
+    try {
+        New-Item -ItemType Directory -Path $parent -Force -ErrorAction Stop |
+            Out-Null
+        if ($null -ne $BeforeCopy) { & $BeforeCopy $Source $Target }
+        [System.IO.File]::Copy($Source, $temporary, $true)
+        $copiedHash = Get-IdemSha256 -Path $temporary
+        $sourcePostHash = Get-IdemSha256 -Path $Source
+        if ($copiedHash -is [int] -or $sourcePostHash -is [int] -or
+            $copiedHash -cne $ExpectedSourceHash -or
+            $sourcePostHash -cne $ExpectedSourceHash) {
+            [Console]::Error.WriteLine(
+                "client=codex error=SOURCE_CHANGED_DURING_COPY " +
+                "file=$(Split-Path -Leaf $Source) expected=$ExpectedSourceHash " +
+                "copied=$copiedHash source_post=$sourcePostHash"
+            )
+            Remove-Item -LiteralPath $temporary -Force `
+                -ErrorAction SilentlyContinue
+            return 46
+        }
+        if (Test-Path -LiteralPath $Target -PathType Leaf) {
+            $backup = "$Target.autoprompt.replace.bak"
+            [System.IO.File]::Replace($temporary, $Target, $backup)
+            if (-not (Complete-IdemReplacement -Target $Target `
+                -Backup $backup -Context 'codex-stable-source')) {
+                return 39
+            }
+        } else {
+            [System.IO.File]::Move($temporary, $Target)
+        }
+    } catch {
+        Remove-Item -LiteralPath $temporary -Force `
+            -ErrorAction SilentlyContinue
+        return 39
+    }
+    return 0
+}
+
+function Invoke-IdemRetiredCodexReconciliation {
+    param([string]$ConfigRoot, [string[]]$CurrentTargets)
+    $AutopromptCodexV2ReceiptBundleRoots = @(Get-CodexV2ReceiptBundleRoots `
+        -ConfigRoot $ConfigRoot -Files $script:AutopromptReceiptFiles)
+    $currentTargetIdentities = New-Object `
+        'System.Collections.Generic.HashSet[string]' `
+        (Get-IdemPathComparer)
+    foreach ($target in @($CurrentTargets)) {
+        $identity = Get-IdemNormalizedPath -Path ([string]$target)
+        if (-not [string]::IsNullOrEmpty($identity)) {
+            [void]$currentTargetIdentities.Add($identity)
+        }
+    }
+    foreach ($file in @($script:AutopromptReceiptFiles)) {
+        if ([string]::IsNullOrEmpty($file) -or
+            -not (Test-UninstallProviderPath -Name 'codex' `
+                -ConfigRoot $ConfigRoot -Path $file)) {
+            continue
+        }
+        $fileIdentity = Get-IdemNormalizedPath -Path $file
+        $isCurrent = -not [string]::IsNullOrEmpty($fileIdentity) -and
+            $currentTargetIdentities.Contains($fileIdentity)
+        if ($isCurrent) { continue }
+
+        $recordedHash = Get-IdemManifestHash -ConfigRoot $ConfigRoot -Key $file
+        $item = Get-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+        $reason = ''
+        if ($null -eq $item) {
+            $reason = 'already-absent'
+        } elseif ($item -isnot [System.IO.FileInfo] -or
+            $item.Attributes.HasFlag([System.IO.FileAttributes]::ReparsePoint)) {
+            $reason = 'linked-or-unsafe'
+        } elseif ([string]::IsNullOrEmpty($recordedHash)) {
+            $reason = 'unfingerprinted'
+        } else {
+            $liveHash = Get-IdemSha256 -Path $file
+            if ($liveHash -is [int]) {
+                $reason = 'hash-unreadable'
+            } elseif ($liveHash -cne $recordedHash) {
+                $reason = 'hash-drift'
+            }
+        }
+
+        if ([string]::IsNullOrEmpty($reason) -or $reason -ceq 'already-absent') {
+            if (-not (Remove-IdemManagedFile -ConfigRoot $ConfigRoot -Path $file)) {
+                [Console]::Error.WriteLine(
+                    "client=codex error=retired-file-prune-failed path=$file"
+                )
+                return 94
+            }
+            [Console]::Out.WriteLine(
+                "client=codex update-pruned=$file reason=prior-only"
+            )
+            continue
+        }
+
+        if (-not (Remove-IdemManifestHash -ConfigRoot $ConfigRoot -Key $file)) {
+            return 94
+        }
+        Remove-IdemReceiptFile -Path $file
+        [Console]::Out.WriteLine(
+            "client=codex update-retained=$file reason=$reason ownership=relinquished"
+        )
+    }
+    return 0
 }
 
 function Test-IdemExactProperties {
@@ -3610,22 +4106,6 @@ function ConvertFrom-ReceiptStringMember {
     return ConvertFrom-ReceiptJsonEscape -Escaped $escaped -Decoded $Value
 }
 
-function Assert-IdemUniqueReceiptPath {
-    param([string[]]$Values, [string]$Candidate)
-    $candidateIdentity = Get-IdemNormalizedPath -Path $Candidate
-    foreach ($value in @($Values)) {
-        if ($value -ceq $Candidate) {
-            throw 'duplicate receipt path spelling'
-        }
-        $identity = Get-IdemNormalizedPath -Path $value
-        if (-not [string]::IsNullOrEmpty($candidateIdentity) -and
-            -not [string]::IsNullOrEmpty($identity) -and
-            $identity.Equals($candidateIdentity, (Get-IdemPathComparison))) {
-            throw 'duplicate receipt path identity'
-        }
-    }
-}
-
 function Assert-IdemUniqueReceiptEdit {
     param([hashtable[]]$Edits, [hashtable]$Candidate)
     $candidateIdentity = Get-IdemNormalizedPath -Path $Candidate.File
@@ -3655,6 +4135,13 @@ function Read-ReceiptStringArray {
         throw "invalid receipt array: $Member"
     }
 
+    # Exact duplicate spellings are always rejected. Valid filesystem
+    # identities are rejected using the existing platform comparer; invalid
+    # identities remain outside that set, preserving the prior behavior.
+    $spellings = New-Object 'System.Collections.Generic.HashSet[string]' `
+        ([System.StringComparer]::Ordinal)
+    $identities = New-Object 'System.Collections.Generic.HashSet[string]' `
+        (Get-IdemPathComparer)
     $values = @()
     $index++
     while ($index -lt $Lines.Count -and
@@ -3668,7 +4155,14 @@ function Read-ReceiptStringArray {
             -Escaped $match.Groups[1].Value -Decoded ([ref]$value))) {
             throw "invalid receipt array string: $Member"
         }
-        Assert-IdemUniqueReceiptPath -Values $values -Candidate $value
+        if (-not $spellings.Add($value)) {
+            throw 'duplicate receipt path spelling'
+        }
+        $identity = Get-IdemNormalizedPath -Path $value
+        if (-not [string]::IsNullOrEmpty($identity) -and
+            -not $identities.Add($identity)) {
+            throw 'duplicate receipt path identity'
+        }
         $values += $value
         $hasComma = $match.Groups[2].Value -ceq ','
         $index++
@@ -3769,7 +4263,10 @@ function Format-UninstallReceiptDocument {
         [bool]$HasOmpManaged,
         [string]$OmpDetachedRoot,
         [bool]$HasOmpDetachedRoot,
-        [hashtable[]]$Edits
+        [hashtable[]]$Edits,
+        [bool]$HasHashBinding = $false,
+        [AllowNull()][string]$PriorManifestSha256 = $null,
+        [string[]]$FileSha256 = @()
     )
     $backupJson = if ($IsBackupNull) {
         'null'
@@ -3777,8 +4274,15 @@ function Format-UninstallReceiptDocument {
         '"' + (Format-ReceiptJsonEscape -Value $Backup) + '"'
     }
     $document = '{' + "`n" +
-        '  "nonce": "' + (Format-ReceiptJsonEscape -Value $Nonce) + '",' + "`n" +
-        '  "backup": ' + $backupJson + ',' + "`n" +
+        '  "nonce": "' + (Format-ReceiptJsonEscape -Value $Nonce) + '",' + "`n"
+    if ($HasHashBinding) {
+        $priorJson = if ([string]::IsNullOrEmpty($PriorManifestSha256)) {
+            'null'
+        } else { '"' + $PriorManifestSha256 + '"' }
+        $document += '  "priorManifestSha256": ' + $priorJson + ',' + "`n" +
+            '  "fileSha256": ' + (Format-ReceiptFilesArray -Files $FileSha256) + ',' + "`n"
+    }
+    $document += '  "backup": ' + $backupJson + ',' + "`n" +
         '  "files": ' + (Format-ReceiptFilesArray -Files $Files) + ',' + "`n"
     if ($HasCreatedDirectories) {
         $document += '  "createdDirectories": ' + (
@@ -3809,7 +4313,7 @@ function Read-UninstallReceiptDocument {
         throw 'invalid receipt newline contract'
     }
     $lines = @($document.Substring(0, $document.Length - 1) `
-        -split "`n", -1)
+        -split "`n")
     if ($lines[0] -cne '{') { throw 'invalid receipt opener' }
     return @{ Document = $document; Lines = $lines }
 }
@@ -3823,6 +4327,30 @@ function Read-UninstallReceiptMembers {
         throw 'invalid receipt nonce'
     }
     $index++
+    $hasHashBinding = $Lines[$index].StartsWith(
+        '  "priorManifestSha256": ', [StringComparison]::Ordinal
+    )
+    $priorManifestSha256 = $null
+    $fileSha256 = [string[]]@()
+    if ($hasHashBinding) {
+        if ($Lines[$index] -cne '  "priorManifestSha256": null,') {
+            $priorManifestSha256 = ''
+            if (-not (ConvertFrom-ReceiptStringMember -Line $Lines[$index] `
+                -Prefix '  "priorManifestSha256": "' -Suffix '",' `
+                -Value ([ref]$priorManifestSha256)) -or
+                $priorManifestSha256 -notmatch '^[a-f0-9]{64}$') {
+                throw 'invalid prior manifest hash'
+            }
+        }
+        $index++
+        $parsedHashes = Read-ReceiptStringArray -Lines $Lines `
+            -Index $index -Member 'fileSha256' -Suffix ','
+        $fileSha256 = [string[]]@($parsedHashes.Values)
+        if (@($fileSha256 | Where-Object { $_ -notmatch '=[a-f0-9]{64}$' }).Count) {
+            throw 'invalid receipt file hash binding'
+        }
+        $index = $parsedHashes.Index
+    }
     $backup = ''
     $isBackupNull = $Lines[$index] -ceq '  "backup": null,'
     if (-not $isBackupNull -and
@@ -3873,7 +4401,9 @@ function Read-UninstallReceiptMembers {
         OmpManaged = $ompManaged; HasOmpManaged = $hasOmpManaged
         OmpDetachedRoot = $ompDetachedRoot
         HasOmpDetachedRoot = $hasOmpDetachedRoot
-        Edits = [hashtable[]]@($parsedEdits.Edits); Index = $parsedEdits.Index }
+        Edits = [hashtable[]]@($parsedEdits.Edits); Index = $parsedEdits.Index
+        HasHashBinding = $hasHashBinding; PriorManifestSha256 = $priorManifestSha256
+        FileSha256 = $fileSha256 }
 }
 
 function Read-UninstallReceipt {
@@ -3901,7 +4431,10 @@ function Read-UninstallReceipt {
             -OmpManaged $state.OmpManaged `
             -HasOmpManaged $state.HasOmpManaged `
             -OmpDetachedRoot $state.OmpDetachedRoot `
-            -HasOmpDetachedRoot $state.HasOmpDetachedRoot -Edits $state.Edits
+            -HasOmpDetachedRoot $state.HasOmpDetachedRoot -Edits $state.Edits `
+            -HasHashBinding $state.HasHashBinding `
+            -PriorManifestSha256 $state.PriorManifestSha256 `
+            -FileSha256 $state.FileSha256
         if ($canonical -cne $parsedDocument.Document) {
             throw 'noncanonical receipt'
         }
@@ -4301,7 +4834,7 @@ function Remove-UninstallEmptyDirs {
     [string[]]$candidates = @($CreatedDirectories | Where-Object {
         -not [string]::IsNullOrEmpty($_) -and
         (-not $Name -or (Test-UninstallProviderPath -Name $Name `
-            -ConfigRoot $ConfigRoot -Path $_))
+            -ConfigRoot $ConfigRoot -Path $_ -Directory))
     })
     $comparer = [System.Collections.Generic.Comparer[string]]::Create(
         [System.Comparison[string]]{
@@ -4353,6 +4886,16 @@ function Test-AutopromptCustomProviderPath {
     $parent = Split-Path -Parent $normalizedPath
     $leaf = Split-Path -Leaf $normalizedPath
     switch ($Name) {
+        'codex' {
+            return (Test-IdemPathEqual -Left $normalizedPath -Right `
+                    (Join-Path $ConfigRoot 'scripts')) -or
+                (Test-IdemPathEqual -Left $normalizedPath -Right `
+                    (Join-Path $ConfigRoot 'scripts/local-only-safety.cjs')) -or
+                (Test-IdemPathEqual -Left $normalizedPath -Right `
+                    (Join-Path $ConfigRoot 'skills/contracts')) -or
+                (Test-IdemPathUnderRoot -Path $normalizedPath -Root `
+                    (Join-Path $ConfigRoot 'skills/contracts'))
+        }
         'claude' {
             return (Test-IdemPathEqual -Left $normalizedPath -Right $agents) -or
                 ((Test-IdemPathEqual -Left $parent -Right $agents) -and
@@ -4443,8 +4986,64 @@ function Test-AutopromptCustomProviderPath {
     }
 }
 
+# The operation-local value shadows this empty default. Do not cache receipt
+# authority across roots or operations, and do not consult the current release.
+$AutopromptCodexV2ReceiptBundleRoots = @()
+function Get-CodexV2ReceiptBundleRoots {
+    param([string]$ConfigRoot, [string[]]$Files)
+    $base = Get-IdemNormalizedPath -Path (Join-Path $ConfigRoot '.autoprompt-private/bundles')
+    $prefix = $base + [System.IO.Path]::DirectorySeparatorChar
+    foreach ($file in @($Files)) {
+        $normalized = Get-IdemNormalizedPath -Path $file
+        if (-not $normalized.StartsWith($prefix, (Get-IdemPathComparison))) { continue }
+        $relative = $normalized.Substring($prefix.Length).Replace([char]92, [char]47)
+        $match = [regex]::Match($relative,
+            '^(codex-v2\.0\.0-[a-f0-9]{16})/skills/autoprompt/\.autoprompt-runtime-manifest\.json$')
+        if (-not $match.Success) { continue }
+        # Use the recorded fingerprint, so uninstall can preserve a drifted or
+        # missing manifest without stranding every other receipt-owned file.
+        $hash = Get-IdemManifestHash -ConfigRoot $ConfigRoot -Key $file
+        if ($hash -is [string] -and $hash -cmatch '^[a-f0-9]{64}$') {
+            Join-Path $base $match.Groups[1].Value
+        }
+    }
+}
+
+function Test-CodexV2ReceiptBundlePath {
+    param([string]$ConfigRoot, [string]$Path, [switch]$Directory)
+    if ($Path -match '(^|[\\/])\.{1,2}([\\/]|$)') { return $false }
+    $owned = $false
+    foreach ($bundle in @($AutopromptCodexV2ReceiptBundleRoots)) {
+        if ((Test-IdemPathEqual -Left $Path -Right $bundle) -or
+            (Test-IdemPathUnderRoot -Path $Path -Root $bundle)) { $owned = $true; break }
+        if ($Directory -and (
+            (Test-IdemPathEqual -Left $Path -Right (Join-Path $ConfigRoot '.autoprompt-private')) -or
+            (Test-IdemPathEqual -Left $Path -Right (Join-Path $ConfigRoot '.autoprompt-private/bundles')))) {
+            $owned = $true; break
+        }
+    }
+    if (-not $owned) { return $false }
+    # Never extend ownership through junctions or symlinked private ancestors.
+    # Existing leaf checks retain linked files and any hash-drifted user bytes.
+    $cursor = Get-IdemNormalizedPath -Path $Path
+    if (-not $Directory) { $cursor = Split-Path -Parent $cursor }
+    while (-not [string]::IsNullOrEmpty($cursor)) {
+        $item = Get-Item -LiteralPath $cursor -Force -ErrorAction SilentlyContinue
+        if ($null -ne $item -and $item.Attributes.HasFlag([System.IO.FileAttributes]::ReparsePoint)) { return $false }
+        if (Test-IdemPathEqual -Left $cursor -Right $ConfigRoot) { return $true }
+        $parent = Split-Path -Parent $cursor
+        if ($parent -ceq $cursor) { break }
+        $cursor = $parent
+    }
+    return $false
+}
+
 function Test-UninstallProviderPath {
-    param([string]$Name, [string]$ConfigRoot, [string]$Path)
+    param([string]$Name, [string]$ConfigRoot, [string]$Path, [switch]$Directory)
+    # File callers enumerate the receipt; directory callers enumerate only its
+    # createdDirectories and remove them empty-only, never recursively.
+    if ($Name -ceq 'codex' -and (Test-CodexV2ReceiptBundlePath `
+        -ConfigRoot $ConfigRoot -Path $Path -Directory:$Directory)) { return $true }
     $scopedNames = @(
         'claude', 'codex', 'opencode', 'kilo', 'vscode', 'vibe',
         'cursor', 'dcode', 'roo', 'gemini', 'cline', 'goose',
@@ -4496,7 +5095,15 @@ function Test-UninstallProviderPath {
                 -Right (Join-Path $ConfigRoot 'config.toml')) -or
             (Test-IdemPathEqual -Left $normalizedPath `
                 -Right ((Join-Path $ConfigRoot 'config.toml') +
-                    $AutopromptConfigEditBackupSuffix))
+                    $AutopromptConfigEditBackupSuffix)) -or
+            (Test-IdemPathEqual -Left $normalizedPath `
+                -Right (Join-Path $ConfigRoot 'scripts')) -or
+            (Test-IdemPathEqual -Left $normalizedPath `
+                -Right (Join-Path $ConfigRoot 'scripts/local-only-safety.cjs')) -or
+            (Test-IdemPathEqual -Left $normalizedPath `
+                -Right (Join-Path $ConfigRoot 'skills/contracts')) -or
+            (Test-IdemPathUnderRoot -Path $normalizedPath -Root `
+                (Join-Path $ConfigRoot 'skills/contracts'))
     }
     if ($Name -ceq 'cursor') {
         $base = Join-Path $ConfigRoot '.cursor'
@@ -4694,7 +5301,7 @@ function Test-UninstallSharedProviderState {
     foreach ($directory in @($Receipt.CreatedDirectories)) {
         if (-not [string]::IsNullOrEmpty($directory) -and
             -not (Test-UninstallProviderPath -Name $Name `
-                -ConfigRoot $ConfigRoot -Path $directory)) {
+                -ConfigRoot $ConfigRoot -Path $directory -Directory)) {
             return $true
         }
     }
@@ -4769,11 +5376,11 @@ function Get-UninstallProviderPlan {
     $providerEdits = Get-UninstallProviderEdits -Name $Name `
         -ConfigRoot $ConfigRoot -Edits ([hashtable[]]$Receipt.Edits)
     $providerDirectories = @($Receipt.CreatedDirectories | Where-Object {
-        Test-UninstallProviderPath -Name $Name -ConfigRoot $ConfigRoot -Path $_
+        Test-UninstallProviderPath -Name $Name -ConfigRoot $ConfigRoot -Path $_ -Directory
     })
     $retainedDirectories = @($Receipt.CreatedDirectories | Where-Object {
         -not (Test-UninstallProviderPath -Name $Name `
-            -ConfigRoot $ConfigRoot -Path $_)
+            -ConfigRoot $ConfigRoot -Path $_ -Directory)
     })
     $retainedEdits = @($Receipt.Edits | Where-Object {
         -not (Test-UninstallProviderPath -Name $Name `
@@ -4838,6 +5445,11 @@ function Remove-UninstallProviderFiles {
     param([string]$ConfigRoot, [string]$Name, [hashtable]$Receipt,
         [hashtable]$Plan)
     $removed = 0
+    $retained = 0
+    $fingerprints = $null
+    if ($Name -ceq 'codex') {
+        $fingerprints = Get-IdemManifestHashIndex -ConfigRoot $ConfigRoot
+    }
     foreach ($file in @($Receipt.Files)) {
         $shouldSkip = [string]::IsNullOrEmpty($file) -or
             ($Plan.IsScoped -and (Test-IdemPathEqual `
@@ -4848,6 +5460,40 @@ function Remove-UninstallProviderFiles {
         if (-not (Test-Path -LiteralPath $file)) {
             [Console]::Out.WriteLine("uninstall-file=$file note=already-absent")
         } else {
+            if ($Name -ceq 'codex') {
+                $isManifest = Test-IdemPathEqual -Left $file -Right $Plan.Manifest
+                $item = Get-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+                $recordedHash = if ($isManifest) { '' } else {
+                    Get-IdemManifestHashFromIndex -Index $fingerprints `
+                        -ConfigRoot $ConfigRoot -Key $file
+                }
+                $reason = ''
+                if (-not $isManifest -and ($null -eq $item -or
+                    $item -isnot [System.IO.FileInfo] -or
+                    $item.Attributes.HasFlag([System.IO.FileAttributes]::ReparsePoint))) {
+                    $reason = 'linked-or-unsafe'
+                } elseif (-not $isManifest -and [string]::IsNullOrEmpty($recordedHash)) {
+                    $reason = 'unfingerprinted'
+                } elseif (-not $isManifest) {
+                    $liveHash = Get-IdemSha256 -Path $file
+                    if ($liveHash -is [int]) {
+                        $reason = 'hash-unreadable'
+                    } elseif ($liveHash -cne $recordedHash) {
+                        $reason = 'hash-drift'
+                    }
+                }
+                if (-not [string]::IsNullOrEmpty($reason)) {
+                    [Console]::Out.WriteLine(
+                        "uninstall-retained=$file reason=$reason ownership=relinquished"
+                    )
+                    $retained++
+                    if ($Plan.IsScoped -and -not (Remove-IdemManifestHash `
+                        -ConfigRoot $ConfigRoot -Key $file)) {
+                        return @{ Code = 74; Removed = $removed; Retained = $retained }
+                    }
+                    continue
+                }
+            }
             try {
                 Remove-Item -LiteralPath $file -Force -ErrorAction Stop
             } catch {
@@ -4856,16 +5502,16 @@ function Remove-UninstallProviderFiles {
                     "Autoprompt uninstall: could not remove $file " +
                     '(permission denied?). Remove it manually and re-run.'
                 )
-                return @{ Code = 74; Removed = $removed }
+                return @{ Code = 74; Removed = $removed; Retained = $retained }
             }
             $removed++
         }
         if ($Plan.IsScoped -and -not (Remove-IdemManifestHash `
             -ConfigRoot $ConfigRoot -Key $file)) {
-            return @{ Code = 74; Removed = $removed }
+            return @{ Code = 74; Removed = $removed; Retained = $retained }
         }
     }
-    return @{ Code = 0; Removed = $removed }
+    return @{ Code = 0; Removed = $removed; Retained = $retained }
 }
 
 function Set-UninstallFinalReceipt {
@@ -4903,6 +5549,11 @@ function Uninstall-Client {
     }
     $receipt = Read-UninstallReceipt -ConfigRoot $ConfigRoot
     if ($receipt -is [int]) { return $receipt }
+    $AutopromptCodexV2ReceiptBundleRoots = @()
+    if ($Name -ceq 'codex') {
+        $AutopromptCodexV2ReceiptBundleRoots = @(Get-CodexV2ReceiptBundleRoots `
+            -ConfigRoot $ConfigRoot -Files $receipt.Files)
+    }
     $plan = Get-UninstallProviderPlan -ConfigRoot $ConfigRoot `
         -Name $Name -Receipt $receipt
     $snapshot = New-UninstallSnapshot -ConfigRoot $ConfigRoot -Receipt $receipt
@@ -4931,10 +5582,10 @@ function Uninstall-Client {
         Restore-UninstallSnapshot -Snapshot $snapshot | Out-Null
         return 77
     }
-    [Console]::Out.WriteLine(
-        "client=$Name uninstall=ok removed=$($removal.Removed) " +
-        "restored-edits=$($script:UninstallRestoredEditFiles)"
-    )
+    $summary = "client=$Name uninstall=ok removed=$($removal.Removed) "
+    if ($Name -ceq 'codex') { $summary += "retained=$($removal.Retained) " }
+    $summary += "restored-edits=$($script:UninstallRestoredEditFiles)"
+    [Console]::Out.WriteLine($summary)
     return 0
 }
 
@@ -5186,7 +5837,8 @@ function Test-AutopromptOmpDetachedManifestAuthority {
             -DefaultAgentRoot $ompDetachedRoot)) {
             continue
         }
-        $matches = @(Get-IdemManifestMatchingKeys -Entries $entries -Key $file)
+        $matches = @(Get-IdemManifestMatchingKeys -Entries $entries -Key $file `
+            -ConfigRoot $ConfigRoot)
         if ($matches.Count -ne 1 -or
             [string]::IsNullOrEmpty([string]$entries[$matches[0]])) {
             return $false
@@ -5445,17 +6097,39 @@ function Add-ReasonixRepairCandidates {
 function Add-CodexRepairCandidates {
     param([hashtable]$Candidates, [string]$ConfigRoot, [string]$LiveSkill,
         [string]$StageSkill, [string]$StageRoot)
-    $sourceAgents = Join-Path $AutopromptInstallRepoRoot 'agents/claude/agents'
+    $sourceAgents = Join-Path $AutopromptInstallRepoRoot 'agents/codex/agents'
     $castingTool = Join-Path $StageSkill 'workflow/codex-agent-casting.js'
     $profileTool = Join-Path $StageSkill 'workflow/codex-agent-profile.js'
-    $stageAgents = Join-Path $StageSkill 'agents-runtime'
-    $stageProfile = Join-Path $StageRoot 'autoprompt.config.toml'
+    $generation = Get-AutopromptCodexPayloadGeneration
+    if ([string]::IsNullOrEmpty($generation)) {
+        throw 'Codex payload generation is unavailable'
+    }
+    $stageLayoutRoot = Join-Path $StageRoot 'root'
+    $stageAgents = Join-Path $stageLayoutRoot `
+        (Join-Path '.autoprompt-private/bundles' `
+            (Join-Path $generation 'skills/autoprompt/agents-runtime'))
+    $stageProfile = Join-Path $stageLayoutRoot 'autoprompt.config.toml'
     $hadAgentsDirectory = Test-Path Env:CODEX_AGENTS_DIR
     $previousAgentsDirectory = $env:CODEX_AGENTS_DIR
     try {
         $env:CODEX_AGENTS_DIR = $stageAgents
-        & node $castingTool --export-inheritance --source-agents $sourceAgents `
-            --agents-dir $stageAgents --selector off | Out-Null
+        New-Item -ItemType Directory -Path $stageAgents -Force | Out-Null
+        $sourceRoles = @(Get-ChildItem -LiteralPath $sourceAgents `
+            -Filter 'ap-*.toml' -File)
+        try {
+            $policy = Get-Content -LiteralPath (Join-Path $sourceAgents `
+                'role-policy.json') -Raw | ConvertFrom-Json
+            $expectedRoles = @($policy.physical_roles.psobject.Properties).Count
+        } catch { throw 'canonical Codex role policy is unreadable' }
+        if ($expectedRoles -le 0 -or $sourceRoles.Count -ne $expectedRoles) {
+            throw "canonical Codex role inventory is incomplete (found=$($sourceRoles.Count) expected=$expectedRoles)"
+        }
+        foreach ($sourceRole in $sourceRoles) {
+            Copy-Item -LiteralPath $sourceRole.FullName `
+                -Destination (Join-Path $stageAgents $sourceRole.Name) -ErrorAction Stop
+        }
+        & node $castingTool --write-manifest --agents-dir $stageAgents `
+            --selector off | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'generated Codex agent stage failed' }
         & node $profileTool --write --agents-dir $stageAgents `
             --profile $stageProfile | Out-Null
@@ -5890,13 +6564,62 @@ function Get-ExtrasConfigRoot {
 
 function Get-ExtrasRuntimeInventory {
     param([string]$Name, [string]$Tool, [string]$Stage)
-    & node $Tool --install $Name --destination $Stage | Out-Null
+    $runtimeDestination = if ($Name -eq 'codex') {
+        Join-Path $Stage 'skills/autoprompt'
+    } else { $Stage }
+    & node $Tool --install $Name --destination $runtimeDestination | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'install failed' }
-    & node $Tool --verify $Name --destination $Stage | Out-Null
+    & node $Tool --verify $Name --destination $runtimeDestination | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'verify failed' }
     $relativeFiles = @(& node $Tool --list $Name)
     if ($LASTEXITCODE -ne 0) { throw 'inventory failed' }
     return $relativeFiles
+}
+
+function Get-CodexExtrasRuntimePlan {
+    param([string]$Tool, [string]$Stage)
+    $runtimeDestination = Join-Path $Stage 'skills/autoprompt'
+    $json = @(& node $Tool --plan codex --destination $runtimeDestination)
+    if ($LASTEXITCODE -ne 0 -or $json.Count -eq 0) {
+        throw 'Codex runtime plan failed'
+    }
+    try { $plan = (($json -join "`n") | ConvertFrom-Json) }
+    catch { throw 'Codex runtime plan JSON is invalid' }
+    if ($plan.schemaVersion -ne 1 -or $plan.provider -cne 'codex' -or
+        $null -eq $plan.files -or @($plan.files).Count -eq 0) {
+        throw 'Codex runtime plan is invalid'
+    }
+    return $plan
+}
+
+function Install-CodexExtrasRuntimePlan {
+    param([string]$ConfigRoot, [string]$Tool, [string]$Stage)
+    $plan = Get-CodexExtrasRuntimePlan -Tool $Tool -Stage $Stage
+    $mappings = @()
+    $agentCount = 0
+    foreach ($item in @($plan.files)) {
+        if ($item.kind -ceq 'discovery-shim') { continue }
+        if ([string]::IsNullOrEmpty($item.target) -or
+            [string]::IsNullOrEmpty($item.receiptPath) -or
+            [IO.Path]::IsPathRooted($item.receiptPath) -or
+            ($item.receiptPath -split '[\\/]' | Where-Object { $_ -in @('', '.', '..') })) {
+            throw 'Codex runtime plan contains an unsafe receipt path'
+        }
+        $mappings += @{
+            Source = [IO.Path]::GetFullPath($item.target)
+            Target = Join-Path $ConfigRoot ($item.receiptPath -replace '/', `
+                [IO.Path]::DirectorySeparatorChar)
+        }
+        if ($item.receiptPath -clike '*/skills/autoprompt/agents/ap-*.toml') {
+            $agentCount++
+        }
+    }
+    $managedCode = Install-IdemManagedFiles -ConfigRoot $ConfigRoot `
+        -Mappings $mappings -RefuseUnownedTarget -UseCodexBatchIndex
+    if ($managedCode -ne 0) {
+        throw "Codex runtime registration failed: $managedCode"
+    }
+    return $agentCount
 }
 
 function Install-ExtrasSkillFiles {
@@ -5989,9 +6712,14 @@ function Install-Extras {
     try {
         $relativeFiles = @(Get-ExtrasRuntimeInventory -Name $Name `
             -Tool $context.Tool -Stage $stage)
-        $agentCount = Install-ExtrasSkillFiles `
-            -ConfigRoot $context.ConfigRoot -Stage $stage `
-            -SkillDest $SkillDest -RelativeFiles $relativeFiles
+        $agentCount = if ($Name -eq 'codex') {
+            Install-CodexExtrasRuntimePlan -ConfigRoot $context.ConfigRoot `
+                -Tool $context.Tool -Stage $stage
+        } else {
+            Install-ExtrasSkillFiles `
+                -ConfigRoot $context.ConfigRoot -Stage $stage `
+                -SkillDest $SkillDest -RelativeFiles $relativeFiles
+        }
         $nativeCount = Install-ExtrasNativePersonas `
             -ConfigRoot $context.ConfigRoot -Stage $stage `
             -NativeDest $context.NativeDestination

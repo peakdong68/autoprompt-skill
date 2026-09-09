@@ -28,6 +28,25 @@
 
 set -u
 
+# macOS ships Bash 3.2, while install-lib.sh requires Bash 4.3 features.
+# Re-exec before sourcing it; this block itself stays Bash 3.2 compatible.
+if [[ "$(uname -s 2>/dev/null || true)" == Darwin ]] && (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 3) )); then
+  autoprompt_modern_bash=''
+  for autoprompt_bash_candidate in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+    if [[ -x "$autoprompt_bash_candidate" ]] && "$autoprompt_bash_candidate" -c '(( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 3) ))' >/dev/null 2>&1; then
+      autoprompt_modern_bash="$autoprompt_bash_candidate"; break
+    fi
+  done
+  if [[ -z "$autoprompt_modern_bash" ]] && command -v brew >/dev/null 2>&1; then
+    autoprompt_bash_prefix="$(brew --prefix bash 2>/dev/null || true)"
+    autoprompt_bash_candidate="$autoprompt_bash_prefix/bin/bash"
+    if [[ -x "$autoprompt_bash_candidate" ]] && "$autoprompt_bash_candidate" -c '(( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 3) ))' >/dev/null 2>&1; then autoprompt_modern_bash="$autoprompt_bash_candidate"; fi
+  fi
+  if [[ -n "$autoprompt_modern_bash" ]]; then exec "$autoprompt_modern_bash" "$0" "$@"; fi
+  printf 'Error: Bash 4.3 or newer is required on macOS. Install it with: brew install bash\n' >&2
+  exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB="$SCRIPT_DIR/lib/install-lib.sh"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -38,11 +57,17 @@ if [ ! -f "$LIB" ]; then
 fi
 # shellcheck source=/dev/null
 . "$LIB"
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/harness-v2.sh"
 
-CLIENTS_ALL=(claude codex opencode kilo vscode prime omp deepseek reasonix)
+CLIENTS_ALL=(claude codex opencode kilo vscode prime omp deepseek hermes grok reasonix)
 
 # Per-run result rows for the matrix (RESULT=/SKIP= lines), filled in this shell.
 RESULT_ROWS=()
+# Destinations are kept out of the human-readable row grammar. Supported roots
+# can contain whitespace or marker-looking text such as "format=", so reparsing
+# RESULT_ROWS would silently truncate a successful destination.
+RESULT_PASS_DESTINATIONS=()
 ANY_FAIL=0
 RETAINED_RECOVERY=0
 LEGACY_CODEX_RECOVERY_NAME='.autoprompt-legacy-codex-recovery'
@@ -54,6 +79,22 @@ install_exit_code() {
     return
   fi
   printf '%s' "$ANY_FAIL"
+}
+
+add_pass_result() {
+  local client="$1" destination="$2" format="$3" detail="${4:-}"
+  local destination_index="${#RESULT_PASS_DESTINATIONS[@]}"
+  RESULT_ROWS+=("RESULT=PASS client=$client destination-index=$destination_index format=$format detail=$detail")
+  RESULT_PASS_DESTINATIONS+=("$destination")
+}
+
+result_destination_for_row() {
+  local line="$1" destination_index
+  destination_index="${line#* destination-index=}"
+  destination_index="${destination_index%% *}"
+  [[ "$destination_index" =~ ^[0-9]+$ ]] || return 1
+  [ "$destination_index" -lt "${#RESULT_PASS_DESTINATIONS[@]}" ] || return 1
+  printf '%s' "${RESULT_PASS_DESTINATIONS[destination_index]}"
 }
 
 usage() {
@@ -69,13 +110,15 @@ payload_file() {
   local client="$1"
   case "$client" in
     claude)   printf '%s' "$REPO_ROOT/agents/claude/SKILL.md" ;;
-    codex)    printf '%s' "$REPO_ROOT/agents/codex/SKILL.md" ;;
+    codex)    printf '%s' "$REPO_ROOT/scripts/install/codex-discovery-shim.md" ;;
     opencode) printf '%s' "$REPO_ROOT/agents/opencode/SKILL.md" ;;
     kilo)     printf '%s' "$REPO_ROOT/agents/kilo/SKILL.md" ;;
     vscode)   printf '%s' "$REPO_ROOT/agents/vscode/SKILL.md" ;;
     omp)      printf '%s' "$REPO_ROOT/agents/omp/SKILL.md" ;;
     deepseek) printf '%s' "$REPO_ROOT/agents/deepseek/SKILL.md" ;;
     reasonix) printf '%s' "$REPO_ROOT/agents/reasonix/SKILL.md" ;;
+    hermes) printf '%s' "$REPO_ROOT/agents/hermes/SKILL.md" ;;
+    grok) printf '%s' "$REPO_ROOT/agents/grok/SKILL.md" ;;
     *) return 1 ;;
   esac
 }
@@ -88,6 +131,11 @@ import sys
 text = open(sys.argv[1], encoding="utf-8").read()
 parts = text.split("---\n")
 body = "---\n".join(parts[2:]) if len(parts) >= 3 else text
+if sys.argv[1].replace("\\", "/").endswith("/scripts/install/codex-discovery-shim.md"):
+    if body.startswith("\n"):
+        body = body[1:]
+    if body.endswith("\n"):
+        body = body[:-1]
 sys.stdout.buffer.write(body.encode("utf-8"))
 PY
 }
@@ -108,6 +156,18 @@ PY
 config_root() {
   local client="$1"
   autoprompt_config_root "$client"
+}
+
+install_reasonix_lifecycle() {
+  local destination
+  destination="$(config_root reasonix)"
+  if node "$REPO_ROOT/scripts/reasonix-package.cjs" install --root "$destination"; then
+    add_pass_result reasonix "$destination" private-v2
+  else
+    RESULT_ROWS+=("RESULT=FAIL client=reasonix stage=lifecycle")
+    ANY_FAIL=1
+    return 1
+  fi
 }
 
 install_prime_lifecycle() {
@@ -139,7 +199,7 @@ install_prime_lifecycle() {
   fi
   printf 'Autoprompt install (prime): PASS - landed %s (48 files, rlmMaxDepth=4).\n' \
     "$destination" >&2
-  RESULT_ROWS+=("RESULT=PASS client=prime dest=$destination format=prime-package detail=files=48")
+  add_pass_result prime "$destination" prime-package files=48
 }
 
 # codex_config_file, extras source + destination helpers.
@@ -157,10 +217,25 @@ codex_agents_dir() {
 
 stage_codex_agents() {
   local skill_dir="$1" source="$2" stage_agents="$3" stage_profile="$4"
+  local role copied=0 expected
+  mkdir -p -- "$stage_agents" || return 91
+  for role in "$source"/ap-*.toml; do
+    [ -f "$role" ] || continue
+    cp -- "$role" "$stage_agents/${role##*/}" || return 91
+    copied=$((copied + 1))
+  done
+  expected="$(node -e '
+    const fs = require("node:fs");
+    const policy = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    process.stdout.write(String(Object.keys(policy.physical_roles || {}).length));
+  ' "$skill_dir/agents/role-policy.json")" || return 91
+  if [ "$expected" -le 0 ] 2>/dev/null || [ "$copied" -ne "$expected" ]; then
+    printf 'Autoprompt install (codex): canonical role inventory is incomplete (found=%s expected=%s).\n' "$copied" "$expected" >&2
+    return 91
+  fi
   CODEX_AGENTS_DIR="$stage_agents" node \
-    "$skill_dir/workflow/codex-agent-casting.js" --export-inheritance \
-    --source-agents "$source" --agents-dir "$stage_agents" \
-    --selector off >/dev/null || return 91
+    "$skill_dir/workflow/codex-agent-casting.js" --write-manifest \
+    --agents-dir "$stage_agents" --selector off >/dev/null || return 91
   CODEX_AGENTS_DIR="$stage_agents" node \
     "$skill_dir/workflow/codex-agent-casting.js" --resolve \
     --agents-dir "$stage_agents" --selector off >/dev/null || return 91
@@ -171,30 +246,35 @@ stage_codex_agents() {
 
 land_codex_agents() {
   local root="$1" stage_agents="$2" stage_profile="$3"
-  local target="$4" profile="$5" file had_nullglob
+  local target="$4" profile="$5" file had_nullglob rc
   case "$(shopt nullglob)" in *on) had_nullglob=1 ;; *) had_nullglob=0 ;; esac
   shopt -s nullglob
   for file in "$stage_agents"/ap-*.toml \
               "$stage_agents"/.autoprompt-casting.json; do
-    if ! _idem_install_managed_file \
-      "$root" "$file" "$target/${file##*/}" 1; then
+    _idem_install_managed_file \
+      "$root" "$file" "$target/${file##*/}" 1 1 0 1
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
       [ "$had_nullglob" -eq 0 ] && shopt -u nullglob
-      return 93
+      return "$rc"
     fi
   done
   [ "$had_nullglob" -eq 0 ] && shopt -u nullglob
-  _idem_install_managed_file "$root" "$stage_profile" "$profile" 1 || return 93
+  _idem_install_managed_file \
+    "$root" "$stage_profile" "$profile" 1 1 0 1 || return $?
 }
 
 install_codex_agents() {
   local root source skill_dir stage stage_agents stage_profile target profile rc
   root="$(config_root codex)"
-  source="$REPO_ROOT/agents/claude/agents"
-  skill_dir="$(extras_skill_dir codex)"
+  skill_dir="$(autoprompt_codex_bundle_skill_root)" || return 90
+  source="$skill_dir/agents"
   stage="$(mktemp -d 2>/dev/null)" || return 90
   target="$(codex_agents_dir)"
   profile="$(codex_profile_file)"
-  stage_agents="$stage/root/skills/autoprompt/agents-runtime"
+  # Mirror the final private-bundle path under the staging root so the
+  # generated profile's relative config_file entries remain valid after land.
+  stage_agents="$stage/root/${target#"$root"/}"
   stage_profile="$stage/root/autoprompt.config.toml"
   if ! command -v node >/dev/null 2>&1; then
     rm -rf -- "$stage"
@@ -742,13 +822,15 @@ _migrate_restore_codex_config() {
 }
 
 legacy_codex_ownership_state() {
-  local root="$1" output_name="$2" helper
+  local root="$1" output_name="$2" helper owned_file
   local -n out="$output_name"
   local -a owned=()
   out=()
   _idem_paths_equal "$root" "$(config_root codex)" || return 1
   helper="$REPO_ROOT/scripts/install/legacy-compat.cjs"
-  mapfile -d '' -t owned < <(node "$helper" files0 codex "$root" 2>/dev/null)
+  while IFS= read -r -d '' owned_file; do
+    owned+=("$owned_file")
+  done < <(node "$helper" files0 codex "$root" 2>/dev/null)
   [ "${#owned[@]}" -gt 0 ] || return 1
   out=("${owned[@]}")
 }
@@ -882,8 +964,12 @@ remove_exact_legacy_codex_recovery() {
   [ -d "$skill_root" ] && [ ! -L "$skill_root" ] || return 1
   _uninstall_receipt_path_under_root "$root" "$skill_root" || return 1
   node "$helper" match codex "$recovery" >/dev/null 2>&1 || return 1
-  mapfile -d '' -t files < <(node "$helper" files0 codex "$recovery" 2>/dev/null)
-  mapfile -d '' -t directories < <(
+  while IFS= read -r -d '' file; do
+    files+=("$file")
+  done < <(node "$helper" files0 codex "$recovery" 2>/dev/null)
+  while IFS= read -r -d '' directory; do
+    directories+=("$directory")
+  done < <(
     node "$helper" directories0 codex "$recovery" 2>/dev/null
   )
   [ "${#files[@]}" -gt 0 ] || return 1
@@ -983,6 +1069,13 @@ prune_stale_claude_personas() {
   done
 }
 
+prune_retired_codex_files() {
+  local root="$1"
+  local -a current_targets=()
+  _preflight_client_targets codex current_targets || return 94
+  _idem_reconcile_retired_codex_files "$root" current_targets
+}
+
 # install_landing <client>: run precheck + install_idempotent for ONE present client IN
 # THIS SHELL, accumulating into the shared receipt arrays. Records a RESULT= row. Does
 # NOT write the receipt (that is per-root, done by the caller). Sets ANY_FAIL on failure.
@@ -1027,6 +1120,16 @@ _landing_load_payload() {
 
 _landing_prepare_root() {
   local client="$1" root="$2"
+  if [ "$client" = codex ]; then
+    local codex_mode="${AUTOPROMPT_CODEX_INSTALL_MODE:-standalone}"
+    if ! command -v node >/dev/null 2>&1 ||
+       ! node "$REPO_ROOT/scripts/runtime-payload.cjs" \
+         --capability codex --mode "$codex_mode" >/dev/null; then
+      _landing_fail "$client" capability \
+        "Autoprompt install (codex): unsupported or unknown install mode '$codex_mode'."
+      return 1
+    fi
+  fi
   if ! precheck_install "$client" >/dev/null; then
     _landing_fail "$client" precheck \
       "Autoprompt install ($client): precheck failed (see message above)."
@@ -1035,6 +1138,11 @@ _landing_prepare_root() {
   if ! migrate_legacy_activation "$client" "$root"; then
     _landing_fail "$client" migration \
       "Autoprompt install ($client): receipt-owned legacy activation migration failed."
+    return 1
+  fi
+  if [ "$client" = codex ] && ! prune_retired_codex_files "$root"; then
+    _landing_fail "$client" migration \
+      "Autoprompt install (codex): prior receipt reconciliation failed."
     return 1
   fi
   if [ "$client" = claude ] && ! prune_stale_claude_personas; then
@@ -1087,10 +1195,18 @@ _landing_install_extras() {
 
 _landing_activate_client() {
   local client="$1"
-  if [ "$client" = codex ] && ! install_codex_agents; then
-    _landing_fail "$client" agents \
-      "Autoprompt install ($client): private custom-agent profile export failed."
-    return 1
+  if [ "$client" = codex ]; then
+    if ! node "$REPO_ROOT/scripts/codex-configure.cjs" \
+        --quarantine-known-legacy >/dev/null; then
+      _landing_fail "$client" migration \
+        "Autoprompt install ($client): known-legacy quarantine failed."
+      return 1
+    fi
+    if ! install_codex_agents; then
+      _landing_fail "$client" agents \
+        "Autoprompt install ($client): private custom-agent profile export failed."
+      return 1
+    fi
   fi
   if [ "$client" = opencode ] &&
      { ! prune_stale_opencode_agents || ! install_opencode_activation; }; then
@@ -1146,12 +1262,13 @@ _landing_verify() {
 
 _landing_publish_success() {
   local client="$1" install_record="$2" verify_record="$3" landed format
+  # The final format marker is emitted by verify_install after the destination.
+  # '%' removes that shortest suffix, preserving spaces and earlier marker text
+  # in the verified destination itself.
   landed="${verify_record#client=* verify=pass dest=}"
   landed="${landed% format=*}"
   format="${verify_record##* format=}"
-  RESULT_ROWS+=(
-    "RESULT=PASS client=$client dest=$landed format=$format signal=verify=pass detail=$install_record"
-  )
+  add_pass_result "$client" "$landed" "$format" "$install_record"
 }
 
 install_landing() {
@@ -1216,14 +1333,14 @@ _preflight_append_agent_targets() {
 }
 
 _preflight_client_targets() {
-  local client="$1" output_name="$2" main_target private_dir relative
-  local -a inventory=() claude_inventory=()
+  local client="$1" output_name="$2" main_target private_dir relative plan_targets
+  local -a inventory=()
   local -n targets_ref="$output_name"
   targets_ref=()
   _preflight_main_target "$client" main_target || return $?
   targets_ref+=("$main_target")
   case "$client" in
-    claude|codex|opencode|kilo|vscode|omp|deepseek|reasonix)
+    claude|opencode|kilo|vscode|omp|deepseek|reasonix)
       _preflight_runtime_inventory "$client" inventory || return $?
       private_dir="$(extras_skill_dir "$client")"
       for relative in "${inventory[@]}"; do
@@ -1231,12 +1348,29 @@ _preflight_client_targets() {
         targets_ref+=("$private_dir/$relative")
       done
       ;;
+    codex)
+      _preflight_runtime_inventory "$client" inventory || return $?
+      private_dir="$(extras_skill_dir "$client")"
+      plan_targets="$(node -e '
+        const runtime = require(process.argv[1]);
+        const plan = runtime.installationPlan("codex", process.argv[2]);
+        for (const item of plan.files) {
+          if (item.kind !== "discovery-shim") process.stdout.write(`${item.target}\n`);
+        }
+      ' "$REPO_ROOT/scripts/runtime-payload.cjs" "$private_dir")" || return 82
+      while IFS= read -r relative; do
+        [ -z "$relative" ] || targets_ref+=("$relative")
+      done <<< "$plan_targets"
+      ;;
   esac
   case "$client" in
     claude) _preflight_append_agent_targets '.md' "$(extras_agents_dir claude)" inventory "$output_name" ;;
     codex)
-      _preflight_runtime_inventory claude claude_inventory || return $?
-      _preflight_append_agent_targets '.toml' "$(codex_agents_dir)" claude_inventory "$output_name"
+      for relative in "${inventory[@]}"; do
+        case "$relative" in agents/ap-*.toml)
+          targets_ref+=("$(codex_agents_dir)/${relative##*/}") ;;
+        esac
+      done
       targets_ref+=("$(codex_agents_dir)/.autoprompt-casting.json" "$(codex_profile_file)")
       ;;
     opencode)
@@ -1454,6 +1588,10 @@ mark_root_preflight_failed() {
 # receipt is a hard failure because treating it as fresh would strand owned paths.
 preseed_root() {
   local root="$1"
+  AUTOPROMPT_RECEIPT_PRIOR_MANIFEST_SHA256=""
+  if [ -f "$root/$AUTOPROMPT_HASH_MANIFEST_NAME" ]; then
+    AUTOPROMPT_RECEIPT_PRIOR_MANIFEST_SHA256="$(_idem_sha256 "$root/$AUTOPROMPT_HASH_MANIFEST_NAME")" || return 42
+  fi
   AUTOPROMPT_RECEIPT_FILES=(); AUTOPROMPT_RECEIPT_EDITS=()
   AUTOPROMPT_RECEIPT_CREATED_DIRECTORIES=()
   AUTOPROMPT_RECEIPT_OMP_MANAGED=0
@@ -1509,12 +1647,13 @@ rollback_root() {
 }
 
 print_matrix() {
-  local line client detail
+  local line client detail index
   printf '\n==== Autoprompt install matrix ====\n'
-  for line in "${RESULT_ROWS[@]}"; do
+  for ((index = 0; index < ${#RESULT_ROWS[@]}; index++)); do
+    line="${RESULT_ROWS[index]}"
     client="${line#* client=}"; client="${client%% *}"
     case "$line" in
-      RESULT=PASS*) detail="${line#* dest=}"; printf '  PASS  %-9s dest=%s\n' "$client" "${detail%% *}" ;;
+      RESULT=PASS*) detail="$(result_destination_for_row "$line")"; printf '  PASS  %-9s dest=%s\n' "$client" "$detail" ;;
       RESULT=FAIL*) detail="${line#* stage=}"; printf '  FAIL  %-9s stage=%s\n' "$client" "${detail%% *}" ;;
       SKIP=*)       detail="${line#* reason=}"; printf '  SKIP  %-9s reason=%s\n' "$client" "${detail%% *}" ;;
     esac
@@ -1560,7 +1699,7 @@ report_root_success() {
     case "$line" in
       RESULT=PASS*)
         client="${line#* client=}"; client="${client%% *}"
-        landed="${line#* dest=}"; landed="${landed%% *}"
+        landed="$(result_destination_for_row "$line")" || return 1
         fmt="${line#* format=}"; fmt="${fmt%% *}"
         detail="${line#* detail=}"
         printf 'Autoprompt install (%s): PASS - landed %s (format %s, %s)\n' \
@@ -1739,7 +1878,8 @@ main() {
     done
     local -a ordinary=()
     for c in "${present[@]}"; do
-      if [ "$c" = prime ]; then install_prime_lifecycle || true
+      if [ "$c" = reasonix ]; then install_reasonix_lifecycle || true
+      elif is_harness_v2 "$c"; then install_harness_v2_lifecycle "$c" || true
       else ordinary+=("$c")
       fi
     done
@@ -1770,8 +1910,13 @@ main() {
     RESULT_ROWS+=("SKIP=skip client=$target reason=not-detected")
     print_matrix; exit 0
   fi
-  if [ "$target" = prime ]; then
-    install_prime_lifecycle || true
+  if [ "$target" = reasonix ]; then
+    install_reasonix_lifecycle || true
+    print_matrix
+    exit "$(install_exit_code)"
+  fi
+  if is_harness_v2 "$target"; then
+    install_harness_v2_lifecycle "$target" || true
     print_matrix
     exit "$(install_exit_code)"
   fi

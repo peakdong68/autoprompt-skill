@@ -1,16 +1,16 @@
 <div dir="rtl" align="right">
 
 <p align="center">
-  <img src="../../assets/i18n/ar/banner.svg" alt="مهارة Autoprompt Skill مع إخفاقات أقل بنسبة 45% في مهام البرمجة بالوكلاء" width="760"/>
+  <img src="../../assets/banner.svg" alt="Autoprompt Skill: سحب وردية وإوز يطير" width="1000"/>
 </p>
 
-<p align="center">Autoprompt مهارة لوكلاء البرمجة تخفض الإخفاقات بنسبة 45% في مهام البرمجة بالوكلاء.</p>
+<p align="center">Autoprompt سير عمل لوكلاء البرمجة يقلل الإخفاقات بنسبة 45% عبر مراجعة العمل وإصلاحه وإعادة التحقق منه.</p>
 
 <p align="center">
-  <a href="#نتائج-الاختبار-المعياري"><img src="https://img.shields.io/badge/Terminal--Bench%202.1-%2B14.61%20%D9%86%D9%82%D8%B7%D8%A9-255C60?style=flat-square&labelColor=14101F" alt="Terminal-Bench 2.1: تحسن 14.61 نقطة"/></a>
-  <a href="https://github.com/Spielewoy/autoprompt-skill/releases/latest"><img src="https://img.shields.io/github/v/release/Spielewoy/autoprompt-skill?style=flat-square&label=%D8%A7%D9%84%D8%A5%D8%B5%D8%AF%D8%A7%D8%B1&color=255C60&labelColor=14101F" alt="الإصدار v1.0.4"/></a>
-  <a href="#التثبيت"><img src="https://img.shields.io/badge/%D8%A7%D9%84%D8%AF%D8%B9%D9%85-9%20%D9%85%D8%B6%D9%8A%D9%81%D9%8A%D9%86%20%D9%85%D8%AF%D8%B9%D9%88%D9%85%D9%8A%D9%86-255C60?style=flat-square&labelColor=14101F" alt="دعم تسعة مضيفين"/></a>
-  <a href="../../LICENSE"><img src="https://img.shields.io/badge/%D8%A7%D9%84%D8%AA%D8%B1%D8%AE%D9%8A%D8%B5-MIT-255C60?style=flat-square&labelColor=14101F" alt="ترخيص MIT"/></a>
+  <a href="#نتائج-الاختبار-المعياري"><img src="https://img.shields.io/badge/Terminal--Bench%202.1-%2B14.61%20%D9%86%D9%82%D8%B7%D8%A9-965477?style=flat-square&labelColor=302335" alt="Terminal-Bench 2.1: تحسن 14.61 نقطة"/></a>
+  <a href="https://github.com/Spielewoy/autoprompt-skill/releases/latest"><img src="https://img.shields.io/github/v/release/Spielewoy/autoprompt-skill?style=flat-square&label=%D8%A7%D9%84%D8%A5%D8%B5%D8%AF%D8%A7%D8%B1&color=965477&labelColor=302335" alt="أحدث إصدار"/></a>
+  <a href="#التثبيت"><img src="https://img.shields.io/badge/%D8%A7%D9%84%D8%AF%D8%B9%D9%85-11%20%D9%85%D8%B2%D9%88%D8%AF%D8%A7%D9%8B%20%D9%85%D8%AF%D8%B9%D9%88%D9%85%D8%A7%D9%8B-965477?style=flat-square&labelColor=302335" alt="أحد عشر مزوداً مدعوماً"/></a>
+  <a href="../../LICENSE"><img src="https://img.shields.io/badge/%D8%A7%D9%84%D8%AA%D8%B1%D8%AE%D9%8A%D8%B5-MIT-965477?style=flat-square&labelColor=302335" alt="ترخيص MIT"/></a>
 </p>
 
 <p align="center">
@@ -23,16 +23,16 @@
 
 ## المحتويات
 
-[التثبيت](#التثبيت) · [النتائج](#نتائج-الاختبار-المعياري) · [الاستدعاء](#بنية-الاستدعاء) · [التحكم](#عناصر-التحكم-في-التشغيل) · [آلية العمل](#كيف-يعمل) · [الوكلاء](#الوكلاء) · [الأمثلة](#أمثلة) · [الأسئلة](#الأسئلة-الشائعة) · [الترخيص](#الترخيص)
+[التثبيت](#التثبيت) · [المعايير](#benchmarks) · [الاستدعاء](#anatomy-of-an-invocation) · [عناصر التحكم](#run-controls) · [سير العمل](#how-it-works) · [الوكلاء](#the-agents) · [الأمثلة](#أمثلة) · [الأسئلة الشائعة](#faq) · [الترخيص](#license)
 
 ## التثبيت
 
-استخدم CLI أدناه أو نزل أحد المثبتات من [GitHub Releases](https://github.com/Spielewoy/autoprompt-skill/releases/tag/v1.0.4).
+استخدم CLI أدناه أو نزّل أحد المثبتات من [GitHub Releases](https://github.com/Spielewoy/autoprompt-skill/releases/latest).
 
 ### 1. تثبيت CLI
 
 ```bash
-npm install -g autoprompt-skill
+npm install -g https://github.com/Spielewoy/autoprompt-skill/releases/download/v2.0.0/autoprompt-skill-2.0.0.tgz
 ```
 
 ### 2. تشغيل المثبت
@@ -62,23 +62,27 @@ autoprompt
 ### المتطلبات
 
 - [Node.js 20+](https://nodejs.org/en/download)
-- [Python 3.11+](https://www.python.org/downloads/) متاح باسم `python`، مع [PyYAML](https://pypi.org/project/PyYAML/)
+- [Python 3.11+](https://www.python.org/downloads/) متاح باسم `python3` أو `python`، مع [PyYAML](https://pypi.org/project/PyYAML/)
 - [Bash 4.3+](https://www.gnu.org/software/bash/) على macOS أو Linux
 - [Git](https://git-scm.com/downloads) لطريقة نسخة GitHub فقط
 
 ### الدعم
 
-| الحالة | وكيل البرمجة | المتطلب المدقق | المفتاح |
+| الحالة | وكيل البرمجة | الإصدار المختبر | المفتاح |
 |---|---|---|---|
-| يعمل | [Claude Code](https://code.claude.com/docs/en/setup) | 2.1.219+؛ تم تدقيق 2.1.233 | `claude` |
-| يعمل | [Codex](https://github.com/openai/codex) | إصدار يدعم الوكلاء الفرعيين؛ تم تدقيق 0.147.0 | `codex` |
-| يعمل | [OpenCode](https://opencode.ai/docs/agents) | 1.18.7+؛ تم تدقيق 1.18.18 | `opencode` |
-| يعمل | [Kilo Code](https://kilo.ai/docs/customize/custom-subagents) | 7.4.22+؛ تم تدقيق 7.4.22 | `kilo` |
-| يعمل | [VS Code](https://code.visualstudio.com/docs/agents/subagents) | 1.133+؛ تم تدقيق 1.133.0 مع Copilot 0.61.0 | `vscode` |
-| يعمل | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) | 0.7.2؛ تم تدقيق 0.7.2؛ محول حزمة أصلي | `prime` |
-| يعمل | [Oh My Pi](https://omp.sh/) | 17.4.0+؛ تم التحقق من عقد الموائم ودورة التثبيت وحمولة الدور الأصلية على 17.4.0 | `omp` |
-| يعمل | [DeepSeek Harness](https://deepseek.com/harness/en/) | 0.1.0-rc.7+؛ تم التحقق من عقد الموائم ودورة التثبيت وحمولة الدور الأصلية على 0.1.0-rc.7 | `deepseek` |
-| يعمل | [Reasonix](https://reasonix.io/docs/) | 1.30.0+؛ تم التحقق من عقد الموائم ودورة التثبيت وحمولة الدور الأصلية على 1.30.0 | `reasonix` |
+| يعمل | [Claude Code](https://code.claude.com/docs/en/setup) | 2.1.263 | `claude` |
+| يعمل | [Codex](https://github.com/openai/codex) | 0.148.0 | `codex` |
+| يعمل | [OpenCode](https://opencode.ai/docs/agents) | 1.18.29 | `opencode` |
+| يعمل | [Kilo Code](https://kilo.ai/docs/customize/custom-subagents) | 7.5.15 | `kilo` |
+| يعمل | [VS Code](https://code.visualstudio.com/docs/agents/subagents) | 1.136.1 | `vscode` |
+| يعمل | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) | 0.7.2 | `prime` |
+| يعمل | [Oh My Pi](https://omp.sh/) | 18.1.14 | `omp` |
+| يعمل | [DeepSeek Harness](https://deepseek.com/harness/en/) | 0.1.2-rc.1 | `deepseek` |
+| يعمل | [Reasonix](https://reasonix.io/docs/) | 1.30.0 | `reasonix` |
+| يعمل | [Hermes Agent](https://github.com/NousResearch/hermes-agent) | 0.21.1 | `hermes` |
+| يعمل | [Grok Build](https://docs.x.ai/build/overview) | 1.0.13 | `grok` |
+
+اجتازت هذه الإصدارات عمليات تشغيل على Linux. يختلف توفر النماذج والمنصات حسب المزود.
 
 راجع [ملاحظات الدعم والتدقيق](../faq/which-coding-agents-are-supported.md).
 
@@ -93,7 +97,9 @@ autoprompt
 
 استبدل `PROVIDER` بمفتاح من جدول الدعم، مثل `claude` أو `codex` أو `prime`.
 
-## نتائج الاختبار المعياري
+## Benchmarks
+
+هذه **نتائج اختبارات الإصدار 1**. ستُنشر نتائج الإصدار 2 لاحقًا.
 
 <p align="center">
   <img src="../../assets/i18n/ar/terminal-bench-2.1-leaderboard.svg" width="1000" alt="ترتيب Terminal-Bench 2.1 مع 18 درجة مرجعية من Artificial Analysis ودرجتي DeepSeek V4 Flash 0731 المقاسَتين مع Autoprompt ومن دونه."/>
@@ -114,7 +120,7 @@ autoprompt
 
 </details>
 
-جاءت نتيجة DeepSeek البالغة 82.7% من إعداد اختبار مختلف، لذا فهي نقطة مرجعية وليست تشغيلا ثالثا قابلا للمقارنة. راجع [إعداد الاختبار وحدود الأدلة](../benchmarks/terminal-bench-2.1.md)، أو [اطلب اختبارا معياريا آخر](https://github.com/Spielewoy/autoprompt-skill/issues/new?template=benchmark_request.md).
+جاءت نتيجة DeepSeek البالغة 82.7% من إعداد اختبار مختلف، لذا فهي نقطة مرجعية وليست تشغيلا ثالثا قابلا للمقارنة. راجع [إعداد الاختبار وحدود الأدلة](../benchmarks/terminal-bench-2.1.md)، أو [اطلب اختبارا معياريا آخر](https://github.com/Spielewoy/autoprompt-skill/issues/new).
 
 <details>
 <summary><strong>التكلفة المتوقعة:</strong> نحو 3x من الوقت و2x من الرموز.</summary>
@@ -123,45 +129,71 @@ autoprompt
 
 </details>
 
-## بنية الاستدعاء
+## Anatomy of an invocation
+
+```bash
+autoprompt activate PROVIDER --target /absolute/project -- "<goal>"
+```
+
+| الجزء | الوظيفة |
+|---|---|
+| `PROVIDER` | مفتاح من جدول الدعم، مثل `claude` أو `codex` أو `grok`. |
+| `--target` | المشروع الذي سيجري العمل عليه. احذفه لاستخدام المجلد الحالي. |
+| `--` | يفصل خيارات المشغّل عن الطلب. |
+| `<goal>` | النتيجة المطلوبة والقيود وكيفية التحقق من النجاح. |
+| `path=` | قيمة اختيارية هي `auto` أو `direct` أو `light` أو `roadmap` قبل الهدف المقتبس. راجع [مسارات العمل](../faq/work-paths.md). |
+
+مثال في Codex:
+
+```bash
+autoprompt activate codex -- path=light "add retries and test the edge cases"
+```
+
+
+## Run controls
+
+تنطبق عناصر التحكم نفسها على المزودين الأحد عشر. [إعداد نموذج مخصص](../faq/how-to-add-custom-models.md)
+
+| عنصر التحكم | ما يفعله |
+|---|---|
+| `--concurrency tokensaver` | يشغّل ستة وكلاء فرعيين كحد أقصى في الوقت نفسه. |
+| `--concurrency wide` | يبدأ العمل المستقل الجاهز حتى حد المضيف. |
+| `--concurrency custom --max-subs N` | يحدد حد التوازي الذي تختاره. |
+| `configure PROVIDER --agents off` | يستخدم النموذج الذي أعدّه المزود. |
+| `configure PROVIDER --agents MODEL` | يختار نموذجاً واحداً. أضف `--effort LEVEL` عندما يكون مدعوماً. |
+| `configure PROVIDER --agents auto --model-map FILE` | يختار من سجل نماذج مقاسة. وتتطلب قائمة النماذج المفصولة بفواصل `--model-map` أيضاً. |
+
+مرّر عناصر التحكم بالتوازي بعد `--` وقبل الهدف المقتبس:
+
+```bash
+autoprompt activate codex -- --concurrency custom --max-subs 4 "add retries and tests"
+autoprompt configure claude --agents provider/model --effort low
+```
+
+## How it works
 
 <p align="center">
-  <a href="../../assets/i18n/ar/anatomy.svg"><img src="../../assets/i18n/ar/anatomy.svg" alt="بنية استدعاء Autoprompt: المشغل ونمط التوازي وحد الوكلاء وتوجيه النماذج والهدف" width="1000"/></a>
+  <a href="../../assets/i18n/ar/how-it-works-loop.svg"><img src="../../assets/i18n/ar/how-it-works-loop.svg" alt="مسار Autoprompt من الأمر إلى التخطيط والتنفيذ والمراجعة والاختبارات والموافقة والفحص النهائي" width="1100"/></a>
 </p>
 
-## عناصر التحكم في التشغيل
-
-استخدم `mode=` لتحديد التوازي. واستخدم `agents=` لتوجيه النماذج عندما يدعم المضيف ذلك.
-
-| التحكم | Claude Code | Codex | OpenCode | Kilo | VS Code | Prime Agent | Oh My Pi | DeepSeek Harness | Reasonix |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| `mode=` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| التوجيه المخصص عبر `agents=` | ✓ | ✓ | ✕ غير متاح - يرث النموذج النشط | ✕ غير متاح - يرث النموذج النشط | ✕ غير متاح - يرث النموذج النشط | ✕ غير متاح - يرث النموذج الأب المحدد | ✕ غير متاح - يرث النموذج الأب المحدد | ✕ غير متاح - يرث النموذج الأب المحدد | ✕ غير متاح - يرث النموذج الأب المحدد |
-
-## كيف يعمل
+## The agents
 
 <p align="center">
-  <img src="../../assets/i18n/ar/how-it-works-loop.svg" alt="مسار Autoprompt من الأمر إلى التخطيط والتنفيذ والمراجعة والاختبارات والموافقة والفحص النهائي" width="1100"/>
-</p>
-
-## الوكلاء
-
-<p align="center">
-  <img src="../../assets/i18n/ar/how-it-works-hierarchy.svg" alt="تسلسل وكلاء Autoprompt من الأمر إلى المنسقين والمدير ومسارات التنفيذ وعمليات التحقق المستقلة" width="1100"/>
+  <a href="../../assets/i18n/ar/how-it-works-hierarchy.svg"><img src="../../assets/i18n/ar/how-it-works-hierarchy.svg" alt="تسلسل وكلاء Autoprompt من الأمر إلى المنسقين والمدير ومسارات التنفيذ وعمليات التحقق المستقلة" width="1100"/></a>
 </p>
 
 ## أمثلة
 
-| الهدف | الأمر |
+| الهدف | Prompt |
 |---|---|
-| إصلاح | `/autoprompt أصلح حالة التسابق في التسجيل وأضف اختبار منع تراجع` |
-| بناء | `/autoprompt mode=wide أنشئ مسار الحجز من API إلى الدفع` |
-| بحث | `/autoprompt قارن قوائم انتظار المهام لهذا المستودع وأوص بواحدة` |
-| تقييد العمل المتوازي | `/autoprompt mode=custom max_subs=4 انقل جميع النماذج` |
+| إصلاح | `autoprompt activate claude -- "fix the registration race and add a regression test"` |
+| بناء | `autoprompt activate codex -- --concurrency wide "build the booking flow from API to checkout"` |
+| بحث | `autoprompt activate hermes -- "compare job queues against this codebase and recommend one"` |
+| تقييد العمل المتوازي | `autoprompt activate grok -- --concurrency custom --max-subs 4 "migrate every model"` |
 
-استخدم `$autoprompt` بدلا من `/autoprompt` في Codex. في Oh My Pi، استخدم `/skill:autoprompt`.
+شغّل هذه الأوامر من مشروعك، أو زوّد `--target /absolute/project` قبل `--`.
 
-## الأسئلة الشائعة
+## FAQ
 
 <details>
 <summary><strong>هل يعني Autoprompt أنني لن أحتاج إلى كتابة تعليمات؟</strong></summary>
@@ -185,23 +217,34 @@ autoprompt
 </details>
 
 <details>
-<summary><strong>ما الذي تتحكم فيه `mode` و`max_subs` و`agents`؟</strong></summary>
+<summary><strong>ما هي مسارات العمل؟</strong></summary>
 
-تحد `mode=tokensaver` الوكلاء الفرعيين النشطين بستة، وتفتح `mode=wide` كل المسارات الجاهزة، وتحدد `mode=custom max_subs=N` سقفا مخصصا، وتتحكم `agents` في توجيه النماذج عندما يدعمه المضيف. [التفاصيل](../faq/tokensaver-vs-wide-vs-custom.md)
+يختار `path=auto` المسار المناسب. يبدأ `direct` العمل المحدد، ويضيف `light` خطة قصيرة، وينظم `roadmap` الأعمال المترابطة. تتضمن جميع المسارات تحققًا مستقلًا. [التفاصيل](../faq/work-paths.md)
+
+</details>
+
+<details>
+<summary><strong>ما الذي تتحكم فيه عناصر التوازي والنماذج والمسارات؟</strong></summary>
+
+تحدد `--concurrency` و`--max-subs` حدود العمل المتوازي. ويختار `configure --agents` النماذج، ويحدد `path=` كيفية تخطيط العمل وتنسيقه. [التفاصيل](../faq/tokensaver-vs-wide-vs-custom.md)
 
 </details>
 
 <details>
 <summary><strong>لماذا لا يبدأ Autoprompt في الخلفية؟</strong></summary>
 
-لأنه يغير التكلفة والوقت وسير العمل. شغله صراحة باستخدام `/autoprompt <الهدف>`، أو `$autoprompt` في Codex.
+لأنه يغير التكلفة والوقت وسير العمل. شغّله صراحة باستخدام `autoprompt activate PROVIDER -- "<goal>"`.
 
 </details>
 
-## الترخيص
+## License
 
 [MIT](../../LICENSE). حقوق النشر 2026 [Spielewoy](https://github.com/Spielewoy).
 
 المجتمع: [المساهمة](../CONTRIBUTING.md)، [قواعد السلوك](../CODE_OF_CONDUCT.md)، [الأمان](../SECURITY.md)، و[الدعم](../SUPPORT.md).
+
+### المساهمون
+
+[johnatag](https://github.com/johnatag) · [rollingdice](https://github.com/rollingdice) · [AincradBot](https://github.com/AincradBot) · [lunar-me](https://github.com/lunar-me) · [fatinghenji](https://github.com/fatinghenji) · [c8dhjp4tyv-bit](https://github.com/c8dhjp4tyv-bit) · [Alexis-Fiolleau-LaPoste-BGPN](https://github.com/Alexis-Fiolleau-LaPoste-BGPN)
 
 </div>
