@@ -16,7 +16,7 @@ const INSTALLER = path.join(ROOT, 'scripts', 'install', 'install.ps1')
 const RUNTIME_TOOL = path.join(ROOT, 'scripts', 'runtime-payload.cjs')
 const POSIX_INSTALLER = path.join(ROOT, 'scripts', 'install', 'install.sh')
 const POWERSHELL = process.platform === 'win32' ? 'powershell.exe' : 'pwsh'
-const GIT_BASH = 'C:\\Program Files\\Git\\bin\\bash.exe'
+const GIT_BASH = require('../helpers/resolve-bash.cjs').resolveBash()
 const POWERSHELL_AVAILABLE = childProcess.spawnSync(
   POWERSHELL, ['-NoProfile', '-NonInteractive', '-Command', '$PSVersionTable.PSVersion.ToString()'],
   { encoding: 'utf8', timeout: 10_000 },
@@ -936,7 +936,7 @@ test('Codex Windows final manifest canonicalization seals mixed core and extras 
 })
 
 test('Codex md-codex renderer contract is byte-identical and git-clean', {
-  skip: process.platform !== 'win32' || !fs.existsSync(GIT_BASH),
+  skip: process.platform !== 'win32' || !Boolean(GIT_BASH),
 }, t => {
   const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-codex-render-contract-'))
   t.after(() => fs.rmSync(sandbox, { recursive: true, force: true }))
@@ -1102,7 +1102,7 @@ test('Codex indexed registration rejects a source mutation before publish or rec
 })
 
 test('Git Bash Codex single and inventory flows reject source mutation without residue', {
-  skip: process.platform !== 'win32' || !fs.existsSync(GIT_BASH),
+  skip: process.platform !== 'win32' || !Boolean(GIT_BASH),
 }, () => {
   for (const mode of ['single', 'batch']) {
     const result = bashRaceResult(mode)
@@ -1115,7 +1115,7 @@ test('Git Bash Codex single and inventory flows reject source mutation without r
 })
 
 test('Git Bash Codex single and inventory flows bind receipt hashes to exact copied bytes', {
-  skip: process.platform !== 'win32' || !fs.existsSync(GIT_BASH),
+  skip: process.platform !== 'win32' || !Boolean(GIT_BASH),
 }, () => {
   const expected = {
     single: { code: 0, targets: 1, hashes: 1, receipt: 2, tmp: 0, pointer: 0 },

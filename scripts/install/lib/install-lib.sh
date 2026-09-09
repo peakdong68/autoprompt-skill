@@ -25,28 +25,58 @@
 
 [ -n "${AUTOPROMPT_INSTALL_LIB_SH:-}" ] && return 0
 AUTOPROMPT_INSTALL_LIB_SH=1
-if ! command -v python >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
-  # Python 3 need not have a `python` alias. Do not change the user's PATH.
-  python() { command python3 "$@"; }
-fi
+# Resolve lazily: Node-only operations should not require a Python interpreter.
+# Python 3 often has no bare `python` alias, especially on macOS.
+AUTOPROMPT_RESOLVED_PYTHON=''
+_autoprompt_resolve_python() {
+  [ -n "$AUTOPROMPT_RESOLVED_PYTHON" ] && return 0
+  local candidate resolved
+  local -a candidates=(python3 python)
+  if [ -n "${AUTOPROMPT_PYTHON:-}" ]; then candidates=("$AUTOPROMPT_PYTHON"); fi
+  for candidate in "${candidates[@]}"; do
+    resolved="$(command -v -- "$candidate" 2>/dev/null)" || continue
+    if command "$resolved" -c 'import sys; sys.exit(0 if sys.version_info.major == 3 else 1)' >/dev/null 2>&1; then
+      AUTOPROMPT_RESOLVED_PYTHON="$resolved"
+      return 0
+    fi
+  done
+  printf '%s\n' 'Autoprompt requires Python 3 for this operation. Set AUTOPROMPT_PYTHON to a Python 3 executable if needed.' >&2
+  return 1
+}
+python() {
+  _autoprompt_resolve_python || return 1
+  command "$AUTOPROMPT_RESOLVED_PYTHON" "$@"
+}
+# Canonicalize only a directory we just created. On macOS TMPDIR commonly
+# starts with /var, an alias of /private/var; payload guards require the physical
+# staging path. User-supplied installation roots retain their strict checks.
+_autoprompt_physical_temp_directory() {
+  local created physical
+  created="$(mktemp -d 2>/dev/null)" || return 1
+  if ! physical="$(cd -- "$created" && pwd -P)"; then
+    rmdir -- "$created" 2>/dev/null
+    return 1
+  fi
+  printf '%s' "$physical"
+}
 AUTOPROMPT_INSTALL_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 
 declare -A AUTOPROMPT_CLIENT_BIN=(
   [claude]=claude [codex]=codex [cursor]=cursor-agent [roo]=roo
   [opencode]=opencode [kilo]=kilo [vscode]=code
   [prime]=prime-agent
-  [omp]=omp [deepseek]=dsh [reasonix]=reasonix
+  [omp]=omp [deepseek]=dsh [hermes]=hermes [grok]=grok [reasonix]=reasonix
   [dcode]=dcode [gemini]=gemini [cline]=cline [goose]=goose
 )
 AUTOPROMPT_VERSION_FLAG="--version"
 AUTOPROMPT_PROBE_TIMEOUT=10
 
-# Public install compatibility is a closed nine-provider registry. Historical
+# Public install compatibility is a closed public provider registry. Historical
 # path resolvers remain below only for receipt-owned cleanup of earlier installs.
 declare -A AUTOPROMPT_PROVIDER_STATUS=(
   [claude]=supported [codex]=supported [opencode]=supported
   [kilo]=supported [vscode]=supported [prime]=supported
-  [omp]=supported [deepseek]=supported [reasonix]=supported
+  [omp]=supported [deepseek]=supported [hermes]=supported [grok]=supported [reasonix]=supported
 )
 declare -A AUTOPROMPT_PROVIDER_BLOCK_REASON=()
 
@@ -200,6 +230,8 @@ autoprompt_config_root() {
     vibe) printf '%s' "${VIBE_HOME:-$home/.vibe}" ;;
     prime) printf '%s' "${PRIME_AGENT_CODING_AGENT_DIR:-$home/.prime/agent}" ;;
     omp) autoprompt_omp_install_root ;;
+    grok) printf '%s' "${GROK_HOME:-$home/.grok}" ;;
+    hermes) printf '%s' "${HERMES_HOME:-$home/.hermes}" ;;
     deepseek) printf '%s' "${DSH_HOME:-$home/.dsh}" ;;
     reasonix)
       if [ -n "${REASONIX_HOME:-}" ]; then
@@ -792,7 +824,7 @@ format_skill() {
 declare -A AUTOPROMPT_VERSION_FLOOR=(
   [claude]=2.1.219 [cursor]=2.5 [cline]=3.58 [opencode]=1.18.7 [kilo]=7.4.22
   [vscode]=1.133.0 [prime]=0.7.2
-  [omp]=17.4.0 [deepseek]=0.1.0-rc.7 [reasonix]=1.30.0
+  [omp]=17.4.0 [deepseek]=0.1.2-rc.1 [hermes]=0.21.1 [grok]=1.0.13 [reasonix]=1.30.0
 )
 AUTOPROMPT_PRECHECK_MARKER_PREFIX=".autoprompt-precheck"
 
@@ -1688,7 +1720,10 @@ _idem_register_managed_file() {
 _idem_atomic_copy() {
   local source="$1" target="$2" parent="${2%/*}" tmp="${2}.autoprompt.tmp"
   if [ -f "$target" ] && cmp -s "$source" "$target"; then return 0; fi
-  mkdir -p -- "$parent" 2>/dev/null || return 1
+  # Per-file bundle materialization can share a parent directory.  Avoid a
+  # separate mkdir process for every such file (especially costly under TCG),
+  # while retaining mkdir's failure path when the parent is absent or invalid.
+  [ -d "$parent" ] || mkdir -p -- "$parent" 2>/dev/null || return 1
   cp -- "$source" "$tmp" 2>/dev/null || { rm -f -- "$tmp" 2>/dev/null; return 1; }
   mv -f -- "$tmp" "$target" 2>/dev/null || { rm -f -- "$tmp" 2>/dev/null; return 1; }
 }
@@ -1699,7 +1734,7 @@ _idem_codex_stable_source_copy() {
   local tmp="${3}.autoprompt.codex.tmp.$$" copied_hash source_post_hash relative
   relative="${target#"$root"/}"
   [ "$relative" != "$target" ] || relative="${target##*/}"
-  mkdir -p -- "$parent" 2>/dev/null || return 39
+  [ -d "$parent" ] || mkdir -p -- "$parent" 2>/dev/null || return 39
   if [ -n "$before_copy" ]; then
     "$before_copy" "$source" "$target" || {
       rm -f -- "$tmp" 2>/dev/null
@@ -5203,7 +5238,7 @@ _repair_restore_extra_file() {
   local filesystem_path="$6" stage_name="$7" candidate source_hash
   local -n candidate_stage_ref="$stage_name"
   if [ -z "$candidate_stage_ref" ]; then
-    candidate_stage_ref="$(mktemp -d 2>/dev/null)" || {
+    candidate_stage_ref="$(_autoprompt_physical_temp_directory)" || {
       printf '%s\n' "client=$client error=repair-stage-failed" >&2
       return 73
     }
@@ -5530,7 +5565,7 @@ install_extras() {
   _extras_prepare_install "$client" "$srcdir" "$skilldest" "$agentsdest" \
     root native_destdir tool || return $?
   journal_start="${#AUTOPROMPT_MANAGED_UNDO_JOURNAL[@]}"
-  stage="$(mktemp -d 2>/dev/null)" || {
+  stage="$(_autoprompt_physical_temp_directory)" || {
     printf '%s\n' "client=$client error=extras-copy-failed" >&2; return 83
   }
   if ! _extras_stage_payload "$tool" "$client" "$stage" inventory; then

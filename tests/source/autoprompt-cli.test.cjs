@@ -90,8 +90,8 @@ function escapeRegExp(value) {
 }
 
 function nextPatchVersion(version) {
-  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(String(version))
-  assert.ok(match, `expected simple semver, got ${version}`)
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.exec(String(version))
+  assert.ok(match, `expected semver, got ${version}`)
   return `${match[1]}.${match[2]}.${Number(match[3]) + 1}`
 }
 
@@ -335,13 +335,13 @@ test('interactive no-argument launch numbers every install provider plus the cus
   for (const [index, provider] of PROVIDERS.entries()) {
     assert.match(result.stdout, new RegExp(`${index + 1}\\) ${provider.label}`))
   }
-  assert.match(result.stdout, /10\) Custom coding agent/)
-  assert.match(result.stdout, /Provider \[1-10, Esc\]: /)
+  assert.ok(result.stdout.includes(`${PROVIDERS.length + 1}) Custom coding agent`))
+  assert.ok(result.stdout.includes(`Provider [1-${PROVIDERS.length + 1}, Esc]: `))
   assert.deepEqual(
     PROVIDERS.map(provider => provider.id),
     [
       'claude', 'codex', 'opencode', 'kilo', 'vscode', 'prime',
-      'omp', 'deepseek', 'reasonix',
+      'omp', 'deepseek', 'hermes', 'grok', 'reasonix',
     ],
   )
   assert.equal(PROVIDERS.some(provider => provider.id === 'vibe'), false)
@@ -704,7 +704,7 @@ test('interactive launch from a repo checkout does not self-install a newer regi
 
 test('interactive custom coding agent option exits safely with the compatibility guide URL', () => {
   const result = invoke([], {
-    answers: ['10'],
+    answers: [String(PROVIDERS.length + 1)],
     interactive: true,
   })
 
@@ -828,13 +828,13 @@ test('interactive strong custom-root match reuses the lifecycle installer throug
   }
 })
 
-test('every supported provider has an unambiguous strong custom-root layout', () => {
+test('existing v1 providers have unambiguous legacy custom-root layouts', () => {
   const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-cli-provider-layouts-'))
   const compat = createProviderRootCompat(Object.fromEntries(
     PROVIDERS.map(provider => [provider.id, provider.label]),
   ))
   try {
-    for (const provider of PROVIDERS) {
+    for (const provider of PROVIDERS.filter(provider => !['hermes', 'grok'].includes(provider.id))) {
       const root = path.join(sandbox, provider.id)
       writeStrongCustomRoot(root, provider.id)
       const result = compat.inspect(root, provider.id)
@@ -921,7 +921,7 @@ test('interactive prompts reject invalid choices and closed input without mutati
     responses: [{ status: 0 }],
   })
   assert.equal(retried.status, 0)
-  assert.match(retried.stdout, /Enter a number from 1 to 10\./)
+  assert.ok(retried.stdout.includes(`Enter a number from 1 to ${PROVIDERS.length + 1}.`))
   assert.match(retried.stdout, /Please answer Y or N\./)
   assert.equal(retried.calls[0].args.at(-1), 'vscode')
 
@@ -961,7 +961,7 @@ test('provider install locations use private v2 roots and never require external
     claude: path.join(home, '.claude'), codex: env.CODEX_HOME,
     opencode: path.join(env.XDG_CONFIG_HOME, 'opencode'), kilo: path.join(env.XDG_CONFIG_HOME, 'kilo'),
     vscode: path.join(home, '.copilot'), prime: env.PRIME_AGENT_CODING_AGENT_DIR, omp: path.join(home, '.omp', 'agent'),
-    deepseek: path.join(home, '.dsh'), reasonix: path.join(home, 'AppData', 'Roaming', 'reasonix'),
+    deepseek: path.join(home, '.dsh'), hermes: path.join(home, '.hermes'), grok: path.join(home, '.grok'), reasonix: path.join(home, 'AppData', 'Roaming', 'reasonix'),
   }
   for (const provider of PROVIDERS) {
     assert.deepEqual(providerInstallLocations(provider.id, { env, platform: 'win32' }),
@@ -1219,10 +1219,10 @@ test('interactive custom root warns on mismatched strong markers, re-prompts on 
   }
 })
 
-test('help stays lean and names only the nine public providers', () => {
+test('help stays lean and names only the eleven public providers', () => {
   assert.match(
     HELP_TEXT,
-    /Interactive providers: claude, codex, opencode, kilo, vscode, prime, omp, deepseek, reasonix\./,
+    /Interactive providers: claude, codex, opencode, kilo, vscode, prime, omp, deepseek, hermes, grok, reasonix\./,
   )
   assert.doesNotMatch(HELP_TEXT, /\b(?:vibe|cursor|dcode|roo|gemini|cline|goose)\b/i)
   assert.match(HELP_TEXT, /^  autoprompt update$/m)
@@ -1898,4 +1898,65 @@ test('Escape returns to provider selection, then exits the interactive uninstall
   assert.match(result.stdout, /Back to provider selection\./)
   assert.match(result.stdout, /Autoprompt uninstaller closed\./)
   assert.deepEqual(result.calls, [])
+})
+
+test('runtime setup requires one provider and explicit unambiguous physical-path arguments', () => {
+  const root = path.resolve(os.tmpdir(), 'runtime setup root')
+  const python = path.resolve(os.tmpdir(), 'python runtime', 'python3')
+  for (const provider of ['codex', 'claude', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek', 'reasonix', 'hermes', 'grok']) {
+    assert.deepEqual(parseArgs(['runtime', 'setup', provider, '--root', root, '--python', python]),
+      { command: 'runtime-setup', provider, root, python })
+    assert.deepEqual(parseArgs(['runtime', 'setup', provider, '--refresh', '--root', root, '--python', python]),
+      { command: 'runtime-setup', provider, root, python, refresh: true })
+  }
+  for (const args of [
+    ['runtime'], ['runtime', 'setup', 'all', '--root', root, '--python', python],
+    ['runtime', 'setup', 'codex', '--root', root],
+    ['runtime', 'setup', 'codex', '--root', root, '--python', 'relative'],
+    ['runtime', 'setup', 'codex', '--root', root, '--python', python, '--python', python],
+    ['runtime', 'setup', 'codex', '--root', root, '--python', python, '--unsafe', 'yes'],
+    ['runtime', 'setup', 'codex', '--root', root, '--python', python, '--refresh', '--refresh'],
+  ]) assert.throws(() => parseArgs(args), { code: 'AUTOPROMPT_USAGE' })
+})
+
+test('runtime VM commands bind explicit toolchains and preserve command argument boundaries', () => {
+  const root = path.resolve(os.tmpdir(), 'vm private state')
+  const target = path.resolve(os.tmpdir(), 'project with spaces')
+  const limactl = path.resolve(os.tmpdir(), 'lima', 'bin', 'limactl')
+  const archive = path.resolve(os.tmpdir(), 'current package.tgz')
+  const connection = path.resolve(os.tmpdir(), 'private', 'codex-connection.json')
+  const credential = path.resolve(os.tmpdir(), 'private', 'credential.json')
+  const toolchain = path.resolve(os.tmpdir(), 'pinned', 'node-v22.23.2-linux-x64')
+  const native = path.resolve(os.tmpdir(), 'native', 'codex')
+  const qemuRoot = path.resolve(os.tmpdir(), 'qemu')
+  const endpoint = 'https://gateway.example.invalid/v1'
+  const setup = ['runtime', 'vm', 'setup', '--root', root, '--target', target,
+    '--provider', 'codex', '--endpoint', endpoint, '--connection', connection, '--credential', credential,
+    '--toolchain', toolchain, '--native', native, '--lima', limactl, '--archive', archive,
+    '--vm-type', 'qemu', '--qemu-root', qemuRoot, '--arch', 'x86_64']
+  assert.deepEqual(parseArgs(setup), { command: 'runtime-vm', action: 'setup', root, target,
+    provider: 'codex', endpoint, connection, credential, toolchain, native, limactl, archive,
+    vmType: 'qemu', qemuRoot, arch: 'x86_64' })
+  assert.deepEqual(parseArgs([...setup, '--resume']), { ...parseArgs(setup), resume: true })
+  assert.deepEqual(parseArgs(['runtime', 'vm', 'status', '--root', root]), { command: 'runtime-vm', action: 'status', root })
+  const argv = ['configure', 'codex', '--model-map', 'literal ; $(no-shell)']
+  assert.deepEqual(parseArgs(['runtime', 'vm', 'exec', '--root', root, '--', ...argv]), { command: 'runtime-vm', action: 'exec', root, argv })
+  const requestId = '1234567890abcdef'.repeat(2)
+  assert.deepEqual(parseArgs(['runtime', 'vm', 'exec', '--root', root, '--request-id', requestId, '--', ...argv]), { command: 'runtime-vm', action: 'exec', root, requestId, argv })
+  assert.deepEqual(parseArgs(['runtime', 'vm', 'status', '--request-id', requestId, '--root', root]), { command: 'runtime-vm', action: 'status', root, requestId })
+  for (const args of [
+    ['runtime', 'vm'], ['runtime', 'vm', 'status'],
+    ['runtime', 'vm', 'exec', '--root', root],
+    ['runtime', 'vm', 'exec', '--root', root, '--'],
+    ['runtime', 'vm', 'status', '--root', root, '--target', target],
+    ['runtime', 'vm', 'status', '--root', root, '--request-id', 'unknown'],
+    ['runtime', 'vm', 'status', '--root', root, '--request-id', requestId, '--request-id', requestId],
+    [...setup, '--request-id', requestId],
+    [...setup, '--root', root],
+    [...setup, '--resume', '--resume'],
+    setup.filter(argument => argument !== '--qemu-root' && argument !== qemuRoot),
+    setup.filter(argument => argument !== '--provider' && argument !== 'codex'),
+    setup.map(arg => arg === 'qemu' ? 'vz' : arg),
+    setup.map(arg => arg === target ? '../relative' : arg),
+  ]) assert.throws(() => parseArgs(args), { code: 'AUTOPROMPT_USAGE' })
 })

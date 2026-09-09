@@ -4,11 +4,19 @@
 // project configuration, or a user's executable provider modules.
 const fs = require('node:fs')
 const path = require('node:path')
+const crypto = require('node:crypto')
+const { canonicalJsonWireProjection } = require('./harness-v2-canonical-json-wire.cjs')
 const YAML = require('yaml')
 const { readBound, privateDirectory, writePrivate } = require('../agents/reasonix/workflow/native.js')
 
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value)
 const reserved = new Set(['__proto__', 'constructor', 'prototype'])
+// OMP's built-in `openrouter` provider applies its own compatibility pass
+// after extension request hooks and removes response_format.  Keep the exact
+// user-selected model and credential declaration, but project that one
+// controller-owned native config entry under a private custom-provider name
+// so the reviewed before_provider_request hook remains authoritative.
+const OMP_OPENROUTER_PRIVATE_PROVIDER = 'autoprompt_openrouter'
 function fail(message) { const error = new Error(message); error.code = 'PROFILE_INVALID'; throw error }
 function text(value, field) {
   if (typeof value !== 'string' || !value || value.length > 16384 || /[\0\r\n]/.test(value) || value.trimStart().startsWith('!')) {
@@ -129,11 +137,50 @@ function credentialNames(connection = {}) {
   return Object.values(connection.providers || {}).flatMap(provider =>
     typeof provider.apiKey === 'string' && /^[A-Z_][A-Z0-9_]*$/.test(provider.apiKey) ? [provider.apiKey] : [])
 }
-function project({ provider, home, sessionRoot, connection, toolBoundary, prompt, continuationId, effort }, env) {
+function requiredResponseFormat(outputSchema) {
+  if (outputSchema === undefined) return null
+  if (!object(outputSchema)) fail('Pi output schema must be an object')
+  let serialized
+  try { serialized = JSON.stringify(outputSchema) } catch { fail('Pi output schema must be JSON') }
+  if (!serialized || Buffer.byteLength(serialized, 'utf8') > 256 * 1024) fail('Pi output schema exceeds its private projection bound')
+  return Object.freeze({ type: 'json_schema', json_schema: { name: 'autoprompt_result', strict: true, schema: JSON.parse(serialized) } })
+}
+// OpenAI Structured Outputs intentionally accepts a smaller schema language
+// than the controller's canonical contracts.  Keep the native-facing schema
+// in that supported subset while retaining the complete canonical value as an
+// exact JSON string.  The adapter validates this closed envelope first, then
+// parses and validates the decoded value against the original controller
+// schema.  This is a transport projection only: it never supplies defaults or
+// removes canonical fields.
+function canonicalWireProjection(canonicalSchema) {
+  try { return canonicalJsonWireProjection(canonicalSchema, { provider: 'pi', label: 'Pi', version: 'pi-canonical-envelope-v1' }) }
+  catch (error) { fail(error.message) }
+}
+function outputCap(connection, model, maxTokens) {
+  if (maxTokens === undefined) return null
+  if (!Number.isSafeInteger(maxTokens) || maxTokens <= 0) fail('Invalid Pi controller output cap')
+  const selected = connection.providers?.[connection.modelProvider]?.models?.find(value => value.id === model)
+  if (!selected) fail('Pi quota execution requires the exact selected model definition')
+  const field = selected?.compat?.maxTokensField
+  // A current native SDK may already select its own known output-cap spelling.
+  // In that case the hook preserves that spelling and only lowers its value.
+  // The field below is needed solely when the native payload omits both caps.
+  return Object.freeze({ field: ['max_tokens', 'max_completion_tokens'].includes(field) ? field : null,
+    value: Math.min(maxTokens, Number.isSafeInteger(selected.maxTokens) && selected.maxTokens > 0 ? selected.maxTokens : maxTokens) })
+}
+function nativeConnectionProjection(provider, connection) {
+  if (provider !== 'omp' || connection.modelProvider !== 'openrouter') return connection
+  const upstream = connection.providers?.openrouter
+  if (!object(upstream)) fail('OMP OpenRouter projection requires its exact provider declaration')
+  return Object.freeze({ ...connection, modelProvider: OMP_OPENROUTER_PRIVATE_PROVIDER,
+    providers: { ...connection.providers, [OMP_OPENROUTER_PRIVATE_PROVIDER]: upstream } })
+}
+function project({ provider, home, sessionRoot, connection, toolBoundary, prompt, continuationId, effort, outputSchema, model, maxTokens }, env) {
   if (!toolBoundary) fail('Pi execution requires controller-owned tools')
   const config = path.join(home, 'agent'), sessions = path.join(sessionRoot, 'sessions')
+  const nativeConnection = nativeConnectionProjection(provider, connection)
   privateDirectory(config); privateDirectory(sessions)
-  writePrivate(path.join(config, provider === 'omp' ? 'models.yml' : 'models.json'), JSON.stringify({ providers: connection.providers || {} }))
+  writePrivate(path.join(config, provider === 'omp' ? 'models.yml' : 'models.json'), JSON.stringify({ providers: nativeConnection.providers || {} }))
   writePrivate(path.join(config, provider === 'omp' ? 'config.yml' : 'settings.json'), JSON.stringify({
     compaction: { enabled: false }, retry: { enabled: false }, extensions: [], packages: [],
   }))
@@ -151,6 +198,19 @@ function project({ provider, home, sessionRoot, connection, toolBoundary, prompt
   }
   env.AUTOPROMPT_TOOL_POLICY = toolBoundary.policyPath
   env.AUTOPROMPT_TOOL_POLICY_SHA256 = toolBoundary.policySha256
+  const responseFormat = requiredResponseFormat(outputSchema)
+  if (responseFormat) {
+    const schemaPath = path.join(config, 'controller-output-schema.json')
+    const schemaBytes = Buffer.from(JSON.stringify(responseFormat.json_schema.schema), 'utf8')
+    writePrivate(schemaPath, schemaBytes)
+    env.AUTOPROMPT_PI_OUTPUT_SCHEMA = schemaPath
+    env.AUTOPROMPT_PI_OUTPUT_SCHEMA_SHA256 = crypto.createHash('sha256').update(schemaBytes).digest('hex')
+  }
+  const cap = outputCap(connection, model || connection.model, maxTokens)
+  if (cap) {
+    if (cap.field) env.AUTOPROMPT_PI_OUTPUT_CAP_FIELD = cap.field
+    env.AUTOPROMPT_PI_OUTPUT_CAP_VALUE = String(cap.value)
+  }
   env.NO_COLOR = '1'; env.CI = '1'
   const argv = ['--print', '--mode', 'json', '--no-extensions', '--no-skills',
     '--extension', path.join(__dirname, 'harness-v2-bridge', 'pi', `${provider}.ts`),
@@ -158,8 +218,8 @@ function project({ provider, home, sessionRoot, connection, toolBoundary, prompt
   if (provider === 'omp') argv.push('--no-tools', '--no-rules', '--no-lsp', '--no-pty', '--no-title', '--no-prewalk', '--auto-approve')
   else argv.push('--no-builtin-tools', '--no-context-files', '--no-prompt-templates', '--offline')
   if (continuationId) argv.push('--resume', continuationId)
-  if (connection.modelProvider) argv.push('--provider', connection.modelProvider)
-  return argv
+  if (nativeConnection.modelProvider) argv.push('--provider', nativeConnection.modelProvider)
+  return { argv, requiredResponseFormat: responseFormat, requiredOutputCap: cap }
 }
 
-module.exports = { sanitize, readConnection, credentialNames, project }
+module.exports = { sanitize, readConnection, credentialNames, requiredResponseFormat, canonicalWireProjection, outputCap, nativeConnectionProjection, project }

@@ -48,6 +48,14 @@ function createProviderRootCompat(providerLabels, inventory) {
   ])
 
   const providerLayouts = Object.freeze({
+    // These providers have only a v2 private installation. A receipt is
+    // verified below before it can establish a compatible root.
+    ...Object.fromEntries(['hermes', 'grok'].map(provider => [provider, Object.freeze({
+      markers: Object.freeze([Object.freeze({
+        label: `.autoprompt-${provider}-v2.json`,
+        check(root) { return matchAnchoredFile(root, [`.autoprompt-${provider}-v2.json`]) },
+      })]),
+    })])),
     claude: Object.freeze({
       markers: Object.freeze([
         Object.freeze({

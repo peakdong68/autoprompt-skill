@@ -1,6 +1,6 @@
 # Autoprompt source
 
-All nine harnesses project the same v2 routes, 32 physical roles (seven active roles and 25 inactive compatibility aliases), checks, modes, playbooks, and 18 frameworks. Generated source parity and runtime admission are separate: current provider capability evidence determines whether a run can start.
+All eleven harnesses project the same v2 routes, 32 physical roles (seven active roles and 25 inactive compatibility aliases), checks, modes, playbooks, and 18 frameworks. Generated source parity and runtime admission are separate: current provider capability evidence determines whether a run can start.
 
 ## Provider packages
 
@@ -14,6 +14,8 @@ All nine harnesses project the same v2 routes, 32 physical roles (seven active r
 | [Prime Agent](prime/) | [SKILL.md](prime/skills/autoprompt/SKILL.md) | [32 private persona prompts](prime/personas/) | [18 procedures](prime/prompts/frameworks/) |
 | [Oh My Pi](omp/) | [SKILL.md](omp/SKILL.md) | [32 Markdown task profiles](omp/agents/) | [18 procedures](omp/frameworks/) |
 | [DeepSeek Harness](deepseek/) | [SKILL.md](deepseek/SKILL.md) | [32 fixed-persona profiles](deepseek/agents/) | [18 procedures](deepseek/frameworks/) |
+| [Hermes Agent](hermes/) | [SKILL.md](hermes/SKILL.md) | [32 private prompts](hermes/agents/) | [18 procedures](hermes/frameworks/) |
+| [Grok Build](grok/) | [SKILL.md](grok/SKILL.md) | [32 private prompts](grok/agents/) | [18 procedures](grok/frameworks/) |
 | [Reasonix](reasonix/) | [SKILL.md](reasonix/SKILL.md) | [32 manual subagent profiles](reasonix/skills/) | [18 procedures](reasonix/frameworks/) |
 
 The public installation surface is one manual launcher per selected harness. Full entry instructions and all internal profiles belong in the private bundle. Loading source text or naming a role does not create or resume a run.
@@ -26,7 +28,7 @@ autoprompt activate PROVIDER --target <absolute-project> -- <request>
 
 There is no default route. DIRECT and LIGHT do not require coordinators or managers. ROADMAP can use the run coordinator and work-group manager only when the canonical policy admits them. The run owner retains route selection and the final response; the controller enforces physical launches, assignment ownership, independent checking, and recovery.
 
-The seven additional native projections route every permitted child assignment through the controller. Their read-only profiles omit write and shell tools. Executable checking requires a separately admitted isolated transport. Leaves and compatibility aliases cannot dispatch; aliases remain read-only redirects and cannot take new v2 work.
+The nine additional native projections route every permitted child assignment through the controller. Their read-only profiles omit write and shell tools. Executable checking requires a separately admitted isolated transport. Leaves and compatibility aliases cannot dispatch; aliases remain read-only redirects and cannot take new v2 work.
 
 Native visibility flags, tool lists, prompt rules, installation checks, and fixture tests do not establish full runtime conformance. Missing required capability evidence must block admission without an unrestricted native fallback. See the [provider capability contract](contracts/providers.json) and each package's README for the source/runtime boundary.
 
@@ -37,7 +39,7 @@ The generation check validates the final translated route examples and every fra
 - [Product](contracts/product.json), [routes](contracts/routes.json), [state machine](contracts/state-machine.json), [roles](contracts/roles.json), [checks](contracts/gates.json), [providers](contracts/providers.json), and [plain language](contracts/plain-language.json) are the seven authoritative v2 contracts.
 - [Physical role policy](codex/agents/role-policy.json) defines exact parent/child edges, modes, schemas, resources, and compatibility restrictions.
 - [Package registry](../scripts/install/codex-package-registry.json) locates canonical instruction sources and framework route mappings.
-- [Generator](../scripts/generate-provider-contracts.cjs) exposes `renderCodexOutputs()`, `renderReasonixOutputs()`, and `renderHarnessV2Outputs(provider, root)`. Normal generation opens all nine projections without promoting runtime admission.
+- [Generator](../scripts/generate-provider-contracts.cjs) exposes `renderCodexOutputs()`, `renderReasonixOutputs()`, and `renderHarnessV2Outputs(provider, root)`. Normal generation opens all eleven projections without promoting runtime admission.
 - [Manifests](manifests/) pin installable payloads and are regenerated separately after source changes.
 
 ```text

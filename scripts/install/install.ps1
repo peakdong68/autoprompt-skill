@@ -35,7 +35,7 @@ if (-not (Test-Path -LiteralPath $Lib -PathType Leaf)) {
 . (Join-Path $ScriptDir 'harness-v2.ps1')
 
 $ClientsAll = @(
-    'claude','codex','opencode','kilo','vscode','prime','omp','deepseek','reasonix'
+    'claude','codex','opencode','kilo','vscode','prime','omp','deepseek','hermes','grok','reasonix'
 )
 $script:ResultRows = @()
 $script:AnyFail = 0
@@ -75,6 +75,8 @@ function Get-PayloadFile {
         'omp'      { return (Join-Path $RepoRoot 'agents/omp/SKILL.md') }
         'deepseek' { return (Join-Path $RepoRoot 'agents/deepseek/SKILL.md') }
         'reasonix' { return (Join-Path $RepoRoot 'agents/reasonix/SKILL.md') }
+        'hermes' { return (Join-Path $RepoRoot 'agents/hermes/SKILL.md') }
+        'grok' { return (Join-Path $RepoRoot 'agents/grok/SKILL.md') }
         default    { return $null }
     }
 }

@@ -1,6 +1,7 @@
 'use strict'
 
 const assert = require('node:assert/strict')
+const crypto = require('node:crypto')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -8,6 +9,71 @@ const test = require('node:test')
 const native = require('../../scripts/harness-v2-native.cjs')
 const { HarnessEventStream } = require('../../scripts/harness-v2-transport.cjs')
 const { modelService, runNative } = require('../helpers/harness-native-service.cjs')
+
+test('claude CLI projection omits only unsupported schema keywords and preserves same-named data', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-schema-projection-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const outputSchema = {
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    $id: 'https://autoprompt.local/schemas/v2/outcome.schema.json',
+    type: 'object',
+    properties: {
+      value: { $ref: '#/$defs/value' },
+      $schema: { const: 'literal-property' },
+      unevaluatedProperties: { const: { $schema: 'literal-data', unevaluatedProperties: false } },
+    },
+    required: ['value'],
+    additionalProperties: false,
+    $defs: { value: { type: 'string', minLength: 1 } },
+    allOf: [{ unevaluatedProperties: false }],
+  }
+  const launch = native.createLaunch({
+    provider: 'claude', home: path.join(root, 'home'), sessionRoot: path.join(root, 'session'),
+    targetPath: root, cwd: root, prompt: 'Return the canonical result.', input: 'fixture',
+    connection: { model: 'claude-sonnet-4-6' }, credentials: {}, environment: { PATH: process.env.PATH },
+    readOnly: true, outputSchema, maxTokens: 4096,
+  })
+  const projected = JSON.parse(launch.argv[launch.argv.indexOf('--json-schema') + 1])
+  assert.equal(Object.hasOwn(projected, '$schema'), false)
+  assert.equal(projected.$id, outputSchema.$id)
+  assert.deepEqual(projected.$defs, outputSchema.$defs)
+  assert.equal(Object.hasOwn(projected.allOf[0], 'unevaluatedProperties'), false)
+  assert.equal(outputSchema.allOf[0].unevaluatedProperties, false)
+  assert.deepEqual(projected.properties.$schema, { const: 'literal-property' })
+  assert.deepEqual(projected.properties.unevaluatedProperties,
+    { const: { $schema: 'literal-data', unevaluatedProperties: false } })
+  assert.equal(outputSchema.$schema, 'https://json-schema.org/draft/2020-12/schema',
+    'launch projection must not mutate the controller-owned canonical schema')
+  assert.equal(launch.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS, '4096')
+})
+
+test('claude CLI projection adds only an implied root object type', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-root-schema-projection-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const canonical = require('../../agents/contracts/schemas/role-report.schema.json')
+  assert.equal(canonical.type, undefined)
+  const project = outputSchema => native.createLaunch({
+    provider: 'claude', home: path.join(root, crypto.randomUUID()), sessionRoot: path.join(root, 'session'),
+    targetPath: root, cwd: root, prompt: 'Return the canonical result.', input: 'fixture',
+    connection: { model: 'claude-sonnet-4-6' }, credentials: {}, environment: { PATH: process.env.PATH },
+    readOnly: true, outputSchema,
+  })
+  const roleLaunch = project(canonical)
+  const roleProjection = JSON.parse(roleLaunch.argv[roleLaunch.argv.indexOf('--json-schema') + 1])
+  assert.equal(roleProjection.type, 'object',
+    'both local-ref oneOf branches contain an object-requiring allOf conjunct')
+  assert.equal(canonical.type, undefined, 'projection must not mutate the canonical role schema')
+
+  const scalarUnion = { oneOf: [{ type: 'string' }, { type: 'integer' }] }
+  const scalarLaunch = project(scalarUnion)
+  const scalarProjection = JSON.parse(scalarLaunch.argv[scalarLaunch.argv.indexOf('--json-schema') + 1])
+  assert.equal(scalarProjection.type, undefined,
+    'a union with non-object branches must not be narrowed to an object')
+
+  const booleanLaunch = project(true)
+  assert.equal(JSON.parse(booleanLaunch.argv[booleanLaunch.argv.indexOf('--json-schema') + 1]), true,
+    'a boolean root schema must remain a boolean schema')
+})
 
 for (const provider of ['claude', 'opencode', 'kilo']) {
   test(`${provider} native reads an actual file, accounts tokens and continues the same native session`, {
@@ -89,3 +155,22 @@ for (const provider of ['claude', 'opencode', 'kilo']) {
     }
   })
 }
+
+test('native tool ceilings apply across providers and fresh callbacks wait for an authentic context', () => {
+  for (const provider of ['claude', 'opencode', 'kilo', 'prime', 'omp', 'deepseek', 'vscode']) {
+    let known = null
+    const seen = []
+    const stream = new HarnessEventStream(provider, { providerToolCallLimit: 1, commandBoundary: true,
+      onSessionIdentified: id => { known = id },
+      onToolCallObserved: evidence => { assert.ok(known); assert.equal(evidence.continuationId, known); seen.push(evidence) } })
+    stream.startTool('first', 'bash', { command: 'pwd' })
+    assert.equal(stream.toolCount, 1)
+    assert.equal(seen.length, 0)
+    stream.session('actual-native-context', {}, '{}')
+    assert.equal(seen.length, 1)
+    stream.finishTool('first', 'fixture output', { exitCode: 0 })
+    assert.throws(() => stream.startTool('second', 'bash', { command: 'pwd' }), { code: 'CHILD_TOOL_CALL_LIMIT_EXHAUSTED' })
+    assert.equal(stream.toolCount, 2)
+    assert.equal(seen.at(-1).attemptedCount, 2)
+  }
+})

@@ -168,7 +168,7 @@
         { "properties": { "code": { "const": "PAUSED" }, "description": { "const": "Work stopped at a saved continuation point and can resume from the recorded state." } }, "required": ["code", "description"] },
         { "properties": { "code": { "const": "ITEM_VERIFIED" }, "description": { "const": "One assigned result passed every check required for that result." } }, "required": ["code", "description"] },
         { "properties": { "code": { "const": "CHECK_INCONCLUSIVE" }, "description": { "const": "A required check could not determine whether the exact result passes." } }, "required": ["code", "description"] },
-        { "properties": { "code": { "const": "DONE" }, "description": { "const": "Every requested result passed its current required checks." } }, "required": ["code", "description"] },
+        { "properties": { "code": { "const": "DONE" }, "description": { "enum": ["Every requested result passed its current required checks.", "The usable requested results are preserved, but the required verification evidence is incomplete."] } }, "required": ["code", "description"] },
         { "properties": { "code": { "const": "PARTIAL" }, "description": { "const": "Some requested results passed, while named remaining results did not finish." } }, "required": ["code", "description"] },
         { "properties": { "code": { "const": "BLOCKED" }, "description": { "const": "No ready work remains until a named external condition changes." } }, "required": ["code", "description"] },
         { "properties": { "code": { "const": "CANCELLED" }, "description": { "const": "The run stopped because the user cancelled it." } }, "required": ["code", "description"] },
@@ -185,6 +185,52 @@
         { "properties": { "code": { "const": "CHANGE_VERIFIED" }, "description": { "const": "The requested change was made and the exact changed version passed its required checks." } }, "required": ["code", "description"] },
         { "properties": { "code": { "const": "EXTERNAL_EFFECT_CONFIRMED" }, "description": { "const": "The authorized external action finished and its observable result was confirmed." } }, "required": ["code", "description"] }
       ]
+    },
+    {
+      "if": {
+        "properties": {
+          "code": { "const": "DONE" },
+          "payload": {
+            "type": "object",
+            "required": ["providerTerminal"],
+            "properties": {
+              "providerTerminal": {
+                "type": "object",
+                "required": ["status"],
+                "properties": {
+                  "status": { "const": "DONE_WITH_VERIFICATION_LIMITATIONS" }
+                }
+              }
+            }
+          }
+        },
+        "required": ["code", "payload"]
+      },
+      "then": {
+        "properties": {
+          "description": { "const": "The usable requested results are preserved, but the required verification evidence is incomplete." },
+          "completedResults": {
+            "items": {
+              "properties": {
+                "description": { "pattern": "^Requested result [1-9][0-9]* is preserved; required verification evidence is incomplete\\.$" }
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "if": {
+          "properties": {
+            "code": { "const": "DONE" }
+          },
+          "required": ["code"]
+        },
+        "then": {
+          "properties": {
+            "description": { "const": "Every requested result passed its current required checks." }
+          }
+        }
+      }
     },
     {
       "if": {

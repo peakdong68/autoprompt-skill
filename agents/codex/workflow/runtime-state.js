@@ -40,6 +40,8 @@ const TERMINAL_STATES = FINAL_OUTCOMES
 const OUTCOME_DESCRIPTIONS = Object.freeze(Object.fromEntries(
   PLAIN_LANGUAGE.userVisibleCodes.map((entry) => [entry.code, entry.description]),
 ))
+const VERIFICATION_LIMITED_DONE_DESCRIPTION =
+  'The usable requested results are preserved, but the required verification evidence is incomplete.'
 const RELEASE_INTENT_OUTCOMES = Object.freeze({
   T010: 'BLOCKED',
   T012: 'FAILED',
@@ -56,6 +58,7 @@ const RELEASE_INTENT_OUTCOMES = Object.freeze({
   T059: 'PARTIAL',
   T076: 'PARTIAL',
 })
+const RELEASE_CLEANUP_TRANSITION_IDS = Object.freeze(new Set(['T082', 'T083']))
 const CRASH_RECOVERY_POLICY = STATE_MACHINE.crashRecoveryPolicy
 const RECOVERY_MILESTONES = Object.freeze([
   'route-analysis', 'route-decision', 'work-preparation', 'external-prepare',
@@ -347,17 +350,62 @@ function runtimeCrashPrecondition(state) {
   return Object.freeze(precondition)
 }
 
+function releaseIntentChain(state, eventLog) {
+  const events = eventLog.readAll()
+  let index = events.length - 1
+  const tip = events[index]
+  if (!tip || tip.sequence !== state.sequence || tip.hash !== state.lastEventHash) {
+    fail('RELEASE_INTENT_INVALID', 'release state does not bind the current append-only event tip')
+  }
+  const cleanupEvents = []
+  while (index >= 0) {
+    const event = events[index]
+    const stateEvent = event && event.details && event.details.stateEvent
+    if (!stateEvent || !RELEASE_CLEANUP_TRANSITION_IDS.has(stateEvent.transitionId)) break
+    const mutationCleanupInvalid = stateEvent.transitionId === 'T082' && (
+      typeof event.details.permitId !== 'string' || !event.details.permitId ||
+      typeof event.details.failureCode !== 'string' || !event.details.failureCode
+    )
+    const accountingCleanupInvalid = stateEvent.transitionId === 'T083' && (
+      !Number.isSafeInteger(event.details.endedSessionCount) || event.details.endedSessionCount < 0
+    )
+    if (cleanupEvents.length > 1 || !validateCanonicalStateEvent(stateEvent) ||
+        stateEvent.sequence !== event.sequence || stateEvent.fromState !== 'RELEASING_LOCK' ||
+        stateEvent.toState !== 'RELEASING_LOCK' || mutationCleanupInvalid || accountingCleanupInvalid ||
+        event.details.processesDrained !== true ||
+        !HASH_PATTERN.test(event.details.processDrainEvidenceHash || '') ||
+        !event.details.accountingCheckpoint ||
+        event.details.accountingCheckpoint.stateEventSequence !== stateEvent.sequence - 1 ||
+        event.details.accountingCheckpoint.stateEventHash !== stateEvent.causalParent ||
+        !HASH_PATTERN.test(event.details.accountingCheckpoint.snapshotHash || '') ||
+        !HASH_PATTERN.test(event.details.accountingCheckpoint.lastAccountingHash || '')) {
+      fail('RELEASE_INTENT_INVALID', 'release cleanup suffix is not one exact drained cancellation permit closure')
+    }
+    cleanupEvents.unshift(event)
+    index -= 1
+  }
+  const sourceEvent = events[index]
+  const stateEvent = sourceEvent && sourceEvent.details && sourceEvent.details.stateEvent
+  if (!sourceEvent || !validateCanonicalStateEvent(stateEvent) ||
+      stateEvent.sequence !== sourceEvent.sequence || stateEvent.toState !== 'RELEASING_LOCK') {
+    fail('RELEASE_INTENT_INVALID', 'release reconciliation cannot bind the canonical entering event')
+  }
+  if (cleanupEvents.length > 0) {
+    const ids = cleanupEvents.map(event => event.details.stateEvent.transitionId)
+    if (stateEvent.transitionId !== 'T057' || new Set(ids).size !== ids.length ||
+        !['T082', 'T083', 'T082,T083'].includes(ids.join(',')) ||
+        cleanupEvents.some(event => event.details.releaseIntentEventHash !== sourceEvent.hash)) {
+      fail('RELEASE_INTENT_INVALID', 'release cleanup does not descend from the exact cancellation intent')
+    }
+  }
+  return Object.freeze({ sourceEvent, stateEvent, cleanupEvents: Object.freeze(cleanupEvents) })
+}
+
 function releaseReconciliationEvidence(state, eventLog) {
   if (!state || state.state !== 'RELEASING_LOCK') {
     fail('RELEASE_RECONCILIATION_REQUIRED', 'release reconciliation requires the exact persisted RELEASING_LOCK state')
   }
-  const sourceEvent = eventLog.readAll().at(-1)
-  const stateEvent = sourceEvent && sourceEvent.details && sourceEvent.details.stateEvent
-  if (!sourceEvent || sourceEvent.sequence !== state.sequence || sourceEvent.hash !== state.lastEventHash ||
-      !validateCanonicalStateEvent(stateEvent) || stateEvent.sequence !== sourceEvent.sequence ||
-      stateEvent.toState !== 'RELEASING_LOCK') {
-    fail('RELEASE_INTENT_INVALID', 'release reconciliation cannot bind the canonical entering event')
-  }
+  const { sourceEvent, stateEvent } = releaseIntentChain(state, eventLog)
   let outcome = RELEASE_INTENT_OUTCOMES[stateEvent.transitionId] || null
   if (stateEvent.transitionId === 'T055') {
     if (!state.terminal || !FINAL_OUTCOMES.includes(state.terminal.outcome) ||
@@ -467,12 +515,25 @@ function terminalProducedEvidenceHashes(manifest, checkHashes = []) {
   return Object.freeze(hashes)
 }
 
+function terminalPresentation(outcome, providerTerminal) {
+  const verificationLimited = outcome === 'DONE' && providerTerminal &&
+    providerTerminal.status === 'DONE_WITH_VERIFICATION_LIMITATIONS'
+  return Object.freeze({
+    description: verificationLimited
+      ? VERIFICATION_LIMITED_DONE_DESCRIPTION : OUTCOME_DESCRIPTIONS[outcome],
+    completedResultDescription: (index) => verificationLimited
+      ? `Requested result ${index + 1} is preserved; required verification evidence is incomplete.`
+      : `Verified requested result ${index + 1}.`,
+  })
+}
+
 function canonicalTerminalOutcome(outcome, state, manifest, manifestHash, options, recordedAt) {
   const producedEvidenceHashes = terminalProducedEvidenceHashes(manifest, options.checkHashes || [])
+  const presentation = terminalPresentation(outcome, options.terminalEnvelope)
   return canonicalize({
     schemaVersion: STATE_MACHINE.contractVersion,
     code: outcome,
-    description: OUTCOME_DESCRIPTIONS[outcome],
+    description: presentation.description,
     stateClass: 'terminal',
     runId: state.runId,
     requestEnvelopeHash: state.requestEnvelopeHash,
@@ -480,7 +541,7 @@ function canonicalTerminalOutcome(outcome, state, manifest, manifestHash, option
     completedResults: manifest.map((entry, index) => ({
       id: `result-${index + 1}`,
       sha256: entry.hash,
-      description: `Verified requested result ${index + 1}.`,
+      description: presentation.completedResultDescription(index),
     })),
     nextReadyWork: [],
     cause: {
@@ -508,17 +569,19 @@ function validateCanonicalTerminalOutcome(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
       Object.keys(value).length !== allowed.size || Object.keys(value).some((key) => !allowed.has(key)) ||
       value.schemaVersion !== STATE_MACHINE.contractVersion || !FINAL_OUTCOMES.includes(value.code) ||
-      value.description !== OUTCOME_DESCRIPTIONS[value.code] || value.stateClass !== 'terminal' ||
+      value.description !== terminalPresentation(value.code, value.payload && value.payload.providerTerminal).description ||
+      value.stateClass !== 'terminal' ||
       typeof value.runId !== 'string' || value.runId.length < 8 ||
       !HASH_PATTERN.test(value.requestEnvelopeHash || '') || !HASH_PATTERN.test(value.currentVersionHash || '') ||
       !Array.isArray(value.completedResults) || !Array.isArray(value.nextReadyWork) || value.nextReadyWork.length !== 0 ||
       value.payloadSchemaId !== 'autoprompt.terminal.v2' || !value.payload || typeof value.payload !== 'object' ||
       Array.isArray(value.payload) || Number.isNaN(Date.parse(value.recordedAt))) return false
-  if (value.completedResults.some((entry) => {
+  const presentation = terminalPresentation(value.code, value.payload.providerTerminal)
+  if (value.completedResults.some((entry, index) => {
     const keys = entry && typeof entry === 'object' && !Array.isArray(entry) ? Object.keys(entry) : []
     return keys.length !== 3 || !keys.every((key) => ['id', 'sha256', 'description'].includes(key)) ||
       typeof entry.id !== 'string' || !entry.id || !HASH_PATTERN.test(entry.sha256 || '') ||
-      typeof entry.description !== 'string' || !entry.description
+      entry.description !== presentation.completedResultDescription(index)
   })) return false
   const cause = value.cause
   return Boolean(cause && typeof cause === 'object' && !Array.isArray(cause) &&
@@ -570,10 +633,57 @@ function validateCapabilityBinding(binding, expected) {
 }
 
 function hashFileStrict(filePath, fsImpl = fs) {
+  const capture = platformCaptureAuthority(fsImpl)
+  if (capture) return captureDigest(capture.captureFile(path.resolve(filePath)), filePath, 'file')
   return sha256(readFileStrict(filePath, fsImpl))
 }
 
+function platformCaptureAuthority(fsImpl) {
+  if (!fsImpl || typeof fsImpl !== 'object') return null
+  const candidate = process.platform === 'darwin' ? fsImpl.darwinCapture
+    : process.platform === 'win32' ? fsImpl.windowsCapture : null
+  if (!candidate || typeof candidate !== 'object' || typeof candidate.captureFile !== 'function' ||
+      typeof candidate.captureTree !== 'function') {
+    return null
+  }
+  return candidate
+}
+
+function captureDigest(result, source, kind) {
+  if (!result || typeof result !== 'object' || !/^[a-f0-9]{64}$/.test(result.hash || '') ||
+      !Number.isSafeInteger(result.bytes) || result.bytes < 0 || !Array.isArray(result.entries)) {
+    fail('PREIMAGE_UNSAFE', `Platform ${kind} capture did not return an exact bounded digest: ${source}`)
+  }
+  return result.hash
+}
+
+function captureRootMatches(result, expected) {
+  const root = result && Array.isArray(result.entries) ? result.entries[0] : null
+  const stat = root && root.type === 'directory' && root.path === '' ? root.stat : null
+  return Boolean(stat && String(expected.dev) === stat.dev && String(expected.ino) === stat.ino &&
+    Number(expected.mode) === stat.mode && Number(expected.nlink) === Number(stat.nlink) && Number(expected.size) === stat.size)
+}
+
 function readFileStrict(filePath, fsImpl = fs) {
+  const capture = platformCaptureAuthority(fsImpl)
+  if (capture) {
+    if (typeof capture.captureFileBytes !== 'function') {
+      fail('PREIMAGE_UNSAFE', `Platform file capture cannot return exact bytes: ${filePath}`)
+    }
+    try {
+      const result = capture.captureFileBytes(path.resolve(filePath))
+      const hash = captureDigest(result, filePath, 'file')
+      if (!Buffer.isBuffer(result.content) || result.content.length !== result.bytes || sha256(result.content) !== hash) {
+        fail('PREIMAGE_UNSAFE', `Platform file capture bytes are not bound to its digest: ${filePath}`)
+      }
+      return result.content
+    } catch (error) {
+      if (error instanceof RuntimeStateError) throw error
+      fail('PREIMAGE_UNSAFE', `deliverable file could not be captured by the platform descriptor authority: ${filePath}`, {
+        cause: error && (error.code || error.message),
+      })
+    }
+  }
   return withStrictAnchoredManifestPath(filePath, fsImpl, (anchored) => {
     const item = fsImpl.lstatSync(anchored)
     if (!item.isFile() || item.isSymbolicLink() || Number(item.nlink) !== 1) {
@@ -733,8 +843,40 @@ function withStrictAnchoredManifestPath(absolute, fsImpl, operation) {
 }
 
 function hashDirectoryStateStrict(directory, fsImpl = fs, expectedRootStat = null) {
+  const capture = platformCaptureAuthority(fsImpl)
+  if (capture) {
+    const resolved = path.resolve(directory)
+    let current
+    try { current = fsImpl.lstatSync(resolved, typeof expectedRootStat?.ino === 'bigint' ? { bigint: true } : undefined) } catch (error) {
+      fail('PREIMAGE_UNSAFE', `deliverable directory is unavailable before platform capture: ${directory}`, {
+        cause: error && (error.code || error.message),
+      })
+    }
+    if (!current.isDirectory() || current.isSymbolicLink() ||
+        (expectedRootStat && !sameStablePhysicalEntry(expectedRootStat, current))) {
+      fail('PREIMAGE_UNSAFE', `deliverable directory is not one physical target: ${directory}`)
+    }
+    try {
+      // Windows file IDs are 64-bit; default numeric stats may round them.
+      // Compare the held HANDLE identity against an exact bigint stat.
+      const exactRoot = process.platform === 'win32' ? fsImpl.lstatSync(resolved, { bigint: true }) : expectedRootStat || current
+      const result = capture.captureTree(resolved)
+      const hash = captureDigest(result, directory, 'directory')
+      if (!captureRootMatches(result, exactRoot)) {
+        fail('PREIMAGE_UNSAFE', `deliverable directory identity changed before platform capture: ${directory}`)
+      }
+      return hash
+    } catch (error) {
+      if (error instanceof RuntimeStateError) throw error
+      fail('PREIMAGE_UNSAFE', `deliverable directory could not be captured by the platform descriptor authority: ${directory}`, {
+        cause: error && (error.code || error.message),
+      })
+    }
+  }
   return withStrictAnchoredManifestPath(directory, fsImpl, (anchoredDirectory) => {
-    const digest = crypto.createHash('sha256')
+    let digest = crypto.createHash('sha256')
+    const capturedEntries = new Map()
+    let verifyingCapture = false
     const anchoredRootStat = fsImpl.lstatSync(anchoredDirectory)
     const rootStat = expectedRootStat || anchoredRootStat
     if (!rootStat || !anchoredRootStat.isDirectory() || anchoredRootStat.isSymbolicLink() ||
@@ -754,6 +896,11 @@ function hashDirectoryStateStrict(directory, fsImpl = fs, expectedRootStat = nul
         if (!stat || stat.isSymbolicLink()) {
           fail('PREIMAGE_UNSAFE', `deliverable directory contains a missing or linked entry: ${path.join(displayedPath, entry.name)}`)
         }
+        if (verifyingCapture) {
+          if (!sameStablePhysicalEntry(capturedEntries.get(name), stat)) {
+            fail('PREIMAGE_UNSAFE', `deliverable entry changed after capture: ${path.join(directory, ...name.split('/'))}`)
+          }
+        } else capturedEntries.set(name, stat)
         if (stat.isDirectory()) {
           let childDescriptor
           try {
@@ -789,7 +936,19 @@ function hashDirectoryStateStrict(directory, fsImpl = fs, expectedRootStat = nul
         fail('PREIMAGE_UNSAFE', `deliverable directory changed while it was opened: ${directory}`)
       }
       visit(rootDescriptor, '', anchoredDirectory, openedRoot)
-      return digest.digest('hex')
+      const capturedHash = digest.digest('hex')
+      // Editing an earlier file does not update its parent directory's
+      // metadata. Dirty mmap writes can even leave file metadata unchanged.
+      // Re-read the complete tree after capture and compare its exact bytes
+      // and entry identities. This is race detection, not an atomic snapshot;
+      // finalization must still establish owned-writer quiescence first.
+      verifyingCapture = true
+      digest = crypto.createHash('sha256')
+      visit(rootDescriptor, '', anchoredDirectory, openedRoot)
+      if (digest.digest('hex') !== capturedHash) {
+        fail('PREIMAGE_UNSAFE', `deliverable bytes changed after tree capture: ${directory}`)
+      }
+      return capturedHash
     } catch (error) {
       if (error instanceof RuntimeStateError) throw error
       fail('PREIMAGE_UNSAFE', `deliverable directory could not be captured without following links: ${directory}`, {
@@ -814,6 +973,18 @@ function readStableFileBytes(filePath, expectedStat, fsImpl, displayedPath = fil
       fail('PREIMAGE_UNSAFE', `deliverable file changed while it was opened: ${displayedPath}`)
     }
     const bytes = fsImpl.readFileSync(descriptor)
+    // Dirty writable mappings can change bytes without another metadata
+    // update. Re-read through the held descriptor; this is change detection,
+    // not an atomic snapshot or a replacement for draining owned writers.
+    const verification = Buffer.allocUnsafe(Math.min(bytes.length, 64 * 1024))
+    for (let offset = 0; offset < bytes.length;) {
+      const length = fsImpl.readSync(descriptor, verification, 0,
+        Math.min(verification.length, bytes.length - offset), offset)
+      if (length < 1 || !verification.subarray(0, length).equals(bytes.subarray(offset, offset + length))) {
+        fail('PREIMAGE_UNSAFE', `deliverable file bytes changed during verification: ${displayedPath}`)
+      }
+      offset += length
+    }
     const after = fsImpl.fstatSync(descriptor)
     const live = fsImpl.lstatSync(filePath)
     if (!sameStablePhysicalEntry(opened, after) || !sameStablePhysicalEntry(after, live) ||
@@ -1456,14 +1627,95 @@ class RuntimeStateStore {
     if (permit.isolationBindingHash && options.isolationBindingHash !== permit.isolationBindingHash) {
       fail('MUTATION_ISOLATION_MISMATCH', 'mutation abort is not bound to its admitted private workspace')
     }
+    const cause = requireString(options.cause, 'mutation abort cause')
+    if (current.state === 'RELEASING_LOCK') {
+      const { sourceEvent, stateEvent, cleanupEvents } = releaseIntentChain(current, this.eventLog)
+      const budgets = options.budgets
+      const sessions = budgets && budgets.sessions
+      const accounting = options.accountingCheckpoint
+      if (stateEvent.transitionId !== 'T057' || cleanupEvents.length !== 0 ||
+          options.processesDrained !== true || !HASH_PATTERN.test(options.processDrainEvidenceHash || '') ||
+          !sessions || typeof sessions !== 'object' || Array.isArray(sessions) ||
+          Object.values(sessions).some(session => !session || session.status === 'RUNNING') ||
+          !accounting || accounting.runId !== current.runId || accounting.activationId !== current.activation.id ||
+          accounting.activationNonce !== current.activation.nonce ||
+          accounting.generation !== current.activation.generation ||
+          accounting.stateEventSequence !== current.sequence || accounting.stateEventHash !== current.lastEventHash ||
+          !Number.isSafeInteger(accounting.lastAccountingSequence) || accounting.lastAccountingSequence < 1 ||
+          !HASH_PATTERN.test(accounting.lastAccountingHash || '') || !HASH_PATTERN.test(accounting.snapshotHash || '') ||
+          !HASH_PATTERN.test(accounting.cumulativeHash || '') || !HASH_PATTERN.test(accounting.ceilingContractHash || '')) {
+        fail(
+          'MUTATION_RELEASE_CLEANUP_INVALID',
+          'release-time mutation abort requires the exact cancellation intent, drained processes, ended sessions, and accounting head',
+        )
+      }
+      return this.transition('RELEASING_LOCK', {
+        capability: options.capability,
+        cause,
+        eventId: 'CANCEL_MUTATION_ABORTED',
+        statePatch: { activeMutation: null, budgets },
+        [INTERNAL]: true,
+        details: {
+          permitId: permit.id,
+          failureCode: typeof options.failureCode === 'string' && options.failureCode ? options.failureCode : 'CANCELLED',
+          processesDrained: true,
+          processDrainEvidenceHash: options.processDrainEvidenceHash,
+          accountingCheckpoint: accounting,
+          releaseIntentEventHash: sourceEvent.hash,
+        },
+      })
+    }
     return this.record('TRANSIENT_RUNTIME', {
       capability: options.capability,
-      cause: requireString(options.cause, 'mutation abort cause'),
+      cause,
       statePatch: { activeMutation: null },
       [INTERNAL]: true,
       details: {
         permitId: permit.id,
         failureCode: typeof options.failureCode === 'string' && options.failureCode ? options.failureCode : 'WORKER_FAILED',
+      },
+    })
+  }
+
+  recordCancellationAccountingClosure(options = {}) {
+    const current = this.load()
+    this._authorize(options.capability, 'record cancellation accounting closure', capabilityExpectation(current))
+    if (current.state !== 'RELEASING_LOCK' || current.activeMutation) {
+      fail('CANCEL_ACCOUNTING_CLOSURE_INVALID', 'cancellation accounting closes only after mutation cleanup in RELEASING_LOCK')
+    }
+    const { sourceEvent, stateEvent, cleanupEvents } = releaseIntentChain(current, this.eventLog)
+    const cleanupIds = cleanupEvents.map(event => event.details.stateEvent.transitionId)
+    const budgets = options.budgets
+    const sessions = budgets && budgets.sessions
+    const accounting = options.accountingCheckpoint
+    if (stateEvent.transitionId !== 'T057' || cleanupIds.includes('T083') ||
+        options.processesDrained !== true || !HASH_PATTERN.test(options.processDrainEvidenceHash || '') ||
+        !sessions || typeof sessions !== 'object' || Array.isArray(sessions) ||
+        Object.values(sessions).some(session => !session || session.status === 'RUNNING') ||
+        !accounting || accounting.runId !== current.runId || accounting.activationId !== current.activation.id ||
+        accounting.activationNonce !== current.activation.nonce ||
+        accounting.generation !== current.activation.generation ||
+        accounting.stateEventSequence !== current.sequence || accounting.stateEventHash !== current.lastEventHash ||
+        !Number.isSafeInteger(accounting.lastAccountingSequence) || accounting.lastAccountingSequence < 1 ||
+        !HASH_PATTERN.test(accounting.lastAccountingHash || '') || !HASH_PATTERN.test(accounting.snapshotHash || '') ||
+        !HASH_PATTERN.test(accounting.cumulativeHash || '') || !HASH_PATTERN.test(accounting.ceilingContractHash || '')) {
+      fail(
+        'CANCEL_ACCOUNTING_CLOSURE_INVALID',
+        'cancellation accounting closure requires T057, drained processes, ended sessions, and the exact accounting head',
+      )
+    }
+    return this.transition('RELEASING_LOCK', {
+      capability: options.capability,
+      cause: requireString(options.cause, 'cancellation accounting closure cause'),
+      eventId: 'CANCEL_ACCOUNTING_CLOSED',
+      statePatch: { budgets },
+      [INTERNAL]: true,
+      details: {
+        processesDrained: true,
+        processDrainEvidenceHash: options.processDrainEvidenceHash,
+        accountingCheckpoint: accounting,
+        endedSessionCount: Object.keys(sessions).length,
+        releaseIntentEventHash: sourceEvent.hash,
       },
     })
   }
@@ -1525,11 +1777,8 @@ class RuntimeStateStore {
 
   _bindReleaseIntentTerminal(outcome, current, options) {
     if (current.activeMutation) fail('MUTATION_INCOMPLETE', 'cannot finalize while a mutation permit is active')
-    const sourceEvent = this.eventLog.readAll().at(-1)
-    const stateEvent = sourceEvent && sourceEvent.details && sourceEvent.details.stateEvent
-    if (!sourceEvent || sourceEvent.sequence !== current.sequence || sourceEvent.hash !== current.lastEventHash ||
-        !validateCanonicalStateEvent(stateEvent) || stateEvent.sequence !== sourceEvent.sequence ||
-        stateEvent.toState !== 'RELEASING_LOCK' || stateEvent.transitionId === 'T055') {
+    const { sourceEvent, stateEvent } = releaseIntentChain(current, this.eventLog)
+    if (stateEvent.transitionId === 'T055') {
       fail('RELEASE_INTENT_INVALID', 'RELEASING_LOCK does not bind one valid canonical failure/cancel/budget intent')
     }
     const derivedOutcome = RELEASE_INTENT_OUTCOMES[stateEvent.transitionId]
@@ -1579,7 +1828,7 @@ class RuntimeStateStore {
       runId: current.runId,
       activationId: current.activation.id,
       generation: current.activation.generation,
-      sequence: sourceEvent.sequence,
+      sequence: current.sequence,
       missionHash: current.activation.missionHash,
       requestEnvelopeHash: current.requestEnvelopeHash,
       workspaceEpoch: current.workspaceEpoch,
@@ -1647,7 +1896,8 @@ class RuntimeStateStore {
     }
     if (state.terminal.releaseIntent) {
       const intent = state.terminal.releaseIntent
-      const event = this.eventLog.readAll()[intent.eventSequence - 1]
+      const events = this.eventLog.readAll()
+      const event = events[intent.eventSequence - 1]
       const stateEvent = event && event.details && event.details.stateEvent
       if (!event || event.hash !== intent.eventHash || !validateCanonicalStateEvent(stateEvent) ||
           stateEvent.transitionId !== intent.transitionId || stateEvent.eventId !== intent.eventId ||
@@ -1655,14 +1905,45 @@ class RuntimeStateStore {
           intent.stateChecksum !== intent.sourceStateChecksum || !HASH_PATTERN.test(intent.sourceStateChecksum || '')) {
         return { valid: false, reason: 'TERMINAL_RELEASE_INTENT_MISMATCH' }
       }
+      const cleanupEvents = events.slice(intent.eventSequence, state.terminal.sequence)
+      const cleanupIds = cleanupEvents.map(cleanup => cleanup?.details?.stateEvent?.transitionId)
+      if (cleanupEvents.length > 2 || new Set(cleanupIds).size !== cleanupIds.length ||
+          !['', 'T082', 'T083', 'T082,T083'].includes(cleanupIds.join(',')) ||
+          cleanupEvents.some((cleanup, index) => {
+        const cleanupStateEvent = cleanup && cleanup.details && cleanup.details.stateEvent
+        const mutationCleanupInvalid = cleanupStateEvent?.transitionId === 'T082' && (
+          cleanupStateEvent.eventId !== 'CANCEL_MUTATION_ABORTED' ||
+          typeof cleanup.details.permitId !== 'string' || !cleanup.details.permitId ||
+          typeof cleanup.details.failureCode !== 'string' || !cleanup.details.failureCode
+        )
+        const accountingCleanupInvalid = cleanupStateEvent?.transitionId === 'T083' && (
+          cleanupStateEvent.eventId !== 'CANCEL_ACCOUNTING_CLOSED' ||
+          !Number.isSafeInteger(cleanup.details.endedSessionCount) || cleanup.details.endedSessionCount < 0
+        )
+        const accounting = cleanup.details.accountingCheckpoint
+        return !validateCanonicalStateEvent(cleanupStateEvent) ||
+          !RELEASE_CLEANUP_TRANSITION_IDS.has(cleanupStateEvent.transitionId) ||
+          cleanupStateEvent.fromState !== 'RELEASING_LOCK' || cleanupStateEvent.toState !== 'RELEASING_LOCK' ||
+          cleanupStateEvent.causalParent !== (index === 0 ? event.hash : cleanupEvents[index - 1].hash) ||
+          cleanup.details.releaseIntentEventHash !== event.hash || cleanup.details.processesDrained !== true ||
+          !HASH_PATTERN.test(cleanup.details.processDrainEvidenceHash || '') ||
+          mutationCleanupInvalid || accountingCleanupInvalid ||
+          !accounting || accounting.stateEventSequence !== cleanupStateEvent.sequence - 1 ||
+          accounting.stateEventHash !== cleanupStateEvent.causalParent ||
+          !HASH_PATTERN.test(accounting.snapshotHash || '') ||
+          !HASH_PATTERN.test(accounting.lastAccountingHash || '')
+      }) || (cleanupEvents.length > 0 && intent.transitionId !== 'T057')) {
+        return { valid: false, reason: 'TERMINAL_RELEASE_CLEANUP_MISMATCH' }
+      }
       if (state.state === 'RELEASING_LOCK') {
-        if (event.sequence !== state.sequence || event.hash !== state.lastEventHash) {
+        const terminalTip = events[state.terminal.sequence - 1]
+        if (state.terminal.sequence !== state.sequence || !terminalTip || terminalTip.hash !== state.lastEventHash) {
           return { valid: false, reason: 'TERMINAL_RELEASE_INTENT_MISMATCH' }
         }
       } else if (FINAL_OUTCOMES.includes(state.state)) {
-        const releaseEvent = this.eventLog.readAll()[state.sequence - 1]
+        const releaseEvent = events[state.sequence - 1]
         const releaseStateEvent = releaseEvent && releaseEvent.details && releaseEvent.details.stateEvent
-        if (!releaseEvent || releaseEvent.hash !== state.lastEventHash || state.sequence !== intent.eventSequence + 1 ||
+        if (!releaseEvent || releaseEvent.hash !== state.lastEventHash || state.sequence !== state.terminal.sequence + 1 ||
             !validateCanonicalStateEvent(releaseStateEvent) || releaseStateEvent.fromState !== 'RELEASING_LOCK' ||
             releaseStateEvent.toState !== state.terminal.outcome ||
             releaseStateEvent.eventId !== `LOCK_RELEASED_${state.terminal.outcome}`) {

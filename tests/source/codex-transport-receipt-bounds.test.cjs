@@ -15,6 +15,10 @@ const {
 } = require(
   path.join(ROOT, 'agents', 'codex', 'workflow', 'phase-budget.js'),
 )
+const {
+  ProcessOwner, createPosixProcessAdapter, prepareProcessLaunchEnvironment,
+} = require(path.join(ROOT, 'agents', 'codex', 'workflow', 'process-owner.js'))
+const routeTranscript = require(path.join(ROOT, 'agents', 'codex', 'workflow', 'route-transcript.js'))
 
 const EXECUTION_POLICY = Object.freeze({
   logicalRole: 'worker',
@@ -331,6 +335,9 @@ test('owned Codex proxy streams every complete large-output line while retaining
   let streamedLines = 0
   let firstLine = null
   let lastLine = null
+  let fairnessObservedAt = null
+  const fairnessTimer = setTimeout(() => { fairnessObservedAt = streamedLines }, 0)
+  t.after(() => clearTimeout(fairnessTimer))
   const result = await runner.run({
     executable: process.execPath,
     argv: ['-e', 'process.exit(0)'],
@@ -347,6 +354,8 @@ test('owned Codex proxy streams every complete large-output line while retaining
   })
 
   assert.equal(streamedLines, lineCount)
+  assert.ok(Number.isSafeInteger(fairnessObservedAt) && fairnessObservedAt < lineCount,
+    'large transcript persistence must yield so activation expiry and signal handlers can run')
   assert.match(firstLine, /"text":"0:/)
   assert.match(lastLine, new RegExp(`"text":"${lineCount - 1}:`))
   assert.equal(result.stdoutByteCount, stdout.length)
@@ -357,6 +366,74 @@ test('owned Codex proxy streams every complete large-output line while retaining
   assert.equal(result.stderrTruncated, true)
   assert.ok(Buffer.byteLength(result.stderr, 'utf8') <= 64 * 1024 + 3)
   assert.match(result.stderr, /stderr-tail\n$/)
+})
+
+test('actual owned large-output replay yields to cancellation and suppresses late transcript callbacks', {
+  skip: process.platform === 'win32',
+}, async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-owned-proxy-fairness-'))
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+  const controlRoot = path.join(directory, 'control')
+  fs.mkdirSync(controlRoot)
+  const routeDir = path.join(directory, 'route')
+  routeTranscript.createRouteTranscript(routeDir)
+  const lineCount = 4096
+  const emitter = path.join(directory, 'emit-large-jsonl.cjs')
+  fs.writeFileSync(emitter, `'use strict'\nfor(let i=0;i<${lineCount};i+=1)process.stdout.write(JSON.stringify({type:'item.completed',item:{type:'reasoning',text:String(i)}})+'\\n')\n`)
+  const processAdapter = createPosixProcessAdapter()
+  const processOwner = new ProcessOwner({
+    adapter: processAdapter,
+    registryPath: path.join(directory, 'processes.json'),
+    pollMs: 5,
+  })
+  const runner = new OwnedCodexProxyRunner({
+    processOwner,
+    controlRoot,
+    targetKey: 'actual-large-output-fairness',
+    pollMs: 5,
+  })
+  const reservationId = 'actual-large-output-reservation'
+  const environment = prepareProcessLaunchEnvironment(processAdapter, reservationId, { ...process.env })
+  let streamedLines = 0
+  let stoppedAt = null
+  let stopPromise = null
+  const result = await runner.run({
+    executable: process.execPath,
+    argv: [emitter],
+    cwd: directory,
+    env: environment,
+    stdin: '',
+    sessionId: 'actual-large-output-session',
+    reservationId,
+    onStdoutLine(line) {
+      streamedLines += 1
+      routeTranscript.appendRouteEvent(routeDir, JSON.parse(line), {
+        rawBytes: Buffer.from(`${line}\n`, 'utf8'),
+        mimeType: 'application/jsonl',
+      })
+      if (streamedLines === 1) {
+        setTimeout(() => {
+          stoppedAt = streamedLines
+          stopPromise = runner.stop({
+            sessionId: 'actual-large-output-session',
+            reason: 'activation authorization expired during transcript replay',
+            terminalStatus: 'CANCELLED',
+          })
+        }, 0)
+      }
+    },
+  })
+  if (stopPromise) await stopPromise
+  await processOwner.assertDrained()
+  assert.ok(Number.isSafeInteger(stoppedAt) && stoppedAt >= 1 && stoppedAt < lineCount)
+  assert.equal(streamedLines, stoppedAt)
+  assert.equal(result.signal, 'OWNED_STOP')
+  assert.equal(result.drained, true)
+  const routeVerification = routeTranscript.verifyRouteTranscript(routeDir)
+  assert.equal(routeVerification.valid, true)
+  assert.equal(routeVerification.events, streamedLines)
+  assert.equal(processOwner.listRecords().some(record =>
+    ['RESERVED', 'RUNNING'].includes(record.status)), false)
 })
 
 test('timeout cleanup has its own finite watchdog and never hides a failed drain', async () => {

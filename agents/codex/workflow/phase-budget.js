@@ -12,6 +12,7 @@ const childProcess = require('node:child_process')
 const fs = require('node:fs')
 const http = require('node:http')
 const https = require('node:https')
+const net = require('node:net')
 const os = require('node:os')
 const path = require('node:path')
 const { StringDecoder } = require('node:string_decoder')
@@ -74,9 +75,11 @@ const {
   createProductionPreMutationBaseline,
   openRunRecord,
 } = require('./run-record.js')
+const { verifyRouteTranscript } = require('./route-transcript.js')
 const { atomicWriteFile, EventLog, readChecksummedJson, stableStringify } = require('./event-log.js')
 const {
   RuntimeStateStore, createEvidenceInvalidationGraph, hashManifestEntryStrict,
+  hashDirectoryStateStrict, readFileStrict,
   runtimeCrashPrecondition,
 } = require('./runtime-state.js')
 const {
@@ -110,6 +113,7 @@ const {
   WorkerWorkspaceManager,
 } = require('./worker-workspace.js')
 const { auditPrivatePermissions, pathIsInside, readFileNoFollow } = require('./safe-run-root.js')
+const { createDarwinFilesystemCapture, createDarwinFilesystemMutations } = require('./darwin-filesystem.js')
 const { validateJsonSchema } = require('./json-schema-validator.js')
 
 const SCOPE_SOFT_SEC = 60
@@ -153,9 +157,10 @@ const REPORT_ONLY_CHECKER_CORRECTION_CODES = new Set([
 const CHECKER_FALSIFICATION_DOCTRINE = Object.freeze([
   'Try to disprove every typed verification obligation against the frozen deliverable. Preserve each declared condition and finish the full assigned matrix after any failure.',
   'For every exact named check ID, return one testOutcomes entry containing checkId (preferred; command and legacy id are accepted aliases) and PASS or FAIL status. Never use a tool-call or chunk ID, repeat a check ID, or supply conflicting identity aliases. Do not inspect Autoprompt transcripts or compute observationId, commandHash, or fingerprint: the controller owns execution identity and adds it only when your report resolves to one exact admissible command receipt. PASS requires a unique zero exit bound to the exact version being checked: it must come from a controller-declared command whose pre-mutation program inputs still match; command text alone and newly created or modified harnesses never certify PASS. An authenticated nonzero test failure may bind FAIL and drive repair. One admissible exact-version harness may cover several IDs; failed setup, ambiguous receipts, inline-output/no-op commands, and writable-scratch reads cover none.',
-  'For each checker-authored harness version, first write a regular program in the assigned writable scratch root. Invoke that sealed version once either as <approved runtime> <absolute sealed scratch program> <absolute frozen exact-version root being checked> or as <absolute sealed executable> <absolute frozen exact-version root being checked>. Correct a setup failure in the same turn under a fresh filename and preserve prior diagnostics; never overwrite or rerun an executed harness or relabel a product failure as setup. Approved runtimes are Python 3, Node.js, Ruby, Perl, and POSIX shell. Substitute the projected absolute paths literally. Emit one direct JSON summary of at most 4 KiB per invocation. Do not use interpreter flags, heredocs, redirection, pipelines, command substitution, environment assignments, shell wrappers, or command glue.',
+  'For each checker-authored harness version, first write a regular program in the assigned writable scratch root. Invoke that sealed version once either as <approved runtime> <absolute sealed scratch program> <absolute frozen exact-version root being checked> or as <absolute sealed executable> <absolute frozen exact-version root being checked>. Correct a setup failure in the same turn under a fresh filename and preserve prior diagnostics; never overwrite or rerun an executed harness or relabel a product failure as setup. Approved runtimes are Python 3, Node.js, Ruby, Perl, and POSIX shell. Substitute the projected absolute paths literally. Emit one direct JSON summary of at most 4 KiB per invocation, including passCount and failureCount as integer counts measured from the assertions actually executed. Count failed assertions honestly and exit nonzero on failures; do not replace measured counts with a lone PASS label or boolean. These counts establish only provisional execution evidence, never independent acceptance by themselves. Do not use interpreter flags, heredocs, redirection, pipelines, command substitution, environment assignments, shell wrappers, or command glue.',
+  'A scratch program must load the deliverable from the frozen-root argument, not from its own directory. In Node.js, read process.argv[2] and resolve deliverable modules with path.join(frozenRoot, relativeModulePath); a relative module specifier instead resolves beside the scratch program. In Python, read sys.argv[1] and resolve deliverable paths beneath it. Keep passing the same frozen-root argument when invoking a corrected program under its fresh filename. Increment passCount or failureCount for each assertion actually executed and print the counted JSON summary, including after a failing assertion.',
   'Treat the frozen exact-version root as immutable, including during reads. Open databases there with an explicit read-only or immutable mode. If a database driver, parser, compiler, or consumer may create a journal, WAL, lock, bytecode, cache, sidecar, or temporary file, first make a hash-bound copy in the assigned writable scratch root and operate only on that copy.',
-  'Return the consumed underlying identifiers in evidenceIds and an allowed referenceMethod. Populate every required invariant category from an independent source, property, strongest available consumer, or independently derived observable result; never derive expected behavior from the implementation being checked.',
+  'Return the consumed underlying identifiers in evidenceIds and an allowed referenceMethod. evidenceIds name only this checker\'s own consumed test inputs, measured outputs, or authenticated observation artifacts: the frozen deliverable hash is already held by the controller\'s immutable-version binding and is never an evidenceId. Individual files belonging to the exact version being checked are also the subject being checked, not independent test evidence: exclude their paths, identifiers, and hashes from evidenceIds. Identify the independently constructed test data or measured observations actually consumed instead. A scratch-PASS confirmation must use evidenceIds disjoint from primaryScratchCoverage; do not rename, prefix, or relabel the same observation to make it appear independent. Populate every required invariant category from an independent source, property, strongest available consumer, or independently derived observable result; never derive expected behavior from the implementation being checked.',
   'Build an independent requirement-by-requirement expected-result basis before accepting the implementation. Exercise exact boundaries, adversarial and negative cases, and any declared ordering, optimization, maximality, or global-selection rule; a self-authored happy-path validator that merely restates the exact version being checked is not independent evidence.',
   'A claimed equivalence requires both forward soundness and reverse separation or injectivity for source classes that must remain distinguishable. One-way matching or a few equal examples cannot establish PASS when forbidden collapses, collisions, or false equivalences remain possible.',
   'For every ordered or temporal relation, execute witnesses before the first boundary, exactly at each boundary, between adjacent boundaries, and after the final boundary. A present endpoint or final-state check alone cannot establish the ordering.',
@@ -169,7 +174,7 @@ const CODEX_CHECKER_COMPACT_DOCTRINE = Object.freeze([
   'Exercise positive, negative, boundary, temporal-order, equivalence-separation, and adversarial composition cases wherever applicable; do not derive the expected result from the implementation being checked.',
   'Derive distinguishable input classes and before/at/between/after boundary witnesses from the request before inspecting the implementation; do not reuse the product\'s equivalence or ordering algorithm as the source of expected results.',
   'Bind PASS to one unique zero exit from unchanged controller-declared pre-mutation test inputs; newly created or modified harnesses never self-certify PASS. Bind a concrete product FAIL to one authenticated nonzero check. Setup, tool, dependency, or consumer unavailability is CHECK_INCONCLUSIVE or RUNTIME_FAILURE.',
-  'Return every named test outcome plus the underlying evidence IDs and independent reference method; keep large evidence in scratch and return bounded diagnostics only.',
+  'Return every named test outcome plus the underlying evidence IDs and independent reference method. evidenceIds identify only this checker\'s own test inputs, measured outputs, or authenticated observation artifacts; never include the frozen deliverable hash already held by the controller\'s immutable-version binding or identifiers, paths, or hashes of individual exact-version files. Exact-version files are the subject being checked; identify independently constructed test data or measured observations instead. A scratch-PASS confirmation must remain disjoint from primaryScratchCoverage without renaming an existing observation. Keep large evidence in scratch and return bounded diagnostics only.',
 ])
 const VERIFICATION_LIMITATION_CODES = new Set([
   'DEPENDENCY_UNAVAILABLE',
@@ -232,6 +237,37 @@ const CODEX_CONTROLLED_MODELS = Object.freeze([
   Object.freeze({ slug: 'gpt-5.6-sol', displayName: 'GPT-5.6-Sol', description: 'High-capability agentic coding model.', defaultEffort: 'low', priority: 1 }),
   Object.freeze({ slug: 'gpt-5.6-terra', displayName: 'GPT-5.6-Terra', description: 'Balanced agentic coding model for everyday work.', defaultEffort: 'medium', priority: 2 }),
   Object.freeze({ slug: 'gpt-5.6-luna', displayName: 'GPT-5.6-Luna', description: 'Fast and affordable agentic coding model.', defaultEffort: 'medium', priority: 3 }),
+])
+// This is intentionally a separate, source-controlled transport profile rather
+// than another Codex-controlled model. It is admitted only when an activation
+// explicitly selects its exact public provider slug. Each profile records the
+// actual native OpenRouter probe that established low-effort direct shell and
+// apply-patch use through the owned Responses relay. The ceilings are conservative
+// controller bounds, not a claim about the provider's advertised limits.
+const CODEX_BYOK_DIRECT_MODEL_PROFILES = Object.freeze([
+  Object.freeze({
+    slug: 'openai/gpt-5.6-luna', displayName: 'GPT-5.6 Luna (OpenRouter BYOK)',
+    description: 'Explicit BYOK model with a verified direct-tool transport.',
+    defaultEffort: 'low', supportedEfforts: Object.freeze(['low']), priority: 101,
+    contextWindow: 32_768, maxOutputTokens: 4_096,
+    inputModalities: Object.freeze(['text']),
+    evidence: Object.freeze({
+      kind: 'native-codex-direct-tool-probe', observedAt: '2026-09-08',
+      cliVersion: '0.148.0', additionalCliVersions: Object.freeze(['0.153.3']),
+      transport: 'OpenRouter Responses via local relay',
+    }),
+  }),
+  Object.freeze({
+    slug: 'z-ai/glm-5.3-flash', displayName: 'Z.ai GLM-5.3 Flash (BYOK)',
+    description: 'Explicit BYOK model with a verified direct-tool transport.',
+    defaultEffort: 'low', supportedEfforts: Object.freeze(['low']), priority: 100,
+    contextWindow: 32_768, maxOutputTokens: 4_096,
+    inputModalities: Object.freeze(['text']),
+    evidence: Object.freeze({
+      kind: 'native-codex-direct-tool-probe', observedAt: '2026-09-08',
+      cliVersion: '0.148.0', transport: 'OpenRouter Responses via local relay',
+    }),
+  }),
 ])
 // Count native execution events, not every event outside a small diagnostic
 // exclusion list. In particular, Codex reports startup warnings as `error`
@@ -1468,6 +1504,10 @@ const REQUIRED_SAFETY_CHANNELS = Object.freeze([
 ])
 const STREAMED_ROUTE_EVENT_COUNT = Symbol('streamedRouteEventCount')
 const MUTATION_ADMISSION_EVIDENCE = Symbol('mutationAdmissionEvidence')
+// Only the scheduler can associate its enriched live return with the exact
+// canonical result written before lease release. Model-authored fields cannot
+// opt into this association or cause arbitrary metadata to be discarded.
+const CANONICAL_DURABLE_CHECKER_RESULTS = new WeakMap()
 const TRANSPORT_QUARANTINE_POINTER = Symbol('transportQuarantinePointer')
 const STRUCTURED_FINAL_RESPONSE_SURVIVAL = Symbol('structuredFinalResponseSurvival')
 // Required-completion admission is controller topology authority, not a
@@ -2154,6 +2194,7 @@ function providerRuntimeIdentityHash(record) {
     requestSha256: record.request && record.request.sha256,
     targetIdentity: record.target,
     configSha256: boundary.configSha256,
+    providerApiBaseUrl: boundary.providerApiBaseUrl,
     payloadManifestSha256: boundary.payloadManifestSha256,
     profileSha256: boundary.enforcementProof && boundary.enforcementProof.profileSha256,
     privatePermissions: boundary.privatePermissions,
@@ -2168,6 +2209,9 @@ function providerRuntimeIdentityHash(record) {
       : null,
     safetyInspectionSha256: sha256Bytes(Buffer.from(JSON.stringify(record.safety), 'utf8')),
     supervisorAdapterSha256: boundary.supervisorAdapterSha256,
+    ...(record.darwinRuntimeClosure ? {
+      darwinRuntimeClosureSha256: sha256Bytes(Buffer.from(JSON.stringify(record.darwinRuntimeClosure), 'utf8')),
+    } : {}),
   }), 'utf8'))
 }
 
@@ -4282,6 +4326,15 @@ function safeEnvironmentFactory() {
         'activation-private Git/GitHub isolation paths and enforcement proof are required',
       )
     }
+    if (options.activationExpiresAt !== undefined) {
+      const expiresAt = Date.parse(options.activationExpiresAt)
+      if (typeof options.activationExpiresAt !== 'string' || !Number.isFinite(expiresAt)) {
+        throw new SupervisorIntegrationError('SAFE_GIT_ENV_INVALID', 'activation expiry binding is invalid')
+      }
+      if (expiresAt <= Date.now()) {
+        throw new SupervisorIntegrationError('ACTIVATION_EXPIRED', 'activation capability expired before local-only environment verification')
+      }
+    }
     const environment = safety.createSafeChildGitEnvironment(repoPath, baseEnvironment, options)
     const repository = safety.discoverRepository(repoPath)
     const inspection = safety.inspect(repository, options.expectedBranch, environment, {
@@ -5969,7 +6022,7 @@ function checkerResultBoundToCommandExecutionEvidence(output, parsed, record) {
         writableScratchRootPathHash: record.checkerScratchBoundary
           ? hashText(path.resolve(record.checkerScratchBoundary.writableScratchRoot)) : null,
         checks: Object.freeze([...boundPassAuthorities]
-          .sort((left, right) => left.checkId.localeCompare(right.checkId))),
+          .sort((left, right) => left.checkId < right.checkId ? -1 : left.checkId > right.checkId ? 1 : 0)),
       })
     : null
   const verificationAuthority = authorityBody
@@ -6138,6 +6191,7 @@ function createCodexJsonlAccumulator(context = {}) {
     verificationBoundsExceeded: false,
     verificationEvidenceCount: 0,
     verificationObservationHash: crypto.createHash('sha256'),
+    commandLifecycleStartHashes: new Map(),
     verificationHarnessStarts: new Map(),
     verificationScratchHarnessInvocationCount: 0,
     verificationScratchHarnessInvocations: new Map(),
@@ -6222,7 +6276,20 @@ function createCodexJsonlAccumulator(context = {}) {
       state.rawOutputHash.update(`${String(line).replace(/\r?\n$/u, '')}\n`)
       state.eventHash.update(state.eventCount === 0 ? '' : ',').update(serializedEvent)
       state.eventCount += 1
-      const commandFailure = !state.turnCompleted
+      // Only the owned native projection enables this channel, after it has
+      // verified and consumed the exact controller tool receipt. A marker in
+      // raw Codex JSONL cannot erase evidence of an attempted execution.
+      const deniedItem = event.item
+      const verifiedPreExecutionDenial = !state.turnCompleted &&
+        context.controllerAuthenticatedNativeProjection === true &&
+        event.type === 'item.failed' && deniedItem?.type === 'command_execution' &&
+        deniedItem.preExecutionDenied === true &&
+        deniedItem.controllerReceiptDisposition === 'NOT_STARTED' &&
+        deniedItem.status === 'failed' && deniedItem.exit_code === null &&
+        typeof deniedItem.id === 'string' && typeof deniedItem.command === 'string' &&
+        state.activeWorkItems.get(deniedItem.id) === 'command_execution' &&
+        state.commandLifecycleStartHashes.get(deniedItem.id) === hashText(deniedItem.command)
+      const commandFailure = !state.turnCompleted && !verifiedPreExecutionDenial
         ? codexCommandExecutionFailure(event, state.eventCount) : null
       if (commandFailure) {
         state.commandFailureHash
@@ -6239,6 +6306,10 @@ function createCodexJsonlAccumulator(context = {}) {
         commandLifecycleItem.id ? commandLifecycleItem.id : null
       if (commandLifecycleItem && commandLifecycleId && event.type === 'item.started' &&
           typeof commandLifecycleItem.command === 'string') {
+        if (!state.commandLifecycleStartHashes.has(commandLifecycleId) &&
+            state.commandLifecycleStartHashes.size < CODEX_TODO_ITEM_ID_MAX_COUNT) {
+          state.commandLifecycleStartHashes.set(commandLifecycleId, hashText(commandLifecycleItem.command))
+        }
         const harnessStart = checkerScratchHarnessAttestation(commandLifecycleItem.command, context)
         if (harnessStart) {
           state.verificationScratchHarnessInvocationCount += 1
@@ -6258,10 +6329,24 @@ function createCodexJsonlAccumulator(context = {}) {
       const startedHarness = commandLifecycleItem && commandLifecycleId &&
         /^item\.(?:completed|failed|cancelled)$/u.test(String(event.type || ''))
         ? state.verificationHarnessStarts.get(commandLifecycleId) || null : null
-      const commandObservation = !state.turnCompleted
+      if (verifiedPreExecutionDenial && startedHarness) {
+        const invocationKey = `${startedHarness.commandHash}:${startedHarness.programPathHash}`
+        const invocation = state.verificationScratchHarnessInvocations.get(invocationKey)
+        // The raw command already matched the started item above. The
+        // attestation's commandHash names its unwrapped harness invocation.
+        if (state.verificationScratchHarnessInvocationCount > 0 && invocation?.count > 0) {
+          state.verificationScratchHarnessInvocationCount -= 1
+          if (invocation.count === 1) state.verificationScratchHarnessInvocations.delete(invocationKey)
+          else state.verificationScratchHarnessInvocations.set(invocationKey, {
+            ...invocation, count: invocation.count - 1,
+          })
+        } else state.verificationBoundsExceeded = true
+      }
+      const commandObservation = !state.turnCompleted && !verifiedPreExecutionDenial
         ? codexCommandExecutionObservation(event, state.eventCount, context, startedHarness) : null
       if (commandLifecycleId && /^item\.(?:completed|failed|cancelled)$/u.test(String(event.type || ''))) {
         state.verificationHarnessStarts.delete(commandLifecycleId)
+        state.commandLifecycleStartHashes.delete(commandLifecycleId)
       }
       if (commandObservation && commandObservation.receipt) {
         if (state.verificationReceipts.length >= CODEX_CHECK_OBSERVATION_MAX_RECEIPTS) {
@@ -6997,29 +7082,54 @@ function materializeCodexProviderEnvelopeSchema(providerSchemaRoot) {
   return filename
 }
 
-function codexControlledModelCatalog(preRouteControlPlane = false) {
-  const commonReasoningLevels = [
+const CODEX_STANDARD_REASONING_LEVELS = Object.freeze([
     ['low', 'Fast responses with lighter reasoning'],
     ['medium', 'Balances speed and reasoning depth for everyday tasks'],
     ['high', 'Greater reasoning depth for complex problems'],
     ['xhigh', 'Extra high reasoning depth for complex problems'],
     ['max', 'Maximum reasoning depth for the hardest problems'],
-  ]
+])
+
+function codexDirectTransportModelProfile(model) {
+  const builtin = CODEX_CONTROLLED_MODELS.find(candidate => candidate.slug === model)
+  if (builtin) return Object.freeze({
+    ...builtin,
+    supportedEfforts: CODEX_STANDARD_REASONING_LEVELS.map(([effort]) => effort),
+    contextWindow: CODEX_MODEL_CONTEXT_WINDOW,
+    maxOutputTokens: CODEX_MODEL_MAX_OUTPUT_TOKENS,
+    inputModalities: Object.freeze(['text', 'image']),
+    builtin: true,
+  })
+  return CODEX_BYOK_DIRECT_MODEL_PROFILES.find(candidate => candidate.slug === model) || null
+}
+
+function codexCatalogProfilesForSelection(selectedProfile) {
+  // Retain the established built-in catalog byte shape for built-in launches.
+  // A BYOK launch receives only its exact source-controlled profile so a
+  // selected provider slug cannot be silently treated as a Codex model.
+  return selectedProfile && selectedProfile.builtin
+    ? CODEX_CONTROLLED_MODELS.map(model => codexDirectTransportModelProfile(model.slug))
+    : selectedProfile ? [selectedProfile] : CODEX_CONTROLLED_MODELS.map(model =>
+      codexDirectTransportModelProfile(model.slug))
+}
+
+function codexControlledModelCatalog(preRouteControlPlane = false, profiles = codexCatalogProfilesForSelection(null)) {
   return Object.freeze({
-    models: CODEX_CONTROLLED_MODELS.map(spec => Object.freeze({
+    models: profiles.map(spec => Object.freeze({
       slug: spec.slug,
       display_name: spec.displayName,
       description: spec.description,
       default_reasoning_level: spec.defaultEffort,
-      supported_reasoning_levels: commonReasoningLevels.map(([effort, description]) => ({
-        effort, description,
+      supported_reasoning_levels: spec.supportedEfforts.map(effort => ({
+        effort,
+        description: CODEX_STANDARD_REASONING_LEVELS.find(([candidate]) => candidate === effort)[1],
       })),
       shell_type: preRouteControlPlane ? 'disabled' : 'shell_command',
       visibility: 'list',
       supported_in_api: true,
       priority: spec.priority,
-      additional_speed_tiers: ['fast'],
-      service_tiers: [{ id: 'priority', name: 'Fast', description: '1.5x speed, increased usage' }],
+      additional_speed_tiers: spec.builtin ? ['fast'] : [],
+      service_tiers: spec.builtin ? [{ id: 'priority', name: 'Fast', description: '1.5x speed, increased usage' }] : [],
       default_service_tier: null,
       availability_nux: null,
       upgrade: null,
@@ -7038,14 +7148,14 @@ function codexControlledModelCatalog(preRouteControlPlane = false) {
       apply_patch_tool_type: preRouteControlPlane ? null : 'freeform',
       web_search_tool_type: 'text_and_image',
       truncation_policy: { mode: 'tokens', limit: 10_000 },
-      supports_image_detail_original: true,
-      context_window: CODEX_MODEL_CONTEXT_WINDOW,
-      max_context_window: CODEX_MODEL_CONTEXT_WINDOW,
+      supports_image_detail_original: Boolean(spec.builtin),
+      context_window: spec.contextWindow,
+      max_context_window: spec.contextWindow,
       auto_compact_token_limit: null,
       comp_hash: '3000',
       effective_context_window_percent: 95,
       experimental_supported_tools: [],
-      input_modalities: preRouteControlPlane ? ['text'] : ['text', 'image'],
+      input_modalities: preRouteControlPlane ? ['text'] : spec.inputModalities,
       supports_search_tool: false,
       use_responses_lite: true,
       node_repl_auto_review_required: false,
@@ -7075,11 +7185,18 @@ function materializeCodexControlledTransport(providerSchemaRoot, record) {
     )
   }
   const selectedModel = record && record.assignment && record.assignment.model
-  if (selectedModel != null &&
-      !CODEX_CONTROLLED_MODELS.some(model => model.slug === String(selectedModel))) {
+  const selectedProfile = selectedModel == null
+    ? null : codexDirectTransportModelProfile(String(selectedModel))
+  if (selectedModel != null && !selectedProfile) {
     throw new SupervisorIntegrationError(
       'PROVIDER_UNSUPPORTED',
       `Codex controlled transport has no pinned direct-tool metadata for ${selectedModel}`,
+    )
+  }
+  const assignedEffort = record && record.assignment && record.assignment.effort
+  if (assignedEffort && selectedProfile && !selectedProfile.supportedEfforts.includes(assignedEffort)) {
+    throw new SupervisorIntegrationError(
+      'INVALID_EFFORT', `Codex transport profile does not support ${assignedEffort} for ${selectedModel}`,
     )
   }
   const preRouteControlPlane = codexPreRouteControlPlane(record)
@@ -7090,7 +7207,10 @@ function materializeCodexControlledTransport(providerSchemaRoot, record) {
     {
       label: `direct-model-catalog-${preRouteControlPlane ? 'control' : 'work'}`,
       suffix: '.json',
-      bytes: Buffer.from(`${JSON.stringify(codexControlledModelCatalog(preRouteControlPlane), null, 2)}\n`, 'utf8'),
+      bytes: Buffer.from(`${JSON.stringify(codexControlledModelCatalog(
+        preRouteControlPlane,
+        codexCatalogProfilesForSelection(selectedProfile),
+      ), null, 2)}\n`, 'utf8'),
     },
     {
       label: `bounded-child-instructions-${preRouteControlPlane ? 'control' : 'work'}`,
@@ -7124,7 +7244,13 @@ function materializeCodexControlledTransport(providerSchemaRoot, record) {
     }
     return filename
   })
-  return Object.freeze({ modelCatalogPath: materialized[0], instructionsPath: materialized[1] })
+  return Object.freeze({
+    modelCatalogPath: materialized[0], instructionsPath: materialized[1],
+    modelLimits: Object.freeze({
+      contextWindow: selectedProfile ? selectedProfile.contextWindow : CODEX_MODEL_CONTEXT_WINDOW,
+      maxOutputTokens: selectedProfile ? selectedProfile.maxOutputTokens : CODEX_MODEL_MAX_OUTPUT_TOKENS,
+    }),
+  })
 }
 
 function codexQuotaProxyUsage(usage) {
@@ -7431,7 +7557,33 @@ function codexToolCallHighWater(records = [], continuationHash) {
   return ordinals.length
 }
 
+function codexQuotaProxyModelLimits(value) {
+  const limits = value === undefined || value === null
+    ? { contextWindow: CODEX_MODEL_CONTEXT_WINDOW, maxOutputTokens: CODEX_MODEL_MAX_OUTPUT_TOKENS }
+    : value
+  if (!limits || typeof limits !== 'object' || Array.isArray(limits) ||
+      !Number.isSafeInteger(limits.contextWindow) || !Number.isSafeInteger(limits.maxOutputTokens) ||
+      limits.contextWindow <= 0 || limits.maxOutputTokens <= 0 ||
+      limits.maxOutputTokens > limits.contextWindow) {
+    throw new SupervisorIntegrationError(
+      'PROVIDER_UNSUPPORTED',
+      'Codex cumulative quota proxy requires finite model context and output ceilings',
+    )
+  }
+  return Object.freeze({
+    contextWindow: limits.contextWindow,
+    maxOutputTokens: limits.maxOutputTokens,
+  })
+}
+
 async function startCodexCumulativeQuotaProxy(options = {}) {
+  if (options.upstreamBaseUrl != null) {
+    let upstream
+    try { upstream = new URL(options.upstreamBaseUrl) } catch {}
+    if (!upstream || !['http:', 'https:'].includes(upstream.protocol) || upstream.username || upstream.password || upstream.hash || upstream.search) {
+      throw new SupervisorIntegrationError('PROVIDER_UNSUPPORTED', 'Codex provider base URL must be an HTTP(S) URL without credentials, query, or fragment')
+    }
+  }
   const tokenLimit = options.tokenLimit
   if (!Number.isSafeInteger(tokenLimit) || tokenLimit <= 0) {
     throw new SupervisorIntegrationError(
@@ -7439,6 +7591,7 @@ async function startCodexCumulativeQuotaProxy(options = {}) {
       'Codex cumulative quota proxy requires a positive token limit',
     )
   }
+  const modelLimits = codexQuotaProxyModelLimits(options.modelLimits)
   const accessToken = crypto.randomBytes(24).toString('hex')
   const routePrefix = `/${accessToken}/v1`
   const cumulativeUsage = {
@@ -7561,14 +7714,14 @@ async function startCodexCumulativeQuotaProxy(options = {}) {
       latestInputBound = inputBound
       const alreadyUsed = billableModelTokens(cumulativeUsage)
       const activationOutputAllowance = tokenLimit - alreadyUsed - inputBound.maximumInputTokens
-      const contextOutputAllowance = CODEX_MODEL_CONTEXT_WINDOW - inputBound.maximumInputTokens
+      const contextOutputAllowance = modelLimits.contextWindow - inputBound.maximumInputTokens
       // Subscription-authenticated Codex uses a different backend contract
       // from the public Responses API: it rejects max_output_tokens. With no
       // enforceable smaller wire ceiling, admission must reserve the model's
       // full response maximum, including under an explicit finite budget.
       const chatgptBackend = Boolean(request.headers['chatgpt-account-id'])
-      const outputAllowance = chatgptBackend ? CODEX_MODEL_MAX_OUTPUT_TOKENS : Math.min(
-        CODEX_MODEL_MAX_OUTPUT_TOKENS, activationOutputAllowance, contextOutputAllowance,
+      const outputAllowance = chatgptBackend ? modelLimits.maxOutputTokens : Math.min(
+        modelLimits.maxOutputTokens, activationOutputAllowance, contextOutputAllowance,
       )
       if (!Number.isSafeInteger(outputAllowance) || outputAllowance <= 0 ||
           contextOutputAllowance <= 0 || activationOutputAllowance < outputAllowance) {
@@ -7867,7 +8020,49 @@ async function startCodexCumulativeQuotaProxy(options = {}) {
   })
 }
 
-function codexCompactCanonicalOutputContract(record, canonicalSchemaText) {
+// Native harnesses return the canonical object directly; only Codex wraps it.
+// Capability probes deliberately use other schemas and must not get role templates.
+function nativeCompactCanonicalOutputContract(record, schema, options = {}) {
+  if (!record || !Object.prototype.hasOwnProperty.call(CANONICAL_PROVIDER_ROLES, record.logicalRole)) return ''
+  const name = record.logicalRole === 'route-analyst' ? 'route-recommendation'
+    : codexPreRouteControlPlane(record) ? 'route-decision'
+      : CHECKER_ROLES.has(record.logicalRole) ? 'outcome' : 'role-report'
+  if (!schema || schema.$id !== `https://autoprompt.local/schemas/v2/${name}.schema.json`) return ''
+  return [
+    codexCompactCanonicalOutputContract(record, JSON.stringify(schema), options)
+      .replaceAll('canonicalJson must decode to', 'the final JSON object must be'),
+    'The schema describes the result; it is not the result. Do not copy schema metadata such as $schema, $id, $defs, or properties into your output.',
+  ].join('\n')
+}
+
+function canonicalReferenceMethodGuidance(record) {
+  const required = record.dispatch?.fetchedEvidence?.requiredInvariantCategories ||
+    requiredReferenceInvariantCategories(record.dispatch?.fetchedEvidence?.verificationObligations || [], record.canonicalAssignment?.checks || [])
+  return ` payload.referenceMethod is a structured object, never a string: {methodClass,source,procedure,expectedOutputDerivedFromSubjectCode:false,subjectLogicReimplemented:false,positiveInvariants:[],negativeInvariants:[],boundaryInvariants:[]}. Allowed methodClass values: ${JSON.stringify([...INDEPENDENT_REFERENCE_METHOD_CLASSES])}. ` +
+    `source is a nonempty string of at most 512 characters; procedure is a nonempty string of at most 2048 characters. Each invariant array contains unique nonempty strings of at most 512 characters each, with at least one invariant overall. Required nonempty invariant categories for this assignment: ${JSON.stringify(required)}. ` +
+    'Describe the actual independent source, procedure, and exercised invariants. Set the two independence flags to false only when expected outputs were not derived from the subject code and its logic was not reimplemented. If you cannot establish the required independence, return CHECK_INCONCLUSIVE and explain the limitation instead of claiming PASS.'
+}
+
+function canonicalOutcomeDescriptionGuidance(canonicalSchemaText) {
+  let schema
+  try { schema = JSON.parse(canonicalSchemaText) } catch { return '' }
+  const pairs = (schema.allOf || []).flatMap(clause => clause.oneOf || [])
+    .filter(branch => typeof branch.properties?.code?.const === 'string' &&
+      typeof branch.properties?.description?.const === 'string')
+    .map(branch => ({ code: branch.properties.code.const, description: branch.properties.description.const }))
+  return pairs.length ? ` For each outcome code, description must be the exact corresponding literal: ${JSON.stringify(pairs)}. Put task-specific explanations in cause.reason or the assigned payload fields, not description.` : ''
+}
+
+function canonicalOutcomeCauseGuidance(canonicalSchemaText) {
+  let schema
+  try { schema = JSON.parse(canonicalSchemaText) } catch { return '' }
+  const cause = schema && schema.properties && schema.properties.cause
+  return cause && typeof cause === 'object' && !Array.isArray(cause)
+    ? `\ncause must match this exact field schema: ${JSON.stringify(cause)}\n`
+    : ''
+}
+
+function codexCompactCanonicalOutputContract(record, canonicalSchemaText, options = {}) {
   const schemaHash = hashText(canonicalSchemaText)
   if (record.logicalRole === 'route-analyst') {
     let schema
@@ -7897,6 +8092,7 @@ function codexCompactCanonicalOutputContract(record, canonicalSchemaText) {
       `Canonical output contract (sha256=${schemaHash}; exact runtime JSON validation applies): canonicalJson must decode to one route recommendation with exactly these required top-level keys: ${JSON.stringify(schema.required)}.`,
       'Use schemaVersion="2.0.0", preWorkResult="CONTINUE"|"NEEDS_USER", recommendedRoute="DIRECT"|"LIGHT"|"ROADMAP"|null, and confidence="high"|"medium"|"low".',
       `These keys are string arrays (non-empty where the exact schema requires it): ${JSON.stringify(stringArrays)}. evidenceIndex is an array of {eventId,reason,byteLength,sha256,truncated}. Emit no extra top-level keys.`,
+      `These string arrays must each contain at least one truthful explanation, including tradeoffs for routes not recommended: ${JSON.stringify(stringArrays.filter(name => schema.properties?.[name]?.$ref === '#/$defs/nonEmptyStrings'))}. Do not use an empty array for them.`,
       `Canonical verificationObligations item schema: ${JSON.stringify(verificationObligation)}`,
       `Canonical routeFactProposal schema: ${JSON.stringify(proposalContract)}`,
     ].join('\n')
@@ -7911,20 +8107,27 @@ function codexCompactCanonicalOutputContract(record, canonicalSchemaText) {
     currentVersionHash: record.candidateHash || null,
     findingIds: canonicalRoleFindingIds(record.canonicalAssignment, record.assignment, record),
   })
-  const prefix = `Canonical output contract (sha256=${schemaHash}; exact runtime JSON validation applies)`
+  const prefix = `Canonical output contract (sha256=${schemaHash}; exact runtime JSON validation applies). The assignment.resultLocation identifies a controller-owned receipt, not a path to create in the project. Return the report through the final response only; the controller persists it. Do not write a duplicate report file`
   if (codexPreRouteControlPlane(record)) {
     return `${prefix}: canonicalJson must decode to a route decision. Always return ` +
       '{schemaVersion:"2.0.0",status:"DECIDED"|"WAITING_USER",route:"DIRECT"|"LIGHT"|"ROADMAP"|null,routeSource:"automatic"|"explicit_control",requestEnvelopeHash,recommendationHash,decidedAt}. ' +
       'WAITING_USER also returns userInputNeeded. DECIDED also returns pathSelection, requestedResult, successChecklist, plannedChecks, verificationObligations, existingTests, likelyAreas, risks, missingInformation, usefulWorkerCount, workerOwnershipReason, independentCheckingPlan, chosenRouteReason, rejectedRouteReasons, analystDisagreement, routeChangeTrigger, decisionClassifications, normalizedRouteFacts, routeFactsFingerprint, classifierFingerprint, acceptance, requiredCapabilities, gateSelection, mutableResourceOwnership, candidateFreeze, assurancePreconditions, topology, and capturedDomainContracts. Copy all controller hashes and facts exactly; emit no extra keys.'
   }
   if (CHECKER_ROLES.has(record.logicalRole)) {
+    const omitControllerOwnedDescription = options?.omitControllerOwnedDescription === true
+    const outcomeShape = omitControllerOwnedDescription
+      ? '{schemaVersion:"2.0.0",code:"PASS"|"FAIL"|"CHECK_INCONCLUSIVE"|"RUNTIME_FAILURE",stateClass:"terminal"|"intermediate",runId,requestEnvelopeHash,currentVersionHash,completedResults:[],nextReadyWork:[],cause:{event,reason,unblockPath},payloadSchemaId,payload,recordedAt}'
+      : '{schemaVersion:"2.0.0",code:"PASS"|"FAIL"|"CHECK_INCONCLUSIVE"|"RUNTIME_FAILURE",description,stateClass:"terminal"|"intermediate",runId,requestEnvelopeHash,currentVersionHash,completedResults:[],nextReadyWork:[],cause:{event,reason,unblockPath},payloadSchemaId,payload,recordedAt}'
+    const descriptionGuidance = omitControllerOwnedDescription ? '' : canonicalOutcomeDescriptionGuidance(canonicalSchemaText)
     return `${prefix}; controller binding=${JSON.stringify(binding)}: canonicalJson must decode to ` +
-      '{schemaVersion:"2.0.0",code:"PASS"|"FAIL"|"CHECK_INCONCLUSIVE"|"RUNTIME_FAILURE",description,stateClass:"terminal"|"intermediate",runId,requestEnvelopeHash,currentVersionHash,completedResults:[],nextReadyWork:[],cause:{event,reason,unblockPath},payloadSchemaId,payload,recordedAt}. ' +
-      'payload must contain the evidenceIds, referenceMethod, testOutcomes, captured-domain outcomes, and limitation details required by the assignment. Copy controller-bound values exactly and emit no extra top-level keys.'
+      `${outcomeShape}. CHECK_INCONCLUSIVE always uses stateClass:"intermediate"; PASS, FAIL, and RUNTIME_FAILURE always use stateClass:"terminal". ` +
+      'payload must contain the evidenceIds, referenceMethod, testOutcomes, captured-domain outcomes, and limitation details required by the assignment. Copy controller-bound values exactly and emit no extra top-level keys.' + descriptionGuidance + canonicalOutcomeCauseGuidance(canonicalSchemaText) + canonicalReferenceMethodGuidance(record) +
+      ` payload.testOutcomes must contain exactly one {checkId,status:"PASS"|"FAIL"} per exact assigned check ID, with no renamed or invented IDs. Assigned check IDs: ${JSON.stringify(record.canonicalAssignment?.checks || [])}. Copy the IDs literally. The controller adds receipt identities; do not invent fingerprint, observationId, or commandHash. Return payload.evidenceIds and the assignment-required payload.referenceMethod as well; payload.checks is not a substitute for payload.testOutcomes.`
   }
   return `${prefix}; controller binding=${JSON.stringify(binding)}; findingIds must match ^AP-[A-Z]+-(?:[0-9]{3}|[0-9]{78})$: canonicalJson must decode to ` +
     '{schemaVersion:"2.0.0",reportType:"result",reportId,runId,assignmentId,logicalRoleId,physicalRoleId,requestEnvelopeHash,findingIds,startedAt,endedAt,filesChanged,resourcesChanged,behaviorChanged,commands,successItems,remainingConcerns,allAssignedItemsPass,requestedTransition:{event:"WORK_ITEM_VERIFIED",reason,invalidateEvidenceIds}}. ' +
-    'Each resource is {kind,identity,access,expectedPreimageHash,owner,ownershipMode}; each command is {command,exitCode,result}; each success item is {id,status:"pass"|"fail"|"blocked",evidenceIds}. Copy controller-bound values exactly and emit no extra keys.'
+    'filesChanged, behaviorChanged, remainingConcerns, findingIds, and each evidenceIds are arrays of strings (behaviorChanged is an array of descriptions, never a boolean). filesChanged names only normalized paths relative to the repository root: do not use ./ or ../ prefixes, absolute paths, or private tool paths. resourcesChanged, commands, and successItems are arrays of objects. allAssignedItemsPass is a boolean. startedAt and endedAt are ISO timestamps. ' +
+    'Each resource is {kind,identity,access,expectedPreimageHash,owner,ownershipMode}; expectedPreimageHash must be a lowercase 64-hex SHA-256 string or the JSON literal null, never the quoted string "null". Each command is {command,exitCode:integer,result:nonempty string}; each success item is {id,status:"pass"|"fail"|"blocked",evidenceIds:[]}. A command result is a nonempty, truthful execution summary, not necessarily stdout. For a successful silent command, use "Exited 0 with no stdout/stderr" rather than an empty string. Copy controller-bound values exactly and emit no extra keys.'
 }
 
 function decodeCodexProviderEnvelope(output) {
@@ -8105,6 +8308,7 @@ function codexPrivateWorkspaceProjection(record, canonicalTargetPath, workingDir
     'For every read, write, command, or path named at or below canonicalTargetRoot, use the identical relative path below writableWorkspaceRoot instead.',
     'Do not attempt to write canonicalTargetRoot directly. Make all requested mutations in writableWorkspaceRoot.',
     'Report filesChanged as normalized paths relative to canonicalTargetRoot (the reportPath values), never as private absolute paths.',
+    'Every physical content or permission-mode change counts as a file change. Include chmod and mode-only changes even when Git status hides them because core.filemode=false.',
   ]
 }
 
@@ -8227,7 +8431,7 @@ function codexCheckerScratchProjection(record, canonicalTargetPath, workingDirec
     `For each checker harness version, write a regular program under ${JSON.stringify(writableScratchRoot)} before executing it.`,
     `Invoke that sealed version once as either <python3|node|ruby|perl|sh> <absolute harness path under ${JSON.stringify(writableScratchRoot)}> ${JSON.stringify(frozenCandidateRoot)} or <absolute executable harness path under that scratch root> ${JSON.stringify(frozenCandidateRoot)}.`,
     'Correct a setup failure in the same turn under a fresh filename while preserving prior diagnostics. Never overwrite or rerun an executed harness or relabel a product failure as setup; a later passing harness does not erase an earlier product failure.',
-    'Use no interpreter flags. Emit one direct JSON summary no larger than 4 KiB. Do not use a heredoc, redirection, a pipeline, command substitution, an environment assignment, a shell wrapper, or command glue such as && or ;.',
+    'Use no interpreter flags. For PASS, emit one direct JSON summary no larger than 4 KiB with a positive integer passCount and failureCount:0. On any assertion failure, increment failureCount, preserve the counted summary, and exit nonzero. Do not use a heredoc, redirection, a pipeline, command substitution, an environment assignment, a shell wrapper, or command glue such as && or ;.',
     'Scratch files are neither exact-version changes nor deliverables.',
   ]
 }
@@ -8242,6 +8446,8 @@ class CodexExecAdapter {
       throw new SupervisorIntegrationError('PROVIDER_UNSUPPORTED', 'Codex exec adapter requires target, profile, and output-schema resolver')
     }
     this.runner = options.runner
+    this.upstreamBaseUrlBound = Object.hasOwn(options, 'upstreamBaseUrl')
+    this.upstreamBaseUrl = options.upstreamBaseUrl ?? null
     this.executable = options.executable || 'codex'
     this.executableArgs = Array.isArray(options.executableArgs) ? [...options.executableArgs] : []
     this.environmentOverlay = options.environmentOverlay && typeof options.environmentOverlay === 'object'
@@ -8436,6 +8642,7 @@ class CodexExecAdapter {
           'canonicalJson must be a JSON string which decodes to the complete canonical output object.',
           'The decoded object remains subject to all canonical AutoPrompt validation after transport decoding.',
           codexCompactCanonicalOutputContract(record, canonicalSchemaText),
+          'After constructing the canonical result, JSON.stringify it into canonicalJson and return {"canonicalJson":"<escaped complete JSON>"}. Do not return the decoded result as the top-level object.',
         ]
       : []
     const workspaceProjection = codexPrivateWorkspaceProjection(
@@ -9251,8 +9458,17 @@ class CodexExecAdapter {
           'controller-bounded Codex transport lacks its complete durable provider accounting hooks',
         )
       }
+      const providerApiBaseUrl = ({ ...record.environment, ...this.environmentOverlay }).OPENAI_BASE_URL || null
+      if (this.upstreamBaseUrlBound && providerApiBaseUrl !== this.upstreamBaseUrl) {
+        throw new SupervisorIntegrationError('PROVIDER_CONNECTION_CHANGED', 'Codex API endpoint changed after activation')
+      }
       cumulativeQuotaProxy = await this.cumulativeQuotaProxyFactory({
+        // Preserve native Codex's explicitly configured API endpoint when the
+        // controller inserts its accounting relay. Never silently route BYOK
+        // credentials to the default OpenAI host.
+        upstreamBaseUrl: providerApiBaseUrl,
         tokenLimit: codexChildSpendLimit(record),
+        modelLimits: controlledTransport.modelLimits,
         onUsage: (cumulative, providerEvidence) => accountCumulativeUsage(
           cumulative,
           providerEvidence,
@@ -9627,33 +9843,72 @@ class OwnedCodexProxyRunner {
     // a fresh owned-process reservation.  Key transport files by both so a
     // crash continuation cannot collide with the prior generation's durable
     // proxy directory.
-    const sessionRoot = path.join(this.controlRoot, hashText(`${spec.sessionId}\0${spec.reservationId}`))
+    // AF_UNIX pathname sockets have a small kernel limit.  A 128-bit opaque
+    // reservation key remains collision-resistant while leaving room for the
+    // controller's private root and the relay socket filename.
+    const sessionRoot = path.join(this.controlRoot, hashText(`${spec.sessionId}\0${spec.reservationId}`).slice(0, 32))
     fs.mkdirSync(sessionRoot, { recursive: false, mode: 0o700 })
+    let launchResource = null
+    if (spec.prepareLaunch !== undefined) {
+      if (typeof spec.prepareLaunch !== 'function') throw new SupervisorIntegrationError('CODEX_PROXY_REQUEST_INVALID', 'owned launch preparation must be a function')
+      launchResource = await spec.prepareLaunch({ sessionRoot, sessionId: spec.sessionId, reservationId: spec.reservationId })
+      if (!launchResource || typeof launchResource !== 'object' || Array.isArray(launchResource) ||
+          !launchResource.relayStdin || typeof launchResource.relayStdin.socketPath !== 'string' ||
+          !path.isAbsolute(launchResource.relayStdin.socketPath) || launchResource.relayStdin.socketPath.includes('\0') ||
+          (launchResource.cleanup !== undefined && typeof launchResource.cleanup !== 'function')) {
+        try { await launchResource?.cleanup?.() } catch {}
+        throw new SupervisorIntegrationError('CODEX_PROXY_REQUEST_INVALID', 'owned launch preparation returned an invalid relay resource')
+      }
+      const relayPath = launchResource.relayStdin.socketPath
+      let relayStat, realRelayPath
+      try { relayStat = fs.lstatSync(relayPath); realRelayPath = fs.realpathSync.native(relayPath) } catch { relayStat = null }
+      // A long Linux socket path may be addressed through its controller-held
+      // directory FD. Check the resolved socket remains inside this session.
+      const relativeRelayPath = realRelayPath ? path.relative(fs.realpathSync.native(sessionRoot), realRelayPath) : '..'
+      if (!relayStat || !relayStat.isSocket() || relativeRelayPath === '' || relativeRelayPath === '..' || relativeRelayPath.startsWith(`..${path.sep}`) || path.isAbsolute(relativeRelayPath) ||
+          (process.getuid && relayStat.uid !== process.getuid()) || (relayStat.mode & 0o077)) {
+        try { await launchResource.cleanup?.() } catch {}
+        throw new SupervisorIntegrationError('CODEX_PROXY_REQUEST_INVALID', 'owned relay socket is not a private session capability')
+      }
+      if (launchResource.launch !== undefined && (!launchResource.launch || typeof launchResource.launch !== 'object' ||
+          typeof launchResource.launch.executable !== 'string' || !Array.isArray(launchResource.launch.argv) ||
+          launchResource.launch.argv.some(value => typeof value !== 'string') || typeof launchResource.launch.cwd !== 'string' ||
+          !launchResource.launch.env || typeof launchResource.launch.env !== 'object')) {
+        try { await launchResource.cleanup?.() } catch {}
+        throw new SupervisorIntegrationError('CODEX_PROXY_REQUEST_INVALID', 'owned launch preparation returned an invalid child launch')
+      }
+    }
+    const childSpec = launchResource?.launch || spec
     const requestPath = path.join(sessionRoot, 'request.json')
     const stdoutPath = path.join(sessionRoot, 'stdout.jsonl')
     const stderrPath = path.join(sessionRoot, 'stderr.log')
     const statusPath = path.join(sessionRoot, 'status.json')
-    const argvHash = hashText(JSON.stringify({ executable: spec.executable, argv: spec.argv }))
+    const argvHash = hashText(JSON.stringify({ executable: childSpec.executable, argv: childSpec.argv }))
     const sequence = ++this.controlSequence
-    fs.writeFileSync(requestPath, `${JSON.stringify({
+    try { fs.writeFileSync(requestPath, `${JSON.stringify({
       schemaVersion: 2,
       activationId: this.activationId,
       generationId: this.generationId,
       sequence,
-      executable: spec.executable,
-      argv: spec.argv,
+      executable: childSpec.executable,
+      argv: childSpec.argv,
       argvHash,
-      cwd: spec.cwd,
-      stdin: spec.stdin,
+      cwd: childSpec.cwd,
+      stdin: childSpec.stdin || '',
+      relayStdin: launchResource?.relayStdin || spec.relayStdin,
       stdoutPath,
       stderrPath,
       statusPath,
-    })}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
-    const owned = await this.processOwner.launch({
+    })}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 }) } catch (error) {
+      try { await launchResource?.cleanup?.() } catch {}
+      throw error
+    }
+    let owned
+    try { owned = await this.processOwner.launch({
       executable: process.execPath,
       argv: [__filename, '--owned-codex-proxy', requestPath],
-      cwd: spec.cwd,
-      env: spec.env,
+      cwd: childSpec.cwd,
+      env: childSpec.env,
       shell: false,
       stdin: 'ignore',
       stdout: 'ignore',
@@ -9662,7 +9917,10 @@ class OwnedCodexProxyRunner {
       reservationId: spec.reservationId,
       targetKey: this.targetKey,
       forWork: false,
-    })
+    }) } catch (error) {
+      try { await launchResource?.cleanup?.() } catch {}
+      throw error
+    }
     const session = { ...owned, sessionRoot, statusPath, stopped: false }
     this.sessions.set(spec.sessionId, session)
     let stdoutTail = Buffer.alloc(0)
@@ -9673,14 +9931,30 @@ class OwnedCodexProxyRunner {
     const stdoutDecoder = new StringDecoder('utf8')
     let status = null
     let terminalRecord = null
-    const emitCompleteStdoutLines = () => {
+    let missingStatusSince = null
+    let stdoutLinesSinceYield = 0
+    const yieldStdoutControl = async () => {
+      stdoutLinesSinceYield += 1
+      if (stdoutLinesSinceYield < 1) return
+      stdoutLinesSinceYield = 0
+      // Transcript persistence is intentionally synchronous and can be
+      // expensive. Give activation expiry and OS-signal handlers a bounded
+      // scheduling point while retaining the exact event order.
+      await new Promise(resolve => setImmediate(resolve))
+    }
+    const emitCompleteStdoutLines = async () => {
       const lines = partial.split(/\r?\n/)
       partial = lines.pop()
       for (const line of lines) {
+        if (session.stopped) {
+          partial = ''
+          return
+        }
         if (line && typeof spec.onStdoutLine === 'function') spec.onStdoutLine(line)
+        await yieldStdoutControl()
       }
     }
-    const readAvailableStdout = () => {
+    const readAvailableStdout = async () => {
       if (!fs.existsSync(stdoutPath)) return
       if (stdoutDescriptor === undefined) stdoutDescriptor = fs.openSync(stdoutPath, 'r')
       const size = fs.fstatSync(stdoutDescriptor).size
@@ -9702,7 +9976,8 @@ class OwnedCodexProxyRunner {
         )
         if (typeof spec.onTransportActivity === 'function') spec.onTransportActivity()
         partial += stdoutDecoder.write(received)
-        emitCompleteStdoutLines()
+        await emitCompleteStdoutLines()
+        if (session.stopped) break
         if (Buffer.byteLength(partial, 'utf8') > CODEX_JSONL_PARTIAL_MAX_BYTES) {
           throw new SupervisorIntegrationError(
             'CODEX_EVENT_STREAM_INVALID',
@@ -9714,15 +9989,36 @@ class OwnedCodexProxyRunner {
     }
     try {
       while (!status && !session.stopped) {
-        readAvailableStdout()
+        await readAvailableStdout()
         if (fs.existsSync(statusPath)) status = readRegularJson(statusPath, 'owned Codex proxy status').parsed
+        if (!status && typeof this.processOwner.adapter?.listOwned === 'function') {
+          const live = await this.processOwner.adapter.listOwned(session.groupIdentity)
+          // listOwned is asynchronous. An abort can mark this session stopped
+          // while that ownership query is in flight; cancellation owns the
+          // terminal result in that case, so do not misclassify its expected
+          // empty group as a missing proxy status.
+          if (!session.stopped && Array.isArray(live) && live.length === 0) {
+            // The proxy publishes status after the child group's close event.
+            // A group scan can observe the final exit just before its atomic
+            // status write is visible, so require a short second observation
+            // before treating the missing record as a crash.
+            missingStatusSince ||= Date.now()
+            if (Date.now() - missingStatusSince >= Math.max(100, this.pollMs * 5)) {
+              if (fs.existsSync(statusPath)) status = readRegularJson(statusPath, 'owned Codex proxy status').parsed
+              if (!status) throw new SupervisorIntegrationError(
+                'CODEX_PROXY_STATUS_INVALID',
+                'owned Codex proxy exited before writing its durable terminal status',
+              )
+            }
+          } else missingStatusSince = null
+        }
         if (!status && !session.stopped) await new Promise(resolve => setTimeout(resolve, this.pollMs))
       }
       // Status is durable only after the proxy closes and fsyncs its output
       // handles, but it can become visible between this poller's size snapshot
       // and status read. Always perform one final read against that closed file
       // before freezing the transcript projection.
-      readAvailableStdout()
+      await readAvailableStdout()
       partial += stdoutDecoder.end()
       if (Buffer.byteLength(partial, 'utf8') > CODEX_JSONL_PARTIAL_MAX_BYTES) {
         throw new SupervisorIntegrationError(
@@ -9731,7 +10027,7 @@ class OwnedCodexProxyRunner {
           { maximumBytes: CODEX_JSONL_PARTIAL_MAX_BYTES },
         )
       }
-      if (partial) {
+      if (partial && !session.stopped) {
         if (typeof spec.onStdoutLine === 'function') spec.onStdoutLine(partial)
       }
       if (!session.stopped) {
@@ -9782,6 +10078,7 @@ class OwnedCodexProxyRunner {
     } finally {
       if (stdoutDescriptor !== undefined) fs.closeSync(stdoutDescriptor)
       this.sessions.delete(spec.sessionId)
+      await launchResource?.cleanup?.()
     }
   }
 
@@ -9810,7 +10107,7 @@ class OwnedCodexProxyRunner {
   }
 }
 
-function runOwnedCodexProxy(requestPath) {
+async function runOwnedCodexProxy(requestPath) {
   const request = readRegularJson(requestPath, 'owned Codex proxy request').parsed
   if (request.schemaVersion !== 2 || typeof request.activationId !== 'string' || !request.activationId ||
       !Number.isSafeInteger(request.generationId) || request.generationId < 1 ||
@@ -9818,6 +10115,8 @@ function runOwnedCodexProxy(requestPath) {
       typeof request.executable !== 'string' ||
       !Array.isArray(request.argv) || request.argv.some(value => typeof value !== 'string') ||
       typeof request.cwd !== 'string' || typeof request.stdin !== 'string' ||
+      (request.relayStdin !== undefined && (!request.relayStdin || typeof request.relayStdin !== 'object' || Array.isArray(request.relayStdin) ||
+        Object.keys(request.relayStdin).length !== 1 || typeof request.relayStdin.socketPath !== 'string' || !path.isAbsolute(request.relayStdin.socketPath) || request.relayStdin.socketPath.includes('\0'))) ||
       !/^[a-f0-9]{64}$/.test(request.argvHash || '')) {
     throw new SupervisorIntegrationError('CODEX_PROXY_REQUEST_INVALID', 'owned Codex proxy request is invalid')
   }
@@ -9828,12 +10127,26 @@ function runOwnedCodexProxy(requestPath) {
   }
   const stdoutHandle = fs.openSync(request.stdoutPath, 'wx', 0o600)
   const stderrHandle = fs.openSync(request.stderrPath, 'wx', 0o600)
+  // The relay path is a private controller capability, never an upstream API
+  // credential. Connect it only inside the owned proxy and pass its already
+  // opened descriptor to bwrap as stdin; the native child receives no path.
+  let relay = null
+  try { relay = request.relayStdin ? await new Promise((resolve, reject) => {
+    const socket = net.createConnection(request.relayStdin.socketPath)
+    const timeout = setTimeout(() => { socket.destroy(); reject(new SupervisorIntegrationError('CODEX_PROXY_RELAY_UNAVAILABLE', 'owned relay connection timed out')) }, 10000)
+    socket.once('connect', () => { clearTimeout(timeout); resolve(socket) })
+    socket.once('error', error => { clearTimeout(timeout); reject(new SupervisorIntegrationError('CODEX_PROXY_RELAY_UNAVAILABLE', `owned relay connection failed: ${error.message}`)) })
+  }) : null } catch (error) {
+    for (const handle of [stdoutHandle, stderrHandle]) { try { fs.closeSync(handle) } catch {} }
+    fs.writeFileSync(request.statusPath, `${JSON.stringify({ schemaVersion: 2, activationId: request.activationId, generationId: request.generationId, sequence: request.sequence, argvHash: request.argvHash, codexPid: process.pid, code: 1, signal: null, error: error.message })}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
+    throw error
+  }
   const child = childProcess.spawn(request.executable, request.argv, {
     cwd: request.cwd,
     env: process.env,
     shell: false,
     windowsHide: true,
-    stdio: ['pipe', 'pipe', 'pipe'],
+    stdio: [relay || 'pipe', 'pipe', 'pipe'],
   })
   child.stdout.on('data', bytes => fs.writeSync(stdoutHandle, bytes))
   child.stderr.on('data', bytes => fs.writeSync(stderrHandle, bytes))
@@ -9842,6 +10155,7 @@ function runOwnedCodexProxy(requestPath) {
   const finish = (code, signal, error = null) => {
     if (settled) return
     settled = true
+    relay?.destroy()
     for (const handle of [stdoutHandle, stderrHandle]) {
       try { fs.fsyncSync(handle) } catch {}
       try { fs.closeSync(handle) } catch {}
@@ -9858,7 +10172,8 @@ function runOwnedCodexProxy(requestPath) {
       error: error ? error.message : null,
     })}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
   }
-  child.stdin.on('error', error => {
+  const stdin = relay || child.stdin
+  stdin.on('error', error => {
     if (!['EPIPE', 'ERR_STREAM_DESTROYED'].includes(error && error.code)) {
       childError = error
       try { child.kill() } catch {}
@@ -9870,7 +10185,7 @@ function runOwnedCodexProxy(requestPath) {
   // provider's terminal usage line. `close` is the process-wide stdio drain
   // boundary; only then close/fsync the files and expose durable status.
   child.once('close', (code, signal) => finish(code, signal, childError))
-  child.stdin.end(request.stdin)
+  if (!relay) child.stdin.end(request.stdin)
 }
 
 async function withTimeout(
@@ -10897,6 +11212,9 @@ class CodexSupervisorRuntime {
     this.record = null
     this.lease = null
     this.scheduler = null
+    this.pendingLaunchSettlements = new Set()
+    this.pendingMutationLaunchSettlements = new Set()
+    this.cancellationDrainAuthorization = null
     this.finalizer = null
     this.requestPointer = null
     this.analystStarted = false
@@ -11426,6 +11744,7 @@ class CodexSupervisorRuntime {
           this._restorePendingScheduler(this.options.resumeState.schedulerState)
           this.analystStarted = false
           const analysis = await this._runRouteAnalyst()
+          if (this.cancelled && this.cancellationPromise) return this.cancellationPromise
           decisionResult = await this._runL0Decision(analysis)
         } else if (this.options.resumeState.stage === 'RESUME_ANALYST') {
           if (!this.options.resumeState.schedulerCrashCheckpoint) {
@@ -11444,6 +11763,7 @@ class CodexSupervisorRuntime {
             decision: null,
             stage: 'route',
           })
+          if (this.cancelled && this.cancellationPromise) return this.cancellationPromise
           const result = adoptedResults['route-analyst']
           if (!result) {
             throw new SupervisorIntegrationError(
@@ -11452,6 +11772,7 @@ class CodexSupervisorRuntime {
             )
           }
           const analysis = await this._runRouteAnalyst(result, this.options.resumeState.resumeState)
+          if (this.cancelled && this.cancellationPromise) return this.cancellationPromise
           decisionResult = await this._runL0Decision(analysis)
         } else if (['AFTER_ANALYST', 'AFTER_ANALYST_SAVING'].includes(this.options.resumeState.stage)) {
           if (!this.options.resumeState.recommendation || !this.options.resumeState.schedulerState) {
@@ -11527,8 +11848,10 @@ class CodexSupervisorRuntime {
           humanDescription: 'Persist the pre-launch route-analysis next ready work before admitting the sole analyst.',
         }, { nextReadyWorkIds: ['route-analyst'] })
         const analysis = await this._runRouteAnalyst()
+        if (this.cancelled && this.cancellationPromise) return this.cancellationPromise
         decisionResult = await this._runL0Decision(analysis)
       }
+      if (this.cancelled && this.cancellationPromise) return this.cancellationPromise
       if (!decisionResult.start_workers) {
         if (decisionResult.status === 'WAITING_USER') {
           return await this._suspendResumable('WAITING_USER', { terminalEnvelope: decisionResult })
@@ -11572,6 +11895,7 @@ class CodexSupervisorRuntime {
         })
       }
       await this._runRepresentativePolicyProbe()
+      if (this.cancelled && this.cancellationPromise) return this.cancellationPromise
       if (this.options.resumeState && this.options.resumeState.resumeState === 'FINALIZING') {
         return await this._finish('DONE', {
           reason: 'resume deterministic finalization after the accepted final check',
@@ -11593,6 +11917,7 @@ class CodexSupervisorRuntime {
           })
           await prepare()
         }
+        if (this.cancelled && this.cancellationPromise) return this.cancellationPromise
         if (this.route === 'LIGHT') {
           const planningAdmission = this.scheduler.recordAdmissionComponent(
             'lightPlanning',
@@ -11627,6 +11952,7 @@ class CodexSupervisorRuntime {
         selectWorkRecipe,
         resumeState: this.options.resumeState || null,
       }))
+      if (this.cancelled && this.cancellationPromise) return this.cancellationPromise
       if (!result || !TERMINAL_OUTCOMES.includes(result.outcome)) {
         throw new SupervisorIntegrationError('TERMINAL_OUTCOME_INVALID', 'route executor must return a typed terminal outcome')
       }
@@ -11947,7 +12273,11 @@ class CodexSupervisorRuntime {
       streamedRouteEventCount = Number(result && result[STREAMED_ROUTE_EVENT_COUNT] || 0)
     } catch (error) {
       streamedRouteEventCount = Number(error && error[STREAMED_ROUTE_EVENT_COUNT] || 0)
-      if (callbackFailureRequiresImmediateAbort(error)) throw error
+      // Advisory failure permits conservative routing only after owned
+      // cleanup succeeds. withTimeout wraps every failed or stalled cleanup
+      // as PROCESS_DRAIN_TIMEOUT; that failure must reach terminal drain.
+      if (error && error.code === 'PROCESS_DRAIN_TIMEOUT' ||
+          callbackFailureRequiresImmediateAbort(error)) throw error
       result = { outcome: error.code === 'ROUTE_ANALYST_TIMEOUT' ? 'TIMEOUT' : 'CRASH', events: [{ type: 'failure', error: serializeError(error) }] }
     }
     const recommendationBounds = result && result.recommendation
@@ -14860,7 +15190,27 @@ class CodexSupervisorRuntime {
     })
   }
 
-  async _launchThroughScheduler(scheduler, request) {
+  _launchThroughScheduler(scheduler, request) {
+    const tracking = { mutationAdmitted: false, settlement: null }
+    const settlement = this._launchThroughSchedulerOnce(scheduler, request, tracking)
+    tracking.settlement = settlement
+    if (!(this.pendingLaunchSettlements instanceof Set)) {
+      this.pendingLaunchSettlements = new Set()
+    }
+    if (!(this.pendingMutationLaunchSettlements instanceof Set)) {
+      this.pendingMutationLaunchSettlements = new Set()
+    }
+    this.pendingLaunchSettlements.add(settlement)
+    if (tracking.mutationAdmitted) this.pendingMutationLaunchSettlements.add(settlement)
+    const forget = () => {
+      this.pendingLaunchSettlements.delete(settlement)
+      this.pendingMutationLaunchSettlements.delete(settlement)
+    }
+    settlement.then(forget, forget)
+    return settlement
+  }
+
+  async _launchThroughSchedulerOnce(scheduler, request, launchTracking = null) {
     // Economic hints cannot mint required topology. The built-in executor
     // brands its exact finite graph before calling launchChild; crash adoption
     // resumes an already authenticated physical lease. PRE_ROUTE admission
@@ -15512,6 +15862,7 @@ class CodexSupervisorRuntime {
         ghConfigDir: this.options.ghConfigDir,
         expectedBranch: this.options.expectedBranch,
         enforcementProof: this.options.enforcementProof,
+        activationExpiresAt: this.options.activationExpiresAt,
       },
     ))
     const env = safetyBoundary.environment
@@ -15717,6 +16068,45 @@ class CodexSupervisorRuntime {
     // terminal-session or pending-envelope failure is evaluated in `finally`.
     let candidateSurvivalEvidence = null
     let childCompletionFailure = null
+    let pendingOwnedAnalyst = null
+    let ownedAnalystSettled = false
+    let deferredAnalystDrain = false
+    const releaseChildAccounting = () => {
+      const pendingProviderEnvelope = this._pendingProviderEnvelope(reservationId)
+      if (pendingProviderEnvelope) {
+        const accountingError = new SupervisorIntegrationError(
+          'INCOMPLETE_USAGE_ACCOUNTING',
+          'child returned with one durable provider request allowance still pending',
+          {
+            requestOrdinal: pendingProviderEnvelope.requestOrdinal,
+            ...(childCompletionFailure
+              ? { priorFailure: serializeError(childCompletionFailure) }
+              : {}),
+            ...(candidateSurvivalEvidence
+              ? { bestAvailableCandidateEvidence: candidateSurvivalEvidence }
+              : {}),
+          },
+        )
+        if (candidateSurvivalEvidence) {
+          accountingError.bestAvailableCandidateEvidence = candidateSurvivalEvidence
+        }
+        this._closeChildTokenAdmissions(accountingError)
+        if (candidateSurvivalIntegrityFailure(childCompletionFailure)) {
+          if ((typeof childCompletionFailure === 'object' ||
+              typeof childCompletionFailure === 'function') &&
+              Object.isExtensible(childCompletionFailure)) {
+            childCompletionFailure.pendingUsageAccountingFailure = serializeError(accountingError)
+            childCompletionFailure.details = {
+              ...(childCompletionFailure.details || {}),
+              pendingUsageAccountingFailure: serializeError(accountingError),
+            }
+          }
+          throw childCompletionFailure
+        }
+        throw accountingError
+      }
+      this._releaseChildTokenEnvelope(reservationId)
+    }
     const transcriptEvidenceTracker = createTranscriptEvidenceTracker()
     try {
     childTokenReservation = await this._acquireChildTokenEnvelope(reservationId, {
@@ -16827,6 +17217,12 @@ class CodexSupervisorRuntime {
             workItemId: request.workItemId,
           })
         }
+        if (launchTracking) {
+          launchTracking.mutationAdmitted = true
+          if (launchTracking.settlement) {
+            this.pendingMutationLaunchSettlements.add(launchTracking.settlement)
+          }
+        }
         const externalLocalTransactionIdentity = canonicalExternalLocalTransactionIdentity({
           runId: this.options.runId,
           activationId: this.activation.id,
@@ -16887,21 +17283,49 @@ class CodexSupervisorRuntime {
           this.childTransportWatchdogMs,
           Number(request.admission && request.admission.max_duration_ms) || ROUTE_ANALYST_MAX_DURATION_MS,
         )
+        const ownsTimeoutDrain = typeof this.options.onChildTransportTimeout === 'function'
+        const timeoutCancellation = ownsTimeoutDrain ? new AbortController() : null
+        let pendingAnalyst
         return withTimeout(
           // Route analysis is optional admission work, so its ceiling is an
           // absolute elapsed deadline. Transport chatter must not refresh it
           // into an unbounded pre-product model turn.
-          () => this.options.launcher(launchRecord),
+          () => {
+            pendingAnalyst = Promise.resolve().then(() => this.options.launcher(
+              timeoutCancellation ? { ...launchRecord, signal: timeoutCancellation.signal } : launchRecord,
+            ))
+            pendingOwnedAnalyst = pendingAnalyst
+            pendingAnalyst.then(() => { ownedAnalystSettled = true }, () => { ownedAnalystSettled = true })
+            return pendingAnalyst
+          },
           analystWatchdogMs,
           this.timerApi,
           'ROUTE_ANALYST_TIMEOUT',
-          typeof this.options.onChildTransportTimeout === 'function'
-            ? () => this.options.onChildTransportTimeout({
-                sessionId,
-                workItemId: request.workItemId,
-                logicalRole: policy.child,
-                schedulerLeaseId: lease.id,
-              })
+          ownsTimeoutDrain
+            ? async () => {
+                // Native adapters own a reservation-specific physical session
+                // ID. Abort their exact launch rather than assuming it equals
+                // the scheduler's logical session ID. The Codex hook retains
+                // its own physical stop path. Keep the lease alive until the
+                // launch has flushed receipts and completed resource cleanup.
+                timeoutCancellation.abort()
+                const stopped = await this.options.onChildTransportTimeout({
+                  sessionId,
+                  reservationId,
+                  workItemId: request.workItemId,
+                  logicalRole: policy.child,
+                  schedulerLeaseId: lease.id,
+                })
+                if (pendingAnalyst) await pendingAnalyst.catch(error => {
+                  // Only a drained, accounted cancellation is a harmless
+                  // optional-analysis timeout. Ownership or accounting errors
+                  // must fail cleanup instead of authorizing product fallback.
+                  const expectedCancellation = error && error.code === 'CHILD_CANCELLED'
+                  const accountedCodexStop = error && error.code === 'CODEX_CHILD_FAILED' &&
+                    error.details && error.details.usageKnown === true && stopped && stopped.drained === true
+                  if (!expectedCancellation && !accountedCodexStop) throw error
+                })
+              }
             : null,
         )
       }
@@ -17323,6 +17747,13 @@ class CodexSupervisorRuntime {
         if (policy.child === 'mission-coordinator') {
           this.retainedL1Leases.set(request.workItemId, returned.retainedLease)
         }
+      }
+      if (checkKey && canonicalAssignment && this.record &&
+          typeof this.record.resolve === 'function') {
+        CANONICAL_DURABLE_CHECKER_RESULTS.set(returned, {
+          result: structuredClone(result),
+          returnedHash: canonicalCheckerResultEvidenceHash(returned),
+        })
       }
       return returned
     } catch (error) {
@@ -18297,6 +18728,41 @@ class CodexSupervisorRuntime {
             )
           : null
       }
+      const settleFailedChild = () => {
+        if (!leaseSettled) {
+          failSchedulerLease(lease, error)
+          leaseSettled = true
+        }
+        if (budgetSessionStarted && !terminalSessionSettlementAttempted) {
+          terminalSessionSettlementAttempted = true
+          try {
+            persistTerminalSession(this.budget, sessionId, {
+              status: error && error.code === 'MISSION_TIMEOUT' ? 'PARTIAL' : 'FAILED', evidenceHashes: [],
+            }, error)
+            budgetSessionStarted = false
+          } catch (settlementError) {
+            if (candidateSurvivalIntegrityFailure(error)) {
+              if ((typeof error === 'object' || typeof error === 'function') &&
+                  Object.isExtensible(error)) {
+                error.terminalSessionSettlementFailure = serializeError(settlementError)
+                error.details = {
+                  ...(error.details || {}),
+                  terminalSessionSettlementFailure: serializeError(settlementError),
+                }
+              }
+            } else error = settlementError
+            if (candidateSurvivalEvidence &&
+                error && (typeof error === 'object' || typeof error === 'function') &&
+                Object.isExtensible(error)) {
+              error.bestAvailableCandidateEvidence = candidateSurvivalEvidence
+              error.details = {
+                ...(error.details || {}),
+                bestAvailableCandidateEvidence: candidateSurvivalEvidence,
+              }
+            }
+          }
+        }
+      }
       const preserveDeferredRepairForTransportSuccessor = Boolean(
         deferredRepairCandidate && committedTransportFailure &&
         request.transportFailureRetryId,
@@ -18323,6 +18789,15 @@ class CodexSupervisorRuntime {
           this.options.mutationEnforcer &&
           typeof this.options.mutationEnforcer.abort === 'function') {
         try {
+          const opened = typeof this.options.runtimeStateProvider === 'function'
+            ? this.options.runtimeStateProvider() : null
+          if (this.cancelled && opened && opened.state === 'RELEASING_LOCK') {
+            // The immutable cancel intent is already durable. Wait for the
+            // physical process proof, then close scheduler/session accounting
+            // before the permit event snapshots budgets for finalization.
+            await this._awaitCancellationDrainAuthorization()
+            settleFailedChild()
+          }
           await this.options.mutationEnforcer.abort({
             assignment: canonicalAssignment,
             permit: mutationPermit,
@@ -18424,74 +18899,25 @@ class CodexSupervisorRuntime {
           }
         }
       }
-      if (!leaseSettled) {
-        failSchedulerLease(lease, error)
-      }
-      if (budgetSessionStarted && !terminalSessionSettlementAttempted) {
-        try {
-          persistTerminalSession(this.budget, sessionId, {
-            status: error && error.code === 'MISSION_TIMEOUT' ? 'PARTIAL' : 'FAILED', evidenceHashes: [],
-          }, error)
-        } catch (settlementError) {
-          if (candidateSurvivalIntegrityFailure(error)) {
-            if ((typeof error === 'object' || typeof error === 'function') &&
-                Object.isExtensible(error)) {
-              error.terminalSessionSettlementFailure = serializeError(settlementError)
-              error.details = {
-                ...(error.details || {}),
-                terminalSessionSettlementFailure: serializeError(settlementError),
-              }
-            }
-          } else error = settlementError
-          if (candidateSurvivalEvidence &&
-              error && (typeof error === 'object' || typeof error === 'function') &&
-              Object.isExtensible(error)) {
-            error.bestAvailableCandidateEvidence = candidateSurvivalEvidence
-            error.details = {
-              ...(error.details || {}),
-              bestAvailableCandidateEvidence: candidateSurvivalEvidence,
-            }
-          }
-        }
-      }
+      if (error && error.code === 'PROCESS_DRAIN_TIMEOUT' &&
+          pendingOwnedAnalyst && !ownedAnalystSettled) {
+        // The physical cleanup watchdog is a fatal result, not evidence that
+        // the native launch finished. Retain its accounting lease until its
+        // callbacks drain, including during the terminal owner's final stop.
+        deferredAnalystDrain = true
+        if (!this.pendingAnalystDrains) this.pendingAnalystDrains = new Map()
+        const settlement = pendingOwnedAnalyst.then(() => {}, () => {}).then(() => {
+          settleFailedChild()
+          releaseChildAccounting()
+        })
+        settlement.catch(() => {})
+        this.pendingAnalystDrains.set(reservationId, settlement)
+      } else settleFailedChild()
       if (candidateSurvivalEvidence) attachErrorField('bestAvailableCandidateEvidence', candidateSurvivalEvidence)
       childCompletionFailure = error
       throw error
     } finally {
-      const pendingProviderEnvelope = this._pendingProviderEnvelope(reservationId)
-      if (pendingProviderEnvelope) {
-        const accountingError = new SupervisorIntegrationError(
-          'INCOMPLETE_USAGE_ACCOUNTING',
-          'child returned with one durable provider request allowance still pending',
-          {
-            requestOrdinal: pendingProviderEnvelope.requestOrdinal,
-            ...(childCompletionFailure
-              ? { priorFailure: serializeError(childCompletionFailure) }
-              : {}),
-            ...(candidateSurvivalEvidence
-              ? { bestAvailableCandidateEvidence: candidateSurvivalEvidence }
-              : {}),
-          },
-        )
-        if (candidateSurvivalEvidence) {
-          accountingError.bestAvailableCandidateEvidence = candidateSurvivalEvidence
-        }
-        this._closeChildTokenAdmissions(accountingError)
-        if (candidateSurvivalIntegrityFailure(childCompletionFailure)) {
-          if ((typeof childCompletionFailure === 'object' ||
-              typeof childCompletionFailure === 'function') &&
-              Object.isExtensible(childCompletionFailure)) {
-            childCompletionFailure.pendingUsageAccountingFailure = serializeError(accountingError)
-            childCompletionFailure.details = {
-              ...(childCompletionFailure.details || {}),
-              pendingUsageAccountingFailure: serializeError(accountingError),
-            }
-          }
-          throw childCompletionFailure
-        }
-        throw accountingError
-      }
-      this._releaseChildTokenEnvelope(reservationId)
+      if (!deferredAnalystDrain) releaseChildAccounting()
     }
   }
 
@@ -18743,12 +19169,107 @@ class CodexSupervisorRuntime {
       try {
         await this.processOwner.cancelAll({ reason, terminalStatus, waitForPending: true })
         await this.processOwner.assertDrained()
+        if (this.pendingAnalystDrains && this.pendingAnalystDrains.size > 0) {
+          const pending = [...this.pendingAnalystDrains.entries()]
+          await withTimeout(
+            () => Promise.all(pending.map(([, settlement]) => settlement)),
+            DEFAULT_TIMEOUT_CLEANUP_WATCHDOG_MS,
+            this.timerApi,
+            'PROCESS_DRAIN_TIMEOUT',
+          )
+          for (const [id, settlement] of pending) {
+            if (this.pendingAnalystDrains.get(id) === settlement) this.pendingAnalystDrains.delete(id)
+          }
+        }
         return
       } catch (error) {
         priorError = error
       }
     }
     throw priorError
+  }
+
+  _beginCancellationDrainAuthorization(reason) {
+    if (this.cancellationDrainAuthorization) return this.cancellationDrainAuthorization
+    let resolve
+    let reject
+    const promise = new Promise((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise
+      reject = rejectPromise
+    })
+    // A drain failure is also observed by _cancelOnce. Mark this waiter as
+    // handled so a worker that has not reached permit cleanup cannot create a
+    // second unhandled rejection while the primary settlement reports it.
+    promise.catch(() => {})
+    this.cancellationDrainAuthorization = { reason, promise, resolve, reject, settled: false }
+    return this.cancellationDrainAuthorization
+  }
+
+  _completeCancellationDrainAuthorization(reason) {
+    const authorization = this._beginCancellationDrainAuthorization(reason)
+    if (authorization.settled) return authorization.promise
+    const evidence = Object.freeze({
+      schemaVersion: 1,
+      activationId: this.activation.id,
+      generation: this.activation.generation,
+      reason: authorization.reason,
+      processesDrained: true,
+      observedAt: new Date(this.now()).toISOString(),
+    })
+    authorization.settled = true
+    authorization.resolve(Object.freeze({
+      ...evidence,
+      processDrainEvidenceHash: hashText(stableStringify(evidence)),
+    }))
+    return authorization.promise
+  }
+
+  _failCancellationDrainAuthorization(error, reason) {
+    const authorization = this._beginCancellationDrainAuthorization(reason)
+    if (!authorization.settled) {
+      authorization.settled = true
+      authorization.reject(error)
+    }
+  }
+
+  async _awaitCancellationDrainAuthorization() {
+    if (!this.cancellationDrainAuthorization) {
+      throw new SupervisorIntegrationError(
+        'MUTATION_RELEASE_CLEANUP_INVALID',
+        'release-time mutation cleanup has no owned-process drain authorization',
+      )
+    }
+    return this.cancellationDrainAuthorization.promise
+  }
+
+  async _awaitPendingLaunchCleanup() {
+    const runtime = typeof this.options.runtimeStateProvider === 'function'
+      ? this.options.runtimeStateProvider() : null
+    const pending = this.pendingLaunchSettlements instanceof Set
+      ? [...this.pendingLaunchSettlements] : []
+    if (pending.length === 0) {
+      if (!runtime || !runtime.activeMutation) return []
+      throw new SupervisorIntegrationError(
+        'MUTATION_INCOMPLETE',
+        'an active mutation permit has no tracked worker cleanup settlement',
+      )
+    }
+    const settled = await withTimeout(
+      () => Promise.allSettled(pending),
+      DEFAULT_TIMEOUT_CLEANUP_WATCHDOG_MS,
+      this.timerApi,
+      'PROCESS_DRAIN_TIMEOUT',
+    )
+    const cleaned = typeof this.options.runtimeStateProvider === 'function'
+      ? this.options.runtimeStateProvider() : null
+    if (cleaned && cleaned.activeMutation) {
+      throw new SupervisorIntegrationError(
+        'MUTATION_INCOMPLETE',
+        'tracked worker cleanup did not close the exact active mutation permit',
+        { settlements: settled.map(item => item.status) },
+      )
+    }
+    return settled
   }
 
   async _runtimeTransition(eventId, nextState, details = {}) {
@@ -19124,6 +19645,16 @@ class CodexSupervisorRuntime {
   }
 
   async _bestEffortPostDrainCheckpoint(reason) {
+    const runtime = typeof this.options.runtimeStateProvider === 'function'
+      ? this.options.runtimeStateProvider() : null
+    if (runtime && (runtime.state === 'RELEASING_LOCK' || TERMINAL_OUTCOMES.includes(runtime.state))) {
+      return Object.freeze({
+        attempted: false,
+        status: 'NOT_REQUIRED',
+        reason,
+        terminalRelease: true,
+      })
+    }
     const result = {
       attempted: typeof this.options.persistRecoveryCheckpoint === 'function' && Boolean(this.scheduler),
       status: 'UNAVAILABLE',
@@ -19165,6 +19696,7 @@ class CodexSupervisorRuntime {
     // same promise instead of draining or publishing a second disposition.
     this.cancelled = true
     this._closeChildTokenAdmissions(new SupervisorIntegrationError('ADMISSION_CANCELLED', reason))
+    this._beginCancellationDrainAuthorization(reason)
     return this._beginSettlement('cancel', () => this._cancelOnce(reason))
   }
 
@@ -19201,7 +19733,22 @@ class CodexSupervisorRuntime {
       }
     }
     if (this.scheduler) this.scheduler.dispose(reason)
-    await this._drainOwnedProcessesWithOneRetry(reason, 'CANCELLED')
+    let drainAuthorization = null
+    try {
+      await this._drainOwnedProcessesWithOneRetry(reason, 'CANCELLED')
+      drainAuthorization = await this._completeCancellationDrainAuthorization(reason)
+    } catch (error) {
+      this._failCancellationDrainAuthorization(error, reason)
+      throw error
+    }
+    // Process drain makes the physical worker harmless. Its already-running
+    // executor cleanup still owns the exact private-workspace rollback and
+    // mutation-permit abort, so join that cleanup before terminal binding.
+    // Clearing the permit here would bypass both transaction authorities.
+    await this._awaitPendingLaunchCleanup()
+    if (this.lease && typeof this.options.persistCancellationAccountingClosure === 'function') {
+      await this.options.persistCancellationAccountingClosure({ reason, ...drainAuthorization })
+    }
     const postDrainCheckpoint = await this._bestEffortPostDrainCheckpoint(reason)
     if (this.lease && !this.finished) {
       const finish = this.settlementKind === 'cancel'
@@ -19739,6 +20286,20 @@ function validateActivationInputs(args = {}, environment = process.env, adapterP
   if (boundary.payloadManifest && fs.realpathSync.native(path.resolve(boundary.payloadManifest)) !== manifestRead.resolved ||
       boundary.payloadManifestSha256 !== crypto.createHash('sha256').update(manifestBytes).digest('hex')) {
     throw new SupervisorIntegrationError('ACTIVATION_RECEIPT_INVALID', 'activation payload manifest binding drifted')
+  }
+  if (record.darwinRuntimeClosure !== null && record.darwinRuntimeClosure !== undefined) {
+    const closure = record.darwinRuntimeClosure
+    if (!closure || typeof closure.path !== 'string' || !path.isAbsolute(closure.path) ||
+        !/^[a-f0-9]{64}$/.test(closure.sha256 || '')) {
+      throw new SupervisorIntegrationError('ACTIVATION_RECEIPT_INVALID', 'Darwin runtime closure receipt is invalid')
+    }
+    const closureRead = readRegularJson(closure.path, 'Darwin runtime closure')
+    const closureRelative = path.relative(activationRoot, closureRead.resolved)
+    if (!closureRelative || path.isAbsolute(closureRelative) || closureRelative === '..' ||
+        closureRelative.startsWith(`..${path.sep}`) ||
+        crypto.createHash('sha256').update(closureRead.bytes).digest('hex') !== closure.sha256) {
+      throw new SupervisorIntegrationError('ACTIVATION_RECEIPT_INVALID', 'Darwin runtime closure receipt drifted')
+    }
   }
   const relativeAdapter = path.relative(activationRoot, canonicalAdapter).split(path.sep).join('/')
   const manifestEntry = Array.isArray(manifestRead.parsed.files)
@@ -20592,6 +21153,17 @@ function sameExternalLocalStableMetadata(left, right) {
     left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs
 }
 
+let windowsResourceFilesystem = null
+function nativeWindowsResourceFilesystem() {
+  if (process.platform !== 'win32') return null
+  if (!windowsResourceFilesystem) {
+    const binding = Object.create(fs)
+    binding.windowsCapture = require('./windows-filesystem.js').createWindowsFilesystemCapture()
+    windowsResourceFilesystem = binding
+  }
+  return windowsResourceFilesystem
+}
+
 function readStableExternalLocalFile(absolute, expectedStat = null) {
   const initial = expectedStat || externalLocalLstat(absolute)
   if (!initial || !initial.isFile() || initial.isSymbolicLink() ||
@@ -20600,6 +21172,17 @@ function readStableExternalLocalFile(absolute, expectedStat = null) {
       'PREIMAGE_UNSAFE',
       `owned file is not one physical target: ${absolute}`,
     )
+  }
+  const nativeFs = nativeWindowsResourceFilesystem()
+  if (nativeFs) {
+    // The native helper retains every ancestor HANDLE while capturing bytes;
+    // Windows has no descriptor path with POSIX /proc/self/fd semantics.
+    const bytes = readFileStrict(absolute, nativeFs)
+    const live = externalLocalLstat(absolute)
+    if (!sameExternalLocalStableMetadata(initial, live) || bytes.length !== initial.size) {
+      throw new SupervisorIntegrationError('PREIMAGE_UNSAFE', `owned file changed during native capture: ${absolute}`)
+    }
+    return bytes
   }
   let descriptor
   try {
@@ -20616,6 +21199,17 @@ function readStableExternalLocalFile(absolute, expectedStat = null) {
       )
     }
     const bytes = fs.readFileSync(descriptor)
+    // Match strict manifest capture: mappings may write without changing
+    // metadata again, so verify bytes through the same held descriptor.
+    const verification = Buffer.allocUnsafe(Math.min(bytes.length, 64 * 1024))
+    for (let offset = 0; offset < bytes.length;) {
+      const length = fs.readSync(descriptor, verification, 0,
+        Math.min(verification.length, bytes.length - offset), offset)
+      if (length < 1 || !verification.subarray(0, length).equals(bytes.subarray(offset, offset + length))) {
+        throw new SupervisorIntegrationError('PREIMAGE_UNSAFE', `owned file bytes changed during verification: ${absolute}`)
+      }
+      offset += length
+    }
     const after = fs.fstatSync(descriptor)
     const live = externalLocalLstat(absolute)
     if (!sameExternalLocalStableMetadata(opened, after) ||
@@ -20639,7 +21233,11 @@ function readStableExternalLocalFile(absolute, expectedStat = null) {
 }
 
 function hashDirectoryState(directory, expectedRootStat = null) {
-  const digest = crypto.createHash('sha256')
+  const nativeFs = nativeWindowsResourceFilesystem()
+  if (nativeFs) return hashDirectoryStateStrict(directory, nativeFs, expectedRootStat)
+  let digest = crypto.createHash('sha256')
+  const capturedEntries = new Map()
+  let verifyingCapture = false
   const rootStat = expectedRootStat || externalLocalLstat(directory)
   if (!rootStat || !rootStat.isDirectory() || rootStat.isSymbolicLink()) {
     throw new SupervisorIntegrationError(
@@ -20664,6 +21262,14 @@ function hashDirectoryState(directory, expectedRootStat = null) {
           `owned directory contains a missing or linked entry: ${path.join(displayedPath, entry.name)}`,
         )
       }
+      if (verifyingCapture) {
+        if (!sameExternalLocalStableMetadata(capturedEntries.get(name), stat)) {
+          throw new SupervisorIntegrationError(
+            'PREIMAGE_UNSAFE',
+            `owned directory entry changed after capture: ${path.join(directory, ...name.split('/'))}`,
+          )
+        }
+      } else capturedEntries.set(name, stat)
       if (stat.isDirectory()) {
         let childDescriptor
         try {
@@ -20714,7 +21320,19 @@ function hashDirectoryState(directory, expectedRootStat = null) {
       )
     }
     visit(rootDescriptor, '', directory, openedRoot)
-    return digest.digest('hex')
+    const capturedHash = digest.digest('hex')
+    // Per-file checks miss edits to already captured files, including dirty
+    // mmap writes that do not change metadata. Recheck the complete capture;
+    // this supplements, rather than replaces, owned-writer quiescence.
+    verifyingCapture = true
+    digest = crypto.createHash('sha256')
+    visit(rootDescriptor, '', directory, openedRoot)
+    if (digest.digest('hex') !== capturedHash) {
+      throw new SupervisorIntegrationError(
+        'PREIMAGE_UNSAFE', `owned directory bytes changed after capture: ${directory}`,
+      )
+    }
+    return capturedHash
   } catch (error) {
     if (error instanceof SupervisorIntegrationError) throw error
     throw new SupervisorIntegrationError(
@@ -20772,6 +21390,8 @@ function externalLocalLstat(absolute) {
 }
 
 function fsyncExternalLocalDirectory(directory) {
+  const nativeFs = nativeWindowsResourceFilesystem()
+  if (nativeFs) return nativeFs.windowsCapture.fsyncDirectory(directory)
   const authority = openExternalLocalDirectoryLineage(directory)
   try {
     if (!fs.fstatSync(authority.descriptor).isDirectory()) {
@@ -20788,6 +21408,8 @@ function fsyncExternalLocalDirectory(directory) {
 }
 
 function createExternalLocalDirectoryDurably(directory, mode) {
+  const nativeFs = nativeWindowsResourceFilesystem()
+  if (nativeFs) return nativeFs.windowsCapture.mkdirExclusive(directory, mode)
   withExternalLocalAnchoredLeaf(directory, (anchored, parentAuthority) => {
     fs.mkdirSync(anchored, { mode })
     fs.fsyncSync(parentAuthority.descriptor)
@@ -20795,6 +21417,8 @@ function createExternalLocalDirectoryDurably(directory, mode) {
 }
 
 function writeExternalLocalRecordDurably(recordPath, bytes, mode) {
+  const nativeFs = nativeWindowsResourceFilesystem()
+  if (nativeFs) return nativeFs.windowsCapture.writeExclusive(recordPath, Buffer.from(bytes), mode)
   withExternalLocalAnchoredLeaf(recordPath, (anchored, parentAuthority) => {
     const descriptor = fs.openSync(anchored, 'wx', mode)
     try {
@@ -20866,6 +21490,8 @@ function fsyncExternalLocalTreeAnchored(absolute) {
 }
 
 function fsyncExternalLocalTree(absolute) {
+  const nativeFs = nativeWindowsResourceFilesystem()
+  if (nativeFs) return nativeFs.windowsCapture.fsyncTree(absolute)
   return withExternalLocalAnchoredLeaf(absolute, (anchored, parentAuthority) => {
     const result = fsyncExternalLocalTreeAnchored(anchored)
     fs.fsyncSync(parentAuthority.descriptor)
@@ -20975,6 +21601,17 @@ function withExternalLocalAnchoredLeaf(absolute, operation) {
 }
 
 function renameExternalLocalTreeNoReplace(source, destination) {
+  const nativeFs = nativeWindowsResourceFilesystem()
+  if (nativeFs) {
+    try { nativeFs.windowsCapture.renameTreeNoReplace(source, destination) } catch (error) {
+      if (error?.code === 'EXDEV') throw new SupervisorIntegrationError(
+        'EXTERNAL_LOCAL_CROSS_DEVICE_UNSUPPORTED', 'external local atomic capture crossed a filesystem boundary', { source, destination })
+      if (error?.code === 'EEXIST') throw new SupervisorIntegrationError(
+        'EXTERNAL_LOCAL_ROLLBACK_STALE', 'external local atomic capture destination already exists', { source, destination })
+      throw error
+    }
+    return destination
+  }
   return withExternalLocalAnchoredLeaf(source, (anchoredSource, sourceAuthority) =>
     withExternalLocalAnchoredLeaf(destination, (anchoredDestination, destinationAuthority) => {
       if (!externalLocalLstat(anchoredSource) || externalLocalLstat(anchoredDestination)) {
@@ -21009,6 +21646,21 @@ function renameExternalLocalTreeNoReplace(source, destination) {
 
 function externalLocalPhysicalState(absolute) {
   const resolved = path.resolve(absolute)
+  const nativeFs = nativeWindowsResourceFilesystem()
+  if (nativeFs) {
+    let inspected
+    try { inspected = nativeFs.windowsCapture.inspectOwnedTarget(resolved) } catch (error) {
+      if (error?.code === 'ENOENT') return Object.freeze({ path: resolved, hash: MISSING_RESOURCE_PREIMAGE_HASH, type: 'missing', mode: null })
+      throw error
+    }
+    const type = inspected.targetIdentity.type
+    const captured = type === 'directory' ? nativeFs.windowsCapture.captureTree(resolved) : nativeFs.windowsCapture.captureFileBytes(resolved)
+    const stat = captured.entries[0]?.stat
+    if (!stat || stat.dev !== inspected.targetIdentity.dev || stat.ino !== inspected.targetIdentity.ino) {
+      throw new SupervisorIntegrationError('PREIMAGE_UNSAFE', `external local resource changed before native capture: ${resolved}`)
+    }
+    return Object.freeze({ path: resolved, hash: captured.hash, type, mode: stat.mode & 0o777 })
+  }
   try {
     return withExternalLocalAnchoredLeaf(resolved, anchored => {
       const stat = externalLocalLstat(anchored)
@@ -21189,6 +21841,8 @@ function copyExternalLocalTreeAnchored(source, destination) {
 }
 
 function copyExternalLocalTree(source, destination) {
+  const nativeFs = nativeWindowsResourceFilesystem()
+  if (nativeFs) return nativeFs.windowsCapture.copyTreeExclusive(source, destination)
   return withExternalLocalAnchoredLeaf(source, anchoredSource =>
     withExternalLocalAnchoredLeaf(destination, (anchoredDestination, destinationAuthority) => {
       const result = copyExternalLocalTreeAnchored(anchoredSource, anchoredDestination)
@@ -21291,6 +21945,15 @@ function publishExternalLocalTreeNoReplace(source, destination, _transactionIden
 }
 
 function removeExternalLocalTreeNoFollow(absolute) {
+  const nativeFs = nativeWindowsResourceFilesystem()
+  if (nativeFs) {
+    let inspected
+    try { inspected = nativeFs.windowsCapture.inspectOwnedTarget(absolute) } catch (error) {
+      if (error?.code === 'ENOENT') return
+      throw error
+    }
+    return nativeFs.windowsCapture.removeOwnedTarget(absolute, inspected.parentIdentity, inspected.targetIdentity)
+  }
   return withExternalLocalAnchoredLeaf(absolute, (anchored, parentAuthority) => {
     const stat = externalLocalLstat(anchored)
     if (!stat) return
@@ -22884,6 +23547,7 @@ function materializeExplicitExternalLocalBoundary(assignment, repository, option
     for (let index = 0; index < materialized.length; index += 1) {
       const resource = materialized[index]
       const before = resource.preimage
+      const nativeFs = nativeWindowsResourceFilesystem()
       let placeholderCreated = false
       if (before.type === 'missing') {
         const parent = path.dirname(resource.identity)
@@ -22903,7 +23567,11 @@ function materializeExplicitExternalLocalBoundary(assignment, repository, option
             `parent of exact external local output is not one physical directory: ${resource.identity}`,
           )
         }
-        withExternalLocalAnchoredLeaf(resource.identity, (anchored, parentAuthority) => {
+        if (nativeFs) {
+          if (['file', 'output'].includes(resource.kind)) nativeFs.windowsCapture.writeExclusive(resource.identity, Buffer.alloc(0), 0o600)
+          else if (['directory', 'cache', 'evidence-root'].includes(resource.kind)) nativeFs.windowsCapture.mkdirExclusive(resource.identity, 0o700)
+          else throw new SupervisorIntegrationError('EXTERNAL_LOCAL_RESOURCE_INVALID', `missing external local ${resource.kind} has no safe materialization`)
+        } else withExternalLocalAnchoredLeaf(resource.identity, (anchored, parentAuthority) => {
           if (['file', 'output'].includes(resource.kind)) {
             const descriptor = fs.openSync(anchored, 'wx', 0o600)
             try { fs.fsyncSync(descriptor) } finally { fs.closeSync(descriptor) }
@@ -22919,17 +23587,18 @@ function materializeExplicitExternalLocalBoundary(assignment, repository, option
         })
         placeholderCreated = true
       }
-      const physical = withExternalLocalAnchoredLeaf(
+      const physical = nativeFs ? nativeFs.windowsCapture.inspectOwnedTarget(resource.identity).targetIdentity : withExternalLocalAnchoredLeaf(
         resource.identity,
         anchored => fs.lstatSync(anchored),
       )
       const requiresDirectory = ['directory', 'cache', 'evidence-root'].includes(resource.kind)
       const acceptsEither = resource.kind === 'output'
+      const isDirectory = nativeFs ? physical.type === 'directory' : physical.isDirectory()
+      const isFile = nativeFs ? physical.type === 'file' : physical.isFile()
       const physicalTypeAllowed = requiresDirectory
-        ? physical.isDirectory()
-        : acceptsEither ? physical.isFile() || physical.isDirectory() : physical.isFile()
-      if (physical.isSymbolicLink() || !physicalTypeAllowed ||
-          (physical.isFile() && Number(physical.nlink) !== 1)) {
+        ? isDirectory : acceptsEither ? isFile || isDirectory : isFile
+      if ((!nativeFs && physical.isSymbolicLink()) || !physicalTypeAllowed ||
+          (!nativeFs && isFile && Number(physical.nlink) !== 1)) {
         throw new SupervisorIntegrationError(
           'EXTERNAL_LOCAL_RESOURCE_INVALID',
           `exact external local output has the wrong physical type: ${resource.identity}`,
@@ -24885,7 +25554,7 @@ function createDefaultRouteExecutor(options) {
     const boundedToolOutputDiscipline =
       ` Keep the direct path compact: target roughly ${CODEX_CHILD_TOOL_GUIDANCE_LIMITS.worker} or fewer purposeful tool calls for the whole turn, without abandoning required work merely because that target was exceeded. The launcher retains at most ${CODEX_CHILD_TOOL_OUTPUT_TOKEN_LIMIT.toLocaleString('en-US')} tokens from each tool output; the classic shell tool has no per-call output-budget argument. Redirect large stdout/stderr to a scratch file, then inspect a hash, count, or targeted preview of at most 4 KiB. Never use line-oriented head, tail, sed, or unrestricted recursive search on potentially monolithic generated artifacts or private run-record/transcript trees. Reuse one focused executable validation harness; after implementation and one focused validation, return the canonical result immediately.`
     const checkerToolOutputDiscipline =
-      ` Keep the independent check compact: target roughly ${CODEX_CHILD_TOOL_GUIDANCE_LIMITS.checker} or fewer purposeful tool calls, while still completing every required observation. The launcher retains at most ${CODEX_CHILD_TOOL_OUTPUT_TOKEN_LIMIT.toLocaleString('en-US')} tokens from each tool output; the classic shell tool has no per-call output-budget argument. For each checker harness version, first write a regular program in the assigned scratch root, then run it once directly as <python3|node|ruby|perl|sh> <absolute sealed scratch program> <absolute frozen exact-version path being checked>, or as <absolute sealed executable> <absolute frozen exact-version path being checked>. Correct setup failures in the same turn under a fresh filename, retaining prior diagnostics; never overwrite or rerun an executed harness or relabel a product failure as setup. Use no interpreter flags. Substitute the projected absolute paths literally and emit one direct JSON summary of at most 4 KiB per invocation. Do not use heredocs, redirection, pipelines, command substitution, environment assignments, shell wrappers, or shell glue. Treat the frozen path as immutable even for database and compiler reads: use explicit read-only/immutable modes, or hash-bind a copy in writable scratch before using a reader that may create journals, WAL files, locks, bytecode, caches, sidecars, or temporary files. Return the canonical result immediately after the required observation.`
+      ` Keep the independent check compact: target roughly ${CODEX_CHILD_TOOL_GUIDANCE_LIMITS.checker} or fewer purposeful tool calls, while still completing every required observation. The launcher retains at most ${CODEX_CHILD_TOOL_OUTPUT_TOKEN_LIMIT.toLocaleString('en-US')} tokens from each tool output; the classic shell tool has no per-call output-budget argument. For each checker harness version, first write a regular program in the assigned scratch root, then run it once directly as <python3|node|ruby|perl|sh> <absolute sealed scratch program> <absolute frozen exact-version path being checked>, or as <absolute sealed executable> <absolute frozen exact-version path being checked>. Correct setup failures in the same turn under a fresh filename, retaining prior diagnostics; never overwrite or rerun an executed harness or relabel a product failure as setup. Use no interpreter flags. Substitute the projected absolute paths literally. For PASS, emit one direct JSON summary of at most 4 KiB with a positive integer passCount and failureCount:0. On any assertion failure, increment failureCount, preserve the counted summary, and exit nonzero. Do not use heredocs, redirection, pipelines, command substitution, environment assignments, shell wrappers, or shell glue. Treat the frozen path as immutable even for database and compiler reads: use explicit read-only/immutable modes, or hash-bind a copy in writable scratch before using a reader that may create journals, WAL files, locks, bytecode, caches, sidecars, or temporary files. Return the canonical result immediately after the required observation.`
     const workerCount = Math.max(1, Number(decision.usefulWorkerCount || 1))
     const legacyRoadmapWorkId = /^(?:roadmap-(?:author|scout|plan-|work-group)|mission-coordination)/u
     const resumeRoadmapIds = resumeState ? [
@@ -24960,7 +25629,20 @@ function createDefaultRouteExecutor(options) {
     const launchChecker = async request => {
       REQUIRED_COMPLETION_LAUNCH_REQUESTS.add(request)
       try {
-        return canonicalizeCheckerTerminalResult(await launch(request))
+        const launched = await launch(request)
+        const canonical = canonicalizeCheckerTerminalResult(launched)
+        const durable = CANONICAL_DURABLE_CHECKER_RESULTS.get(launched)
+        if (durable) {
+          if (durable.returnedHash !== canonicalCheckerResultEvidenceHash(launched)) {
+            throw new SupervisorIntegrationError('SCRATCH_PASS_CONFIRMATION_INCOMPLETE',
+              'controller-enriched checker result changed after canonical persistence')
+          }
+          CANONICAL_DURABLE_CHECKER_RESULTS.set(canonical, {
+            result: canonicalizeCheckerTerminalResult(durable.result),
+            returnedHash: canonicalCheckerResultEvidenceHash(canonical),
+          })
+        }
+        return canonical
       } catch (error) {
         if (error && error.code === 'CANCELLED') throw error
         // Only provider/transport availability faults are checker limitations.
@@ -28053,11 +28735,14 @@ function createDefaultRouteExecutor(options) {
         const sameEnvironmentCapabilityUnavailable = result && result.code === 'CHECK_INCONCLUSIVE' &&
           stableCapabilityUnavailable(result)
         if (nonAuthoritative && scratchConfirmationRequired) {
+          const durablePrimary = CANONICAL_DURABLE_CHECKER_RESULTS.get(result)
+          const evidenceResult = durablePrimary ? durablePrimary.result : result
+          const primaryResultHash = canonicalCheckerResultEvidenceHash(evidenceResult)
           provisionalScratchPassReports.push(Object.freeze({
             index,
             checkerId: workItemId,
-            result,
-            checkerResultHash: rawCheckerResultHash,
+            result: evidenceResult,
+            checkerResultHash: primaryResultHash,
           }))
           provisionalScratchPassReport = true
           // Historical retry checkpoints may recover a scratch PASS after the
@@ -28068,7 +28753,7 @@ function createDefaultRouteExecutor(options) {
             await closeInconclusiveChecker({
               candidateHash,
               checkerId: workItemId,
-              checkerResultHash: rawCheckerResultHash,
+              checkerResultHash: primaryResultHash,
               retryAttempt,
               controllerReason: 'CHECK_SCRATCH_CONFIRMATION_REQUIRED',
               terminalDisposition: 'CHECK_INCONCLUSIVE',
@@ -28405,6 +29090,26 @@ function createDefaultRouteExecutor(options) {
             `scratch confirmation ${confirmationId} has conflicting adopted and durable results`,
           )
         }
+        let primaryScratchEvidencePointer = null
+        if (!durableConfirmation && !adoptedConfirmation &&
+            typeof options.resultPointer === 'function') {
+          const pointer = options.resultPointer(primary.checkerId)
+          if (pointer !== undefined && pointer !== null) {
+            primaryScratchEvidencePointer = validateDurableResultEvidencePointer(
+              pointer, primary.checkerId,
+            )
+            const persistedPrimary = canonicalizeCheckerTerminalResult(readRegularJson(
+              primaryScratchEvidencePointer.path, 'primary scratch coverage result',
+            ).parsed)
+            if (!checkerResultEvidenceHashMatches(persistedPrimary, primary.checkerResultHash) ||
+                stableStringify(persistedPrimary) !== stableStringify(primary.result)) {
+              throw new SupervisorIntegrationError(
+                'SCRATCH_PASS_CONFIRMATION_INCOMPLETE',
+                'primary scratch coverage pointer differs from the exact provisional checker result',
+              )
+            }
+          }
+        }
         const confirmationResult = durableConfirmation
           ? durableConfirmation.result
           : adoptedConfirmation
@@ -28421,7 +29126,10 @@ function createDefaultRouteExecutor(options) {
                 'coverage claims, derive a distinct reference method, and execute targeted ' +
                 'missing-property, negative, separation, boundary, and composition probes. Do ' +
                 'not duplicate the full-scale matrix; run a fresh full-scale execution only when ' +
-                'scale itself is the unverified property.' +
+                'scale itself is the unverified property. Read the exact primary report at ' +
+                'primaryScratchCoverage.evidencePointer when present; its payload contains all ' +
+                'testOutcomes, verificationAuthority, and referenceMethod claims. Those claims ' +
+                'remain provisional and do not replace your independent execution.' +
                 checkerToolOutputDiscipline,
               candidateHash,
               oracle: confirmationOracle,
@@ -28444,11 +29152,15 @@ function createDefaultRouteExecutor(options) {
                 primaryScratchCoverage: {
                   checkerId: primary.checkerId,
                   resultHash: primary.checkerResultHash,
-                  testOutcomes: structuredClone(primary.result.payload.testOutcomes),
-                  verificationAuthority: structuredClone(
-                    primary.result.payload.verificationAuthority,
-                  ),
-                  referenceMethod: structuredClone(primary.result.payload.referenceMethod),
+                  ...(primaryScratchEvidencePointer
+                    ? { evidencePointer: primaryScratchEvidencePointer }
+                    : {
+                        testOutcomes: structuredClone(primary.result.payload.testOutcomes),
+                        verificationAuthority: structuredClone(
+                          primary.result.payload.verificationAuthority,
+                        ),
+                        referenceMethod: structuredClone(primary.result.payload.referenceMethod),
+                      }),
                 },
                 ...(finalResponse ? {
                   structuredFinalResponse: {
@@ -28461,9 +29173,16 @@ function createDefaultRouteExecutor(options) {
                   },
                 } : {}),
               },
-              ...(finalResponse && finalResponse.evidencePointer ? {
-                evidencePointers: [finalResponse.evidencePointer],
-              } : {}),
+              evidencePointers: [
+                ...(primaryScratchEvidencePointer ? [primaryScratchEvidencePointer] : []),
+                ...(finalResponse && finalResponse.evidencePointer
+                  ? [finalResponse.evidencePointer] : []),
+              ],
+              evidenceHashes: [
+                ...(primaryScratchEvidencePointer ? [primaryScratchEvidencePointer.hash] : []),
+                ...(finalResponse && finalResponse.evidencePointer
+                  ? [finalResponse.evidencePointer.hash] : []),
+              ],
               checkerRecoveryDisposition: {
                 nonAuthoritativeRetryId: null,
                 failureRepairId: null,
@@ -30114,6 +30833,46 @@ function createDefaultRuntimeOptions(input) {
   const environment = context.environment || process.env
   const wallTimeUnbounded = false
   const activationRecord = activation.record
+  // The activation root is controller-private and is verified before this
+  // runtime is constructed. A Darwin deployment may place its exact Python
+  // closure manifest here through scripts/darwin-runtime-setup.cjs. No
+  // environment value selects an interpreter or helper at runtime.
+  const runtimeFs = (() => {
+    if (process.platform === 'win32') {
+      const shim = Object.create(fs)
+      // The helper is part of the activation's verified runtime payload;
+      // the wrapper binds it and the system PowerShell executable before use.
+      shim.windowsCapture = require('./windows-filesystem.js').createWindowsFilesystemCapture()
+      shim.windowsMutations = shim.windowsCapture
+      return shim
+    }
+    if (process.platform !== 'darwin') return fs
+    const binding = activationRecord.darwinRuntimeClosure
+    if (binding === null || binding === undefined) return fs
+    if (!binding || typeof binding.path !== 'string' || !path.isAbsolute(binding.path) ||
+        !/^[a-f0-9]{64}$/.test(binding.sha256 || '')) {
+      throw new SupervisorIntegrationError('ACTIVATION_RECEIPT_INVALID', 'Darwin runtime closure binding is invalid')
+    }
+    const closurePath = binding.path
+    const manifestSha256 = crypto.createHash('sha256').update(fs.readFileSync(closurePath)).digest('hex')
+    if (manifestSha256 !== binding.sha256) throw new SupervisorIntegrationError('ACTIVATION_RECEIPT_INVALID', 'Darwin runtime closure binding drifted')
+    const closure = require('./darwin-runtime-closure.js').validateDarwinRuntimeClosure({
+      manifest: closurePath, manifestSha256,
+    })
+    const [python, helper] = closure.entries
+    const shim = Object.create(fs)
+    shim.darwinCapture = createDarwinFilesystemCapture({
+      python: python.binding.path,
+      helper: helper.binding.path,
+      runtimeClosure: { manifest: closurePath, manifestSha256 },
+    })
+    shim.darwinMutations = createDarwinFilesystemMutations({
+      python: python.binding.path,
+      helper: helper.binding.path,
+      runtimeClosure: { manifest: closurePath, manifestSha256 },
+    })
+    return shim
+  })()
   const targetPath = activationRecord.target.realpath
   const generation = activationRecord.capability.generation
   const missionHash = hashText(activationRecord.request.canonicalJson)
@@ -30134,7 +30893,7 @@ function createDefaultRuntimeOptions(input) {
   let codexAdapter = null
   let trustedTestRunner = null
   let currentRoute = null
-  const boundRecord = openRunRecord(activation.supervisorRuntime.runPath, { requireInitialized: false })
+  const boundRecord = openRunRecord(activation.supervisorRuntime.runPath, { requireInitialized: false, fsImpl: runtimeFs })
   if (boundRecord.runId !== activation.runId || boundRecord.targetPath !== targetPath ||
       boundRecord.targetIdentity !== activation.supervisorRuntime.targetIdentity) {
     throw new SupervisorIntegrationError(
@@ -30216,6 +30975,7 @@ function createDefaultRuntimeOptions(input) {
     ghConfigDir,
     expectedBranch,
     enforcementProof: activation.enforcementProof,
+    activationExpiresAt: activationRecord.capability.expiresAt,
   }
   const gitEnvironment = repository => safeEnvFactory(repository || targetPath, environment, safetyOptions).environment
   const openWorkerWorkspaceManager = () => {
@@ -30827,6 +31587,7 @@ function createDefaultRuntimeOptions(input) {
   const runtimeOptions = {
     activationId: activation.runId,
     activationNonce: nonce,
+    activationExpiresAt: safetyOptions.activationExpiresAt,
     baseEnvironment: environment,
     configIsolationPath,
     enforcementProof: activation.enforcementProof,
@@ -30972,6 +31733,7 @@ function createDefaultRuntimeOptions(input) {
       }
       cleanupRegistry = new CleanupRegistry({
         ...record.paths.cleanupRegistry,
+        fsImpl: runtimeFs,
         allowedRoots: [activation.activationRoot],
         controlBinding: {
           activationId: activation.runId,
@@ -30999,6 +31761,7 @@ function createDefaultRuntimeOptions(input) {
       stateStore = new RuntimeStateStore({
         ...record.paths.stateStore,
         eventLog,
+        fsImpl: runtimeFs,
         capabilityVerifier: capability => missionLock.verifyCapability(capability),
         accountingCheckpointVerifier: checkpoint => {
           if (!accountingAuthorityRef) {
@@ -31616,6 +32379,7 @@ function createDefaultRuntimeOptions(input) {
       const ExecutionAdapter = context.ExecutionAdapter || CodexExecAdapter
       codexAdapter = new ExecutionAdapter({
         runner,
+        upstreamBaseUrl: activationRecord.activationBoundary.providerApiBaseUrl ?? null,
         executable: probe.executable,
         executableArgs: context.executableArgs,
         environmentOverlay: probe.environmentOverlay,
@@ -31741,7 +32505,18 @@ function createDefaultRuntimeOptions(input) {
       capability: lease,
       runRecord: record,
       cleanupRegistry,
-      completionBoundary: () => record.assertBoundary({ phase: 'completion' }),
+      fsImpl: runtimeFs,
+      completionBoundary: () => {
+        const boundary = record.assertBoundary({ phase: 'completion' })
+        const routeVerification = verifyRouteTranscript(record.paths.route)
+        if (!routeVerification.valid) {
+          throw new SupervisorIntegrationError(
+            'RUN_RECORD_FAILURE',
+            `Cannot finalize an invalid route transcript: ${routeVerification.reason}`,
+          )
+        }
+        return boundary
+      },
     }),
     capabilityVerifier: async launch => {
       if (!capabilityBinding) throw new SupervisorIntegrationError('PROVIDER_UNSUPPORTED', 'runtime capability probes have not completed')
@@ -31783,6 +32558,31 @@ function createDefaultRuntimeOptions(input) {
     runtimeTransition: payload => applyProductionRuntimeTransition({
       stateStore, capability: leaseRef, budgetController: runtimeOptions.budgetController,
     }, payload),
+    persistCancellationAccountingClosure: ({ reason, ...releaseCleanup }) => {
+      const current = stateStore.load()
+      if (current.state !== 'RELEASING_LOCK' || current.activeMutation) {
+        throw new SupervisorIntegrationError(
+          'CANCEL_ACCOUNTING_CLOSURE_INVALID',
+          'final cancellation accounting requires drained release state with no active mutation',
+        )
+      }
+      accountingAuthorityRef.checkpoint({
+        capability: leaseRef,
+        cause: {
+          kind: 'CHECKPOINT',
+          causeId: `cancel-final-accounting:${generation}`,
+          humanDescription: 'Bind every ended cancellation session after owned process and launch cleanup.',
+        },
+        delta: accountingDelta(),
+      })
+      return stateStore.recordCancellationAccountingClosure({
+        capability: leaseRef,
+        cause: `Close cancellation accounting after owned launch cleanup: ${reason}`,
+        budgets: runtimeOptions.budgetController.snapshot(),
+        accountingCheckpoint: accountingAuthorityRef.resumeCheckpoint(),
+        ...releaseCleanup,
+      })
+    },
     mutationEnforcer: {
       begin: ({ preimages, isolation, workItemId }) => {
         const current = stateStore.load()
@@ -31881,12 +32681,34 @@ function createDefaultRuntimeOptions(input) {
         if (!admitted) return null
         return this.resolve({ permit: admitted.details.permit, postimages: [], isolation })
       },
-      abort: ({ permit, isolation, workItemId, error }) => stateStore.abortAuthorizedMutation(permit, {
-        capability: leaseRef,
-        isolationBindingHash: isolation && isolation.bindingHash,
-        cause: `Close failed owned mutation permit for ${workItemId}.`,
-        failureCode: error && error.code || 'WORKER_FAILED',
-      }),
+      abort: async ({ permit, isolation, workItemId, error }) => {
+        const opened = stateStore.load()
+        const releaseCleanup = opened.state === 'RELEASING_LOCK'
+          ? await runtimeOptions.runtimeInstance._awaitCancellationDrainAuthorization()
+          : null
+        let accountingCheckpoint = null
+        if (releaseCleanup) {
+          accountingAuthorityRef.checkpoint({
+            capability: leaseRef,
+            cause: {
+              kind: 'CHECKPOINT',
+              causeId: `cancel-accounting-closed:${generation}:${workItemId}`,
+              humanDescription: 'Bind ended cancellation session accounting before closing its exact mutation permit.',
+            },
+            delta: accountingDelta(),
+          })
+          accountingCheckpoint = accountingAuthorityRef.resumeCheckpoint()
+        }
+        return stateStore.abortAuthorizedMutation(permit, {
+          capability: leaseRef,
+          isolationBindingHash: isolation && isolation.bindingHash,
+          cause: `Close failed owned mutation permit for ${workItemId}.`,
+          failureCode: error && error.code || 'WORKER_FAILED',
+          ...(releaseCleanup ? { budgets: runtimeOptions.budgetController.snapshot() } : {}),
+          ...(accountingCheckpoint ? { accountingCheckpoint } : {}),
+          ...(releaseCleanup || {}),
+        })
+      },
       recoverCommit: ({ permit, postimages, isolation, workItemId, journalPath, commitRecord }) => {
         const journal = readChecksummedJson(journalPath)
         if (!journal || !['COMMITTED', 'FINALIZED'].includes(journal.status) ||
@@ -32596,6 +33418,92 @@ function supervisorCapabilities() {
   }
 }
 
+async function runAbortOwnedSupervisor(runtime, signal, defaultReason = 'operator signal') {
+  if (!runtime || typeof runtime.start !== 'function' || typeof runtime.cancel !== 'function' ||
+      !signal || typeof signal.addEventListener !== 'function' ||
+      typeof signal.removeEventListener !== 'function') {
+    throw new SupervisorIntegrationError(
+      'SUPERVISOR_SIGNAL_INVALID',
+      'signal-owned supervisor requires a runtime and AbortSignal',
+    )
+  }
+  let cancellation = null
+  const cancel = () => {
+    if (!cancellation) {
+      const reason = typeof signal.reason === 'string' && signal.reason
+        ? signal.reason : defaultReason
+      cancellation = Promise.resolve().then(() => runtime.cancel(reason))
+    }
+    return cancellation
+  }
+  const cancellationSelected = Object.freeze({ cancellationSelected: true })
+  let settleCancellation
+  const cancelled = new Promise(resolve => {
+    settleCancellation = () => {
+      cancel().catch(() => {})
+      resolve(cancellationSelected)
+    }
+  })
+  if (signal.aborted) return cancel()
+  signal.addEventListener('abort', settleCancellation, { once: true })
+  const started = Promise.resolve().then(() => runtime.start())
+  try {
+    // Cancellation is itself the settlement owner. Do not wait for a native
+    // request promise that may never report its killed process after the
+    // runtime has durably selected cancellation and drained its descendants.
+    const selected = await Promise.race([started, cancelled])
+    return selected === cancellationSelected ? await cancellation : selected
+  } finally {
+    signal.removeEventListener('abort', settleCancellation)
+    if (cancellation) await cancellation
+  }
+}
+
+async function runSignalOwnedSupervisor(runtime, signalSource = process, options = {}) {
+  const controller = new AbortController()
+  const cancel = reason => {
+    if (!controller.signal.aborted) controller.abort(
+      reason === 'activation authorization expired' ? reason : 'operator signal',
+    )
+  }
+  const cancelFromSignal = () => cancel('operator signal')
+  const expiresAtValue = options.activationExpiresAt ?? runtime.options?.activationExpiresAt
+  const expiresAt = expiresAtValue === undefined ? null : Date.parse(expiresAtValue)
+  if (expiresAtValue !== undefined && !Number.isFinite(expiresAt)) {
+    throw new SupervisorIntegrationError(
+      'ACTIVATION_EXPIRY_INVALID',
+      'signal-owned supervisor activation expiry must be an ISO timestamp',
+    )
+  }
+  const timerApi = options.timerApi || { setTimeout, clearTimeout }
+  const wallNowMs = typeof options.wallNowMs === 'function' ? options.wallNowMs : Date.now
+  if (typeof timerApi.setTimeout !== 'function' || typeof timerApi.clearTimeout !== 'function') {
+    throw new SupervisorIntegrationError(
+      'ACTIVATION_EXPIRY_INVALID',
+      'signal-owned supervisor activation expiry requires a bounded timer API',
+    )
+  }
+  signalSource.on('SIGINT', cancelFromSignal)
+  signalSource.on('SIGTERM', cancelFromSignal)
+  const remainingAuthorizationMs = expiresAt === null ? null : expiresAt - Number(wallNowMs())
+  if (remainingAuthorizationMs !== null && remainingAuthorizationMs <= 0) {
+    cancel('activation authorization expired')
+  }
+  const expiryTimer = remainingAuthorizationMs === null || remainingAuthorizationMs <= 0
+    ? null
+    : timerApi.setTimeout(
+        () => cancel('activation authorization expired'),
+        remainingAuthorizationMs,
+      )
+  try {
+    return await runAbortOwnedSupervisor(runtime, controller.signal)
+  } finally {
+    if (expiryTimer !== null) timerApi.clearTimeout(expiryTimer)
+    signalSource.removeListener('SIGINT', cancelFromSignal)
+    signalSource.removeListener('SIGTERM', cancelFromSignal)
+  }
+}
+
 async function runSupervisorCli(argv) {
   const args = parseFlagPairs(argv)
   if (args.capabilities) {
@@ -32615,7 +33523,7 @@ async function runSupervisorCli(argv) {
       adapterPath,
       exactPathPreflight: productionExactPathPreflight,
     }))
-    const outcome = await runtime.start()
+    const outcome = await runSignalOwnedSupervisor(runtime)
     process.stdout.write(`${JSON.stringify(outcome)}\n`)
     return outcome.outcome === 'DONE' ? 0 : 1
   } catch (error) {
@@ -32627,10 +33535,10 @@ async function runSupervisorCli(argv) {
 if (require.main === module) {
   const argv = process.argv.slice(2)
   if (argv[0] === '--owned-codex-proxy' && argv.length === 2) {
-    try { runOwnedCodexProxy(argv[1]) } catch (error) {
+    runOwnedCodexProxy(argv[1]).catch(error => {
       process.stderr.write(`owned-codex-proxy: ${error.code || 'RUNTIME_FAILURE'}: ${error.message}\n`)
       process.exitCode = 2
-    }
+    })
   } else if (argv.includes('--verdict')) {
     process.exitCode = runVerdictCli(argv.filter(value => value !== '--verdict'))
   } else if (argv.includes('--supervisor')) {
@@ -32769,6 +33677,9 @@ module.exports = {
   probeCodexExecCapabilities,
   codexControlledModelCatalog,
   codexCompactCanonicalOutputContract,
+  nativeCompactCanonicalOutputContract,
+  runAbortOwnedSupervisor,
+  runSignalOwnedSupervisor,
   startCodexCumulativeQuotaProxy,
   unresolvedCodexProviderEnvelopes,
   codexToolCallHighWater,

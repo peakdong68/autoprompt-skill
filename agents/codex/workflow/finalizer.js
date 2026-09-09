@@ -28,6 +28,26 @@ const {
 } = require('./run-record.js')
 
 const CLEANUP_SCHEMA_VERSION = 4
+const MAX_NATIVE_TERMINAL_BYTES = 8 * 1024 * 1024 + 1
+function nativeRecordMutations(fsImpl) {
+  const candidate = process.platform === 'darwin' ? fsImpl.darwinMutations
+    : process.platform === 'win32' ? fsImpl.windowsMutations : null
+  if (!candidate) return null
+  if (typeof candidate.publishRecordExclusive !== 'function' || typeof candidate.assertRecordParent !== 'function' || typeof candidate.recoverRecordPublication !== 'function') {
+    fail('TERMINAL_PATH_UNSAFE', 'native terminal publication authority is incomplete')
+  }
+  return candidate
+}
+
+function nativeCleanupMutations(fsImpl) {
+  const candidate = process.platform === 'darwin' ? fsImpl.darwinMutations
+    : process.platform === 'win32' ? fsImpl.windowsMutations : null
+  if (!candidate) return null
+  if (typeof candidate.inspectOwnedTarget !== 'function' || typeof candidate.removeOwnedTarget !== 'function') {
+    fail('CLEANUP_CONFIG_INVALID', 'native cleanup authority is incomplete')
+  }
+  return candidate
+}
 
 class FinalizerError extends Error {
   constructor(code, message, details = {}) {
@@ -103,10 +123,17 @@ class CleanupRegistry {
     if (!this.allowedRoots.some((root) => isWithin(root, target))) {
       fail('CLEANUP_ENTRY_UNSAFE', `scratch path is outside registered cleanup roots: ${target}`)
     }
-    const identities = this._withCleanupTarget(target, (anchoredTarget, _verify, parentIdentity) => ({
+    const nativeCleanup = nativeCleanupMutations(this.fs)
+    const identities = nativeCleanup ? nativeCleanup.inspectOwnedTarget(target) : this._withCleanupTarget(target, (anchoredTarget, _verify, parentIdentity) => ({
       parentIdentity,
       targetIdentity: cleanupTargetIdentity(this.fs.lstatSync(anchoredTarget), target),
     }))
+    if (!identities || !identities.parentIdentity || !identities.targetIdentity ||
+        !['file', 'directory'].includes(identities.targetIdentity.type) ||
+        [identities.parentIdentity.dev, identities.parentIdentity.ino, identities.targetIdentity.dev, identities.targetIdentity.ino]
+          .some(value => typeof value !== 'string' || !/^\d+$/.test(value))) {
+      fail('CLEANUP_ENTRY_UNSAFE', 'cleanup authority returned an invalid physical identity')
+    }
     const registry = this.load()
     if (registry.entries.some((item) => item.path === target && item.status !== 'CLEANED')) {
       fail('CLEANUP_ENTRY_DUPLICATE', `scratch path is already registered: ${target}`)
@@ -176,6 +203,16 @@ class CleanupRegistry {
       const target = path.resolve(entry.path)
       if (!this.allowedRoots.some((root) => isWithin(root, target))) {
         fail('CLEANUP_ENTRY_UNSAFE', `registered cleanup path is no longer safe: ${target}`)
+      }
+      const nativeCleanup = nativeCleanupMutations(this.fs)
+      if (nativeCleanup) {
+        if (this.cleanup) fail('CLEANUP_CONFIG_INVALID', 'native cleanup requires its bound removal operation')
+        const result = nativeCleanup.removeOwnedTarget(target, entry.parentIdentity, entry.targetIdentity)
+        if (!result || typeof result.removed !== 'boolean') fail('CLEANUP_ENTRY_UNSAFE', 'native cleanup did not confirm removal or prior absence')
+        entry.status = 'CLEANED'
+        entry.cleanedAt = String(this.clock())
+        this._write(registry)
+        continue
       }
       this._withCleanupTarget(target, (anchoredTarget, _verify, parentIdentity) => {
         if (parentIdentity.dev !== entry.parentIdentity.dev || parentIdentity.ino !== entry.parentIdentity.ino) {
@@ -819,6 +856,10 @@ class Finalizer {
     } finally {
       if (descriptor !== undefined) this.fs.closeSync(descriptor)
     }
+    return this._parseTerminalRecord(bytes)
+  }
+
+  _parseTerminalRecord(bytes) {
     let parsed
     try { parsed = JSON.parse(bytes.toString('utf8')) } catch (error) {
       fail('TERMINAL_RECORD_INVALID', 'registered terminal is not JSON', { cause: error.message })
@@ -831,17 +872,23 @@ class Finalizer {
   }
 
   _readTerminalRecord() {
+    const native = nativeRecordMutations(this.fs)
+    if (native) {
+      try {
+        native.assertRecordParent(this.terminalPath)
+        const bytes = readFileStrict(this.terminalPath, this.fs)
+        if (bytes.length > MAX_NATIVE_TERMINAL_BYTES) fail('TERMINAL_RECORD_INVALID', 'registered terminal exceeds its finite byte boundary')
+        return this._parseTerminalRecord(bytes)
+      } catch (error) {
+        if (error instanceof FinalizerError) throw error
+        fail('TERMINAL_RECORD_INVALID', 'registered terminal cannot be read through its native authority', { cause: error && (error.code || error.message) })
+      }
+    }
     return this._withTerminalRecordAuthority((terminalPath, verifyLineage) =>
       this._readTerminalRecordAt(terminalPath, verifyLineage))
   }
 
-  _createOrVerifyTerminalAt(record, terminalPath, verifyLineage) {
-    if (this.fs.existsSync(terminalPath)) {
-      let existing
-      try { existing = this._readTerminalRecordAt(terminalPath, verifyLineage) } catch (error) {
-        if (error && error.code === 'PREIMAGE_UNSAFE') throw error
-        fail('TERMINAL_RECORD_INVALID', 'registered terminal exists but is not valid', { cause: error.message })
-      }
+  _assertTerminalAgreement(record, existing) {
       for (const field of [
         'schemaVersion', 'outcome', 'runId', 'activationId', 'generation', 'sequence', 'missionHash',
         'requestEnvelopeHash', 'workspaceEpoch', 'deliverableManifestHash',
@@ -856,6 +903,16 @@ class Finalizer {
           fail('TERMINAL_RECORD_CONFLICT', `registered terminal conflicts on ${field}`)
         }
       }
+  }
+
+  _createOrVerifyTerminalAt(record, terminalPath, verifyLineage) {
+    if (this.fs.existsSync(terminalPath)) {
+      let existing
+      try { existing = this._readTerminalRecordAt(terminalPath, verifyLineage) } catch (error) {
+        if (error && error.code === 'PREIMAGE_UNSAFE') throw error
+        fail('TERMINAL_RECORD_INVALID', 'registered terminal exists but is not valid', { cause: error.message })
+      }
+      this._assertTerminalAgreement(record, existing)
       fsyncDirectory(path.dirname(terminalPath), this.fs)
       return existing
     }
@@ -899,6 +956,26 @@ class Finalizer {
   }
 
   _createOrVerifyTerminal(record) {
+    const native = nativeRecordMutations(this.fs)
+    if (native) {
+      const signed = { ...canonicalize(record) }
+      signed.checksum = checksumRecord(signed)
+      const bytes = Buffer.from(`${stableStringify(signed)}\n`, 'utf8')
+      if (bytes.length > MAX_NATIVE_TERMINAL_BYTES) fail('TERMINAL_RECORD_FAILURE', 'registered terminal exceeds its finite byte boundary')
+      try {
+        native.assertRecordParent(this.terminalPath)
+        native.recoverRecordPublication(this.terminalPath)
+        native.publishRecordExclusive(this.terminalPath, bytes)
+      } catch (error) {
+        if (!error || error.code !== 'EEXIST') {
+          if (error instanceof FinalizerError) throw error
+          fail('TERMINAL_RECORD_FAILURE', 'registered terminal could not be published atomically through its native authority', { cause: error && (error.code || error.message) })
+        }
+      }
+      const existing = this._readTerminalRecord()
+      this._assertTerminalAgreement(record, existing)
+      return existing
+    }
     return this._withTerminalRecordAuthority((terminalPath, verifyLineage) => {
       recoverTerminalPublicationResiduesAnchored(terminalPath, verifyLineage, { fsImpl: this.fs })
       return this._createOrVerifyTerminalAt(record, terminalPath, verifyLineage)

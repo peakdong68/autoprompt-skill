@@ -231,7 +231,7 @@ test('Codex manifest currentness rejects CRLF byte drift', t => {
   assert.match(stderr.join(''), /stale manifests: agents\/manifests\/codex-runtime\.json/)
 })
 
-test('all nine public provider payloads contain the complete product', () => {
+test('all eleven public provider payloads contain the complete product', () => {
   const contract = require('../../agents/contracts/autoprompt.contract.json')
   const personaCount = Object.keys(require('../../agents/codex/agents/role-policy.json').physical_roles).length
   assert.equal(personaCount, 32)
@@ -239,7 +239,7 @@ test('all nine public provider payloads contain the complete product', () => {
 
   const manifests = renderManifests(ROOT)
   for (const provider of [
-    'claude', 'codex', 'opencode', 'kilo', 'vscode', 'omp', 'deepseek', 'reasonix',
+    'claude', 'codex', 'opencode', 'kilo', 'vscode', 'omp', 'deepseek', 'hermes', 'grok', 'reasonix',
   ]) {
     const manifest = manifests.get(`agents/manifests/${provider}-runtime.json`)
     assert.ok(manifest.files.includes('GATES.md'))
@@ -310,10 +310,13 @@ test('all nine public provider payloads contain the complete product', () => {
   assert.ok(codex.files.includes('agents/role-policy.schema.json'))
   assert.ok(codex.files.includes('workflow/codex-agent-casting.js'))
   const runtimeWorkflow = fs.readdirSync(path.join(ROOT, 'agents', 'codex', 'workflow'))
-    .filter(file => ['.js', '.ps1', '.sh'].includes(path.extname(file)))
+    .filter(file => ['.js', '.ps1', '.sh', '.py', '.cs'].includes(path.extname(file)))
     .map(file => `workflow/${file}`)
     .sort()
   assert.deepEqual(codex.files.filter(file => file.startsWith('workflow/')), runtimeWorkflow)
+  for (const source of ['workflow/windows-appcontainer-native.cs', 'workflow/windows-appcontainer-resources-native.cs']) {
+    assert.ok(runtimeWorkflow.includes(source), `Codex runtime declares required Windows native source: ${source}`)
+  }
   assert.ok(opencode.files.includes('autoprompt.opencode.json'))
   assert.ok(opencode.files.includes('workflow/launch-opencode.ps1'))
   assert.ok(opencode.files.includes('workflow/launch-opencode.sh'))

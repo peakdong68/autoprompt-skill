@@ -60,7 +60,7 @@ function sameLogicalLeaf(left, right) {
 }
 
 function temporaryFixture(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-external-local-'))
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-external-local-')))
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
   const target = path.join(root, 'app')
   const external = path.join(root, 'external')
@@ -739,10 +739,10 @@ test('external pre-admission transaction restores missing, preexisting, and dire
   rollbackExplicitExternalLocalBoundary(boundary, target, admission)
   assert.equal(fs.existsSync(missing), false)
   assert.equal(fs.readFileSync(existing, 'utf8'), 'original bytes\n')
-  assert.equal(fs.statSync(existing).mode & 0o777, 0o640)
+  if (process.platform !== 'win32') assert.equal(fs.statSync(existing).mode & 0o777, 0o640)
   assert.deepEqual(fs.readdirSync(directory), ['original.txt'])
   assert.equal(fs.readFileSync(path.join(directory, 'original.txt'), 'utf8'), 'original tree\n')
-  assert.equal(fs.statSync(directory).mode & 0o777, 0o750)
+  if (process.platform !== 'win32') assert.equal(fs.statSync(directory).mode & 0o777, 0o750)
 })
 
 test('post-external pre-local failure keeps rollback authority until mutation state commits', t => {

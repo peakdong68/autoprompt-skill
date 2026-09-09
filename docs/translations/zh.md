@@ -1,3 +1,5 @@
+> 本文保留 v1 发布版的说明。v2 分支的安装方式、模型选择和运行验证要求请参阅[当前英文说明](../../README.md)及 [v2 验证指南](../guides/harness-v2-verification.md)。下文的 v1 审核结果不代表 v2 已通过验证。
+
 <p align="center">
   <img src="../../assets/banner.svg" alt="Autoprompt Skill：粉色云朵与飞翔的大雁" width="1000"/>
 </p>

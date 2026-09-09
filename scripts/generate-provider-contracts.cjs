@@ -220,6 +220,8 @@ const PUBLIC_PROVIDER_IDS = Object.freeze([
   'claude',
   'codex',
   'deepseek',
+  'grok',
+  'hermes',
   'kilo',
   'omp',
   'opencode',
@@ -1815,7 +1817,7 @@ function renderReasonixOutputs(root = ROOT) {
         '- `GATES.md`, `MODES.md`, and `PLAYBOOKS.md`: compiled v2 contracts', '',
         '```bash', 'autoprompt activate reasonix --target <absolute-project-path> -- <request>', '```', '',
         'Internal profiles are installed in a private bundle and become available only to an explicit activation. Installation and source tests do not constitute live provider conformance.', '',
-        'Production activation currently refuses with `PROVIDER_UNSUPPORTED`: this release has no independent signed Reasonix conformance attestation. This is the same required-capability admission policy used by v2. Do not replace the missing record with self-issued evidence.', '',
+        'Production activation requires either independent signed Reasonix conformance or an exact matching maintainer-reviewed release followed by a fresh, activation-bound native canary. The reviewed-local policy does not claim an independent signature. Missing, invalid, expired, or mismatched authority returns `PROVIDER_UNSUPPORTED`; never replace it with self-issued signed evidence.', '',
         'Configure model inheritance with `autoprompt configure reasonix --agents off`, one model with `--agents provider/model --effort high`, or measured automatic selection with `--agents auto --model-map <reasonix-registry.json>`. Explicit lists use the same measured registry. Model selection never changes the task route.', '',
       ].join('\n'))
     } else {
@@ -1831,7 +1833,7 @@ function renderReasonixOutputs(root = ROOT) {
 
 // Native files are projections, not provider-conformance attestations. C0 owns
 // physical launches; logical parent/child edges remain in the unchanged policy.
-const HARNESS_V2_PROVIDERS = Object.freeze(['claude', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek'])
+const HARNESS_V2_PROVIDERS = Object.freeze(['claude', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek', 'hermes', 'grok'])
 const HARNESS_V2_NATIVE = Object.freeze({
   claude: { display: 'Claude Code', docs: 'https://code.claude.com/docs/en/sub-agents', format: 'markdown-subagent' },
   opencode: { display: 'OpenCode', docs: 'https://opencode.ai/docs/agents/', format: 'markdown-subagent-permissions' },
@@ -1839,6 +1841,8 @@ const HARNESS_V2_NATIVE = Object.freeze({
   vscode: { display: 'VS Code', docs: 'https://code.visualstudio.com/docs/agent-customization/custom-agents', format: 'custom-agent-markdown' },
   prime: { display: 'Prime Agent', docs: 'https://github.com/PrimeIntellect-ai/prime-agent', format: 'private-persona' },
   omp: { display: 'Oh My Pi', docs: 'https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/task/agents.ts', format: 'markdown-task-agent' },
+  grok: { display: 'Grok Build', docs: 'https://docs.x.ai/build/features/skills-plugins-marketplaces', format: 'private-controller-prompt' },
+  hermes: { display: 'Hermes Agent', docs: 'https://hermes-agent.nousresearch.com/docs', format: 'fixed-plugin-tool' },
   deepseek: { display: 'DeepSeek Harness', docs: 'https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/subagent/tool-subagent/src/index.ts', format: 'fixed-persona-tool' },
 })
 
@@ -1849,6 +1853,7 @@ function harnessV2RoleTools(provider, role) {
   const capabilities = ['Read', 'Glob', 'Grep', ...(writable ? ['Write', 'Edit', 'Bash'] : [])]
   if (provider === 'claude') return capabilities
   if (provider === 'vscode') return vscodeTools(capabilities)
+  if (['hermes', 'grok'].includes(provider)) return ['read', 'list', 'search', ...(writable ? ['write', 'edit', 'bash'] : [])]
   if (provider === 'prime') return [] // RLM has no audited native per-role tool allowlist.
   if (provider === 'omp') return ompTools(capabilities)
   if (provider === 'deepseek') return capabilities.filter(tool => tool !== 'Bash').map(tool => tool.toLowerCase())
@@ -1903,6 +1908,10 @@ function renderHarnessV2Role(provider, id, role, source) {
       // Empty spawns alone is not a deny rule: OMP infers '*' from a task tool.
       header.push(`tools: ${JSON.stringify(tools)}`, 'spawns: []', 'prewalk: false', 'advisor: false')
       break
+    case 'grok':
+    case 'hermes':
+      // Private instruction files are read by the owned plugin wrapper, never native agent discovery.
+      return asciiDashes(body)
     case 'deepseek':
       // The fixed-persona tool owns toolFilter, not unsupported prompt fields.
       break

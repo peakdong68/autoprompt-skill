@@ -25,18 +25,36 @@ async function piModelService(calls, options = {}) {
       if (JSON.stringify(advertised) !== JSON.stringify([...NAMES].sort())) throw new Error(`Unexpected tool surface: ${advertised.join(',')}`)
       const results = (value.messages || []).filter(message => message.role === 'tool')
       await options.onRequest?.(value, results)
+      if (options.hold) {
+        await new Promise(resolve => {
+          let settled = false
+          const done = () => { if (!settled) { settled = true; resolve() } }
+          req.once('aborted', done)
+          res.once('close', done)
+        })
+        return
+      }
+      if (Number.isSafeInteger(options.delayMessagesMs) && options.delayMessagesMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, options.delayMessagesMs))
+      }
       const next = calls.find(call => !results.some(message => message.tool_call_id === call.id))
       const id = `pi-fixture-${++completed}`
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' })
+      const canonicalResult = options.result || { ok: true, marker: options.marker || null }
+      const wireSchema = value.response_format?.json_schema?.schema
+      const usesCanonicalEnvelope = wireSchema?.type === 'object' && wireSchema?.additionalProperties === false &&
+        Array.isArray(wireSchema?.required) && wireSchema.required.length === 1 && wireSchema.required[0] === 'canonicalJson' &&
+        wireSchema.properties?.canonicalJson?.type === 'string'
       const delta = next
         ? { role: 'assistant', tool_calls: [{ index: 0, id: next.id, type: 'function', function: { name: next.name, arguments: JSON.stringify(next.args) } }] }
-        : { role: 'assistant', content: JSON.stringify({ ok: true, marker: options.marker || null }) }
+        : { role: 'assistant', content: JSON.stringify(usesCanonicalEnvelope ? { canonicalJson: JSON.stringify(canonicalResult) } : canonicalResult) }
       res.write(`data: ${JSON.stringify({ id, object: 'chat.completion.chunk', created: 1, model: value.model,
         choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`)
+      const usage = options.usage || { prompt_tokens: 137, completion_tokens: 19, total_tokens: 156,
+        prompt_tokens_details: { cached_tokens: 11 }, completion_tokens_details: { reasoning_tokens: 0 } }
       res.end(`data: ${JSON.stringify({ id, object: 'chat.completion.chunk', created: 1, model: value.model,
         choices: [{ index: 0, delta: {}, finish_reason: next ? 'tool_calls' : 'stop' }],
-        usage: { prompt_tokens: 137, completion_tokens: 19, total_tokens: 156,
-          prompt_tokens_details: { cached_tokens: 11 }, completion_tokens_details: { reasoning_tokens: 0 } } })}\n\ndata: [DONE]\n\n`)
+        usage })}\n\ndata: [DONE]\n\n`)
     } catch (error) {
       errors.push(error.message)
       if (!res.headersSent) res.writeHead(500, { 'content-type': 'application/json' })
@@ -44,7 +62,7 @@ async function piModelService(calls, options = {}) {
     }
   })
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
-  return { requests, errors, url: `http://127.0.0.1:${server.address().port}`,
+  return { calls, requests, errors, url: `http://127.0.0.1:${server.address().port}`,
     get completed() { return completed },
     close: () => new Promise(resolve => { server.closeAllConnections(); server.close(resolve) }) }
 }

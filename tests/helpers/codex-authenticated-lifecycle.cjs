@@ -218,6 +218,8 @@ function sendResponse(response, step, item) {
 }
 
 async function nativeWorker(context, repair) {
+  const model = context.model || 'gpt-5.6-sol'
+  const maxOutputTokens = model === 'z-ai/glm-5.3-flash' ? 4_096 : 128_000
   const { mode, directory, workdir, home, cli } = context
   const assignmentId = repair ? 'repair-interval' : 'implement-interval'
   const observations = {
@@ -335,7 +337,7 @@ async function nativeWorker(context, repair) {
         brief: canonicalAssignment.requestedResult,
         requestPointer: { path: 'request-envelope.json', hash: requestEnvelopeHash },
       },
-      assignment: { model: 'gpt-5.6-sol', effort: 'low' },
+      assignment: { model, effort: 'low' },
       // ChatGPT exercises the real accounting-only default. Its backend cannot
       // enforce a caller's smaller response ceiling through max_output_tokens.
       finiteTokenBudget: mode === 'apikey',
@@ -374,9 +376,9 @@ async function nativeWorker(context, repair) {
       assert.equal(observations.argv.includes('view_image'), false,
         'default ChatGPT work has no hard-tool-counter image override')
       assert.equal(relay.snapshot().tokenLimit, Number.MAX_SAFE_INTEGER)
-      assert.ok(observations.started.every(item => item.maximumUnaccountedTokens >= 128000 &&
+      assert.ok(observations.started.every(item => item.maximumUnaccountedTokens >= maxOutputTokens &&
         item.maximumUnaccountedTokens < Number.MAX_SAFE_INTEGER),
-      'each ChatGPT request reserves its full bounded response, not the activation sentinel')
+      'each ChatGPT request reserves the selected profile response bound, not the activation sentinel')
     }
     assert.ok(events.some(event => event.type === 'turn.completed'))
     assert.deepEqual(observations.tools.map(item => item.attemptedCount), [1, 2],
@@ -389,7 +391,7 @@ async function nativeWorker(context, repair) {
     assert.match(commands[0].item.aggregated_output, /INTERIOR_SMOKE_PASS/)
     assert.ok(observations.terminal)
     assert.equal(fs.readFileSync(path.join(workdir, 'interval.cjs'), 'utf8'), repair ? GOOD_SOURCE : BAD_SOURCE)
-    return { assignmentId, toolCalls: observations.tools.length, providerRequests: observations.started.length, usage: result.usage }
+    return { assignmentId, model, toolCalls: observations.tools.length, providerRequests: observations.started.length, usage: result.usage }
   } catch (error) {
     // Surface this fixture's precise wire-contract refusal rather than hiding
     // it behind the adapter's correct generic incomplete-usage disposition.
@@ -424,8 +426,10 @@ async function runAuthenticatedLifecycle(cli) {
   assert.equal(fs.lstatSync(root).isDirectory(), true)
   const summary = []
   try {
-    for (const mode of ['apikey', 'chatgpt']) {
-      const directory = path.join(root, mode)
+    for (const model of ['gpt-5.6-sol', 'z-ai/glm-5.3-flash']) {
+      const modelDirectory = model.replace(/[^a-z0-9]+/gi, '-')
+      for (const mode of ['apikey', 'chatgpt']) {
+      const directory = path.join(root, modelDirectory, mode)
       const workdir = path.join(directory, 'candidate')
       const home = path.join(directory, 'private-home')
       fs.mkdirSync(workdir, { recursive: true, mode: 0o700 })
@@ -446,7 +450,7 @@ async function runAuthenticatedLifecycle(cli) {
       const verifier = path.join(directory, 'independent-acceptance.cjs')
       fs.writeFileSync(verifier, ACCEPTANCE, { mode: 0o400 })
       const verifierHash = hash(fs.readFileSync(verifier))
-      const context = { mode, directory, workdir, home, cli }
+      const context = { model, mode, directory, workdir, home, cli }
       const original = await nativeWorker(context, false)
       const red = childProcess.spawnSync(process.execPath, [verifier, workdir], { env: environment, encoding: 'utf8' })
       assert.equal(red.status, 1, 'independent acceptance rejects the worker\'s false completion claim')
@@ -457,7 +461,8 @@ async function runAuthenticatedLifecycle(cli) {
       assert.equal(green.status, 0, green.stderr)
       assert.equal(green.stdout, 'INDEPENDENT_ACCEPTANCE_PASS\n')
       assert.equal(hash(fs.readFileSync(verifier)), verifierHash)
-      summary.push({ mode, original, repaired, independentRed: red.status, independentGreen: green.status })
+      summary.push({ model, mode, original, repaired, independentRed: red.status, independentGreen: green.status })
+      }
     }
     return { networkIsolation: 'private-loopback-only', scope: 'native-adapter-relay-and-independent-repair', summary }
   } finally {

@@ -253,15 +253,7 @@ test('Codex local-only activation proof accepts an exact detached HEAD', t => {
     configIsolationPath,
     ghConfigDir,
   })
-  const repaired = run(process.execPath, [
-    path.join(ROOT, 'scripts', 'local-only-safety.cjs'),
-    '--repo', target,
-    '--expected-branch', '',
-    '--enforcement-proof', proofPath,
-    '--repair',
-    '--json',
-  ], { env: environment })
-  assert.equal(repaired.status, 0, repaired.stderr || repaired.stdout)
+  assert.equal(safety.inspect(safety.discoverRepository(target), '', environment, { enforcementProof: proof }).mechanicallyEnforced, false)
 
   const inspection = codexConfigure.proveLocalOnlySafety(target, environment, proof)
   assert.equal(inspection.mechanicallyEnforced, true)

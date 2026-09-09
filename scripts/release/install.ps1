@@ -12,18 +12,26 @@ function Require-Command {
     }
 }
 
+function Invoke-RequiredPython {
+    $candidates = @()
+    if ($env:AUTOPROMPT_PYTHON) { $candidates += $env:AUTOPROMPT_PYTHON }
+    else { $candidates += @('python', 'python3') }
+    foreach ($candidate in $candidates) {
+        $command = Get-Command $candidate -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $command) { continue }
+        & $command.Source -c "import sys, yaml; assert sys.version_info >= (3, 11)"
+        if ($LASTEXITCODE -eq 0) { return $command.Source }
+    }
+    throw 'Python 3.11 or newer with PyYAML is required. Run: python -m pip install PyYAML'
+}
+
 Require-Command -Name 'node' -InstallUrl 'https://nodejs.org/en/download'
 Require-Command -Name 'npm' -InstallUrl 'https://nodejs.org/en/download'
-Require-Command -Name 'python' -InstallUrl 'https://www.python.org/downloads/'
+$pythonExecutable = Invoke-RequiredPython
 
 $nodeMajor = [int](& node -p "Number(process.versions.node.split('.')[0])")
 if ($nodeMajor -lt 20) {
     throw "Node.js 20 or newer is required. Found $(& node --version)."
-}
-
-& python -c "import sys, yaml; assert sys.version_info >= (3, 11)"
-if ($LASTEXITCODE -ne 0) {
-    throw 'Python 3.11 or newer with PyYAML is required. Run: python -m pip install PyYAML'
 }
 
 $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -39,16 +47,23 @@ if ($LASTEXITCODE -ne 0) {
     throw "npm install failed with exit code $LASTEXITCODE."
 }
 
-$autoprompt = Get-Command 'autoprompt' -ErrorAction SilentlyContinue
-if (-not $autoprompt) {
-    Write-Host 'Installed successfully. Open a new terminal, then run: autoprompt'
-    exit 0
+# Resolve the package just installed by npm, not a competing PATH command.
+$globalModules = @(& npm root --global)
+if ($LASTEXITCODE -ne 0 -or $globalModules.Count -ne 1 -or -not $globalModules[0].Trim()) {
+    throw 'Could not resolve the installed npm package root.'
 }
+$installedCli = Join-Path $globalModules[0].Trim() 'autoprompt-skill/bin/autoprompt.cjs'
+if (-not (Test-Path -LiteralPath $installedCli -PathType Leaf)) {
+    throw "Installed Autoprompt entrypoint is missing: $installedCli"
+}
+$installedVersion = & node $installedCli version
+if ($LASTEXITCODE -ne 0) { throw 'The newly installed Autoprompt entrypoint failed.' }
 
-Write-Host "Installed Autoprompt skill $(& autoprompt version)."
+Write-Host "Installed Autoprompt skill $installedVersion."
 if (-not $NoLaunch -and [Environment]::UserInteractive) {
-    & autoprompt
+    & node $installedCli
     exit $LASTEXITCODE
 }
 
-Write-Host 'Run autoprompt to open the provider installer.'
+$quotedCli = $installedCli.Replace("'", "''")
+Write-Host "Open this provider installer with: node '$quotedCli'"

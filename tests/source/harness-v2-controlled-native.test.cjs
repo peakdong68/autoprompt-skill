@@ -47,6 +47,71 @@ test('receipt verifier rejects model-written success, changed results, omitted e
   assert.throws(() => verifier.verify(name, args, serialized, false), { code: 'TOOL_RECEIPT_INVALID' })
 })
 
+test('receipt verifier admits only a journal-bound pre-spawn bash cwd refusal, then accepts an exact retry', async t => {
+  const f = fixture(t, 'prime')
+  const deniedArgs = { command: 'printf must-not-run', cwd: path.join(f.scratch, 'missing-cwd') }
+  await assert.rejects(boundary.executeTool(f.boundary.policy, 'bash', { command: '', cwd: deniedArgs.cwd }), { code: 'TOOL_ARGUMENTS_INVALID' })
+  const denied = await boundary.executeTool(f.boundary.policy, 'bash', deniedArgs)
+  assert.deepEqual(Object.keys(denied).sort(), ['code', 'command', 'executionState', 'exitCode', 'output', 'outputSha256', 'status', 'tool'])
+  assert.equal(denied.executionState, 'NOT_STARTED')
+  assert.equal(denied.code, 'TOOL_PATH_INVALID')
+  const receipt = boundary.appendReceipt(f.boundary, 'bash', deniedArgs, denied, new Date().toISOString())
+  assert.equal(receipt.executionState, 'NOT_STARTED')
+  const verifier = new controlled.ReceiptVerifier('prime', f.boundary)
+  const name = controlled.toolName('prime', 'bash')
+  const serialized = JSON.stringify(denied)
+  assert.throws(() => verifier.verify(name, deniedArgs, JSON.stringify({ ...denied, executionState: undefined }), true), { code: 'TOOL_OUTPUT_INCOMPLETE' })
+  assert.throws(() => verifier.verify(name, deniedArgs, JSON.stringify({ ...denied, background: false }), true), { code: 'TOOL_OUTPUT_INCOMPLETE' })
+  assert.throws(() => verifier.verify(name, deniedArgs, JSON.stringify({ ...denied, signal: 'SIGTERM' }), true), { code: 'TOOL_OUTPUT_INCOMPLETE' })
+  assert.throws(() => verifier.verify(name, deniedArgs, JSON.stringify({ ...denied, code: 'TOOL_CANCELLED' }), true), { code: 'TOOL_OUTPUT_INCOMPLETE' })
+  assert.equal(verifier.verify(name, deniedArgs, serialized, true).executionState, 'NOT_STARTED')
+
+  const sandbox = await boundary.probeCommandSandbox()
+  if (!sandbox.supported) {
+    t.diagnostic(`No exact retry on unsupported sandbox: ${sandbox.code || sandbox.backend}`)
+    assert.equal(verifier.finish().length, 1)
+    return
+  }
+  const retryArgs = { command: 'printf exact-retry', cwd: f.scratch, timeoutMs: 3000 }
+  const retry = await boundary.executeTool(f.boundary.policy, 'bash', retryArgs)
+  assert.equal(retry.status, 'completed')
+  assert.equal(retry.exitCode, 0)
+  boundary.appendReceipt(f.boundary, 'bash', retryArgs, retry, new Date().toISOString())
+  assert.equal(verifier.verify(name, retryArgs, JSON.stringify(retry), false).exitCode, 0)
+  assert.equal(verifier.finish().length, 2)
+})
+
+test('receipt-authenticated no-spawn bash is emitted as a typed failed lifecycle, not foreground output', async t => {
+  const f = fixture(t, 'prime'), args = { command: 'printf must-not-run', cwd: path.join(f.scratch, 'missing-cwd') }
+  const denied = await boundary.executeTool(f.boundary.policy, 'bash', args)
+  boundary.appendReceipt(f.boundary, 'bash', args, denied, new Date().toISOString())
+  const stream = new HarnessEventStream('prime', { commandBoundary: true, toolBoundary: f.boundary })
+  const events = []; stream.emit = event => events.push(event)
+  stream.startTool('no-spawn', controlled.toolName('prime', 'bash'), args)
+  stream.finishTool('no-spawn', JSON.stringify(denied), { error: true })
+  assert.deepEqual(events.map(event => event.type), ['item.started', 'item.failed'])
+  const terminal = events.at(-1).item
+  assert.equal(terminal.type, 'command_execution')
+  assert.equal(terminal.command, args.command)
+  assert.equal(terminal.status, 'failed')
+  assert.equal(terminal.exit_code, null)
+  assert.equal(terminal.preExecutionDenied, true)
+  assert.equal(terminal.controllerReceiptDisposition, 'NOT_STARTED')
+  assert.equal(Object.hasOwn(terminal, 'aggregated_output'), true)
+})
+
+test('an actually started timed-out bash remains incomplete even with a matching receipt', async t => {
+  const sandbox = await boundary.probeCommandSandbox()
+  if (!sandbox.supported) return t.diagnostic(`No started-command timeout on unsupported sandbox: ${sandbox.code || sandbox.backend}`)
+  const f = fixture(t, 'prime'), args = { command: 'sleep 1', cwd: f.scratch, timeoutMs: 20 }
+  const result = await boundary.executeTool(f.boundary.policy, 'bash', args)
+  assert.equal(result.executionState, undefined)
+  assert.equal(result.timedOut, true)
+  boundary.appendReceipt(f.boundary, 'bash', args, result, new Date().toISOString())
+  const verifier = new controlled.ReceiptVerifier('prime', f.boundary)
+  assert.throws(() => verifier.verify(controlled.toolName('prime', 'bash'), args, JSON.stringify(result), true), { code: 'TOOL_OUTPUT_INCOMPLETE' })
+})
+
 // Reasonix has its own native configuration and production-adapter suite.
 for (const provider of ['claude', 'opencode', 'kilo']) {
   test(`${provider}: real native MCP executes an isolated checker command with private receipts`, {

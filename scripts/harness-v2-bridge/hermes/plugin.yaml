@@ -1,0 +1,3 @@
+name: autoprompt_owned
+version: "0.1.0"
+description: Controller-owned fixed tool projection for the Hermes native bridge.

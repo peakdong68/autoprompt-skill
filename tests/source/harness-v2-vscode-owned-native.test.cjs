@@ -14,12 +14,21 @@ const { ProcessOwner, createPosixProcessAdapter } = require('../../agents/codex/
 const quote = value => `'${value.replaceAll("'", "'\\''")}'`
 const enabled = Boolean(process.env.AUTOPROMPT_VSCODE_TEST_CLI)
 
+function closedBinding() {
+  const names = ['AUTOPROMPT_CLOSED_CANARY_OWNERSHIP_ROOT', 'AUTOPROMPT_CLOSED_CANARY_PROVIDER', 'AUTOPROMPT_CLOSED_CANARY_ACTIVATION_ID', 'AUTOPROMPT_CLOSED_CANARY_GENERATION', 'AUTOPROMPT_CLOSED_CANARY_CHALLENGE']
+  const value = Object.fromEntries(names.map(name => [name, process.env[name]]))
+  if (!names.some(name => value[name] !== undefined)) return null
+  if (names.some(name => typeof value[name] !== 'string' || !value[name]) || value.AUTOPROMPT_CLOSED_CANARY_PROVIDER !== 'vscode' || !path.isAbsolute(value.AUTOPROMPT_CLOSED_CANARY_OWNERSHIP_ROOT) || !/^\d+$/.test(value.AUTOPROMPT_CLOSED_CANARY_GENERATION) || !/^[A-Za-z0-9_-]{43}$/.test(value.AUTOPROMPT_CLOSED_CANARY_CHALLENGE)) throw new Error('closed canary VS Code binding is invalid')
+  return { root: value.AUTOPROMPT_CLOSED_CANARY_OWNERSHIP_ROOT, activationId: value.AUTOPROMPT_CLOSED_CANARY_ACTIVATION_ID, generation: Number(value.AUTOPROMPT_CLOSED_CANARY_GENERATION), challenge: value.AUTOPROMPT_CLOSED_CANARY_CHALLENGE }
+}
+
 async function fixture(t, options = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ap-vscode-owned-'))
   const target = path.join(root, 'target'), controller = path.join(root, 'controller'), nativeRoot = path.join(controller, 'native')
   for (const dir of [target, controller, nativeRoot]) fs.mkdirSync(dir, { mode: 0o700 })
+  const closed = closedBinding()
   const projection = core.createCanonicalMissionProjection('Read the assigned candidate and return {"ok":true}.')
-  const record = { activationId: 'vscode-owned-native', generation: 1, workItemId: 'read', sessionId: crypto.randomUUID(), reservationId: crypto.randomUUID(), logicalRole: 'worker', providerRole: 'ap-worker', physicalRole: 'ap-worker', canonicalMission: projection.canonicalMission, workingDirectory: target, dispatch: { requestPointer: { hash: native.sha256('native vscode assignment') } } }
+  const record = { activationId: closed?.activationId || 'vscode-owned-native', generation: closed?.generation || 1, workItemId: 'read', sessionId: crypto.randomUUID(), reservationId: crypto.randomUUID(), logicalRole: 'worker', providerRole: 'ap-worker', physicalRole: 'ap-worker', canonicalMission: projection.canonicalMission, workingDirectory: target, dispatch: { requestPointer: { hash: native.sha256('native vscode assignment') } } }
   record.missionBinding = core.bindCanonicalMissionForChild(projection, { ...record, sourceRequestHash: projection.sourceRequestHash, requestEnvelopeHash: record.dispatch.requestPointer.hash })
   record.physicalExecutionPolicy = { logicalRole: 'worker', providerRole: 'ap-worker', physicalRole: 'ap-worker', sandboxMode: 'read-only' }
   record.environment = Object.fromEntries(['PATH', 'DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR'].filter(name => process.env[name]).map(name => [name, process.env[name]]))
@@ -28,7 +37,9 @@ async function fixture(t, options = {}) {
   fs.writeFileSync(schema, JSON.stringify({ type: 'object', properties: { ok: { const: true } }, required: ['ok'], additionalProperties: false }))
   const binding = native.probeExecutable({ provider: 'vscode', executable: process.env.AUTOPROMPT_VSCODE_TEST_CLI })
   const adapter = createPosixProcessAdapter()
-  const owner = new ProcessOwner({ adapter, registryPath: path.join(controller, 'processes.json'), pollMs: 10 })
+  const registrationRoot = closed ? path.join(closed.root, `vscode-${crypto.randomUUID()}`) : controller
+  if (closed) { fs.mkdirSync(registrationRoot, { mode: 0o700 }); fs.writeFileSync(path.join(registrationRoot, 'registration.json'), JSON.stringify({ schemaVersion: 1, provider: 'vscode', activationId: closed.activationId, generation: closed.generation, challenge: closed.challenge, registryPath: path.join(registrationRoot, 'processes.json') }), { flag: 'wx', mode: 0o600 }) }
+  const owner = new ProcessOwner({ adapter, registryPath: path.join(registrationRoot, 'processes.json'), pollMs: 10 })
   const proxy = path.join(controller, 'proxy'); fs.mkdirSync(proxy, { mode: 0o700 })
   const runner = new core.OwnedCodexProxyRunner({ processOwner: owner, controlRoot: proxy, targetKey: 'vscode-owned', pollMs: 10 })
   const requests = [], errors = []
@@ -38,15 +49,21 @@ async function fixture(t, options = {}) {
       const body = JSON.parse(text); requests.push(body)
       assert.equal(req.headers.authorization, 'Bearer local-fixture')
       if (options.gate) await options.gate(requests.length)
+      if (typeof options.respond === 'function') {
+        await options.respond({ req, res, body, requests, root, target, controller, nativeRoot, scratch })
+        return
+      }
       const first = requests.length === 1 && !options.noTools
       const command = `cat ${quote(path.join(target, 'candidate.txt'))}; printf checked > ${quote(path.join(scratch, 'checked.txt'))}; if printf wrong > ${quote(path.join(target, 'candidate.txt'))} 2>/dev/null; then exit 19; fi; if cat ${quote(path.join(controller, 'private.txt'))} 2>/dev/null; then exit 20; fi`
       res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ id: `owned-request-${requests.length}`, model: 'fixture', choices: [{ index: 0, finish_reason: first ? 'tool_calls' : 'stop', message: first ? { role: 'assistant', content: '', tool_calls: [{ id: 'check-1', type: 'function', function: { name: 'autoprompt_owned_bash', arguments: JSON.stringify({ command }) } }] } : { role: 'assistant', content: '{"ok":true}' } }], usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110, prompt_tokens_details: { cached_tokens: 20 }, completion_tokens_details: { reasoning_tokens: 2 } } }))
+      const structured = body.response_format?.json_schema
+      if (structured) assert.deepEqual(structured, { name: 'autoprompt_result', strict: true, schema: { type: 'object', properties: { canonicalJson: { type: 'string' } }, required: ['canonicalJson'], additionalProperties: false } })
+      res.end(JSON.stringify({ id: `owned-request-${requests.length}`, model: 'fixture', choices: [{ index: 0, finish_reason: first ? 'tool_calls' : 'stop', message: first ? { role: 'assistant', content: '', tool_calls: [{ id: 'check-1', type: 'function', function: { name: 'autoprompt_owned_bash', arguments: JSON.stringify({ command }) } }] } : { role: 'assistant', content: structured ? '{"canonicalJson":"{\\"ok\\":true}"}' : '{"ok":true}' } }], usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110, prompt_tokens_details: { cached_tokens: 20 }, completion_tokens_details: { reasoning_tokens: 2 } } }))
     } catch (error) { errors.push(error.message); res.writeHead(500); res.end() }
   })
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
   const execution = new HarnessExecAdapter({ provider: 'vscode', runner, nativeRoot, executableBinding: binding, targetPath: target,
-    connection: { model: 'fixture', baseUrl: `http://127.0.0.1:${server.address().port}/v1`, maxTokens: 128, maxSteps: 4 }, credentialEnvironment: { OPENROUTER_API_KEY: 'local-fixture' }, rolePrompt: () => 'Use the owned tools and return JSON.', outputSchemaResolver: () => schema })
+    connection: { model: 'fixture', baseUrl: `http://127.0.0.1:${server.address().port}/v1`, maxTokens: 128, maxSteps: 4, ...(options.structured ? { supportsStructuredOutput: true } : {}) }, credentialEnvironment: { OPENROUTER_API_KEY: 'local-fixture' }, rolePrompt: () => 'Use the owned tools and return JSON.', outputSchemaResolver: () => schema })
   t.after(async () => {
     await owner.cancelAll({ reason: 'VS Code native test cleanup', graceMs: 0, killMs: 2000 })
     server.closeAllConnections(); await new Promise(resolve => server.close(resolve))
@@ -56,8 +73,8 @@ async function fixture(t, options = {}) {
   return { root, target, controller, scratch, nativeRoot, record, requests, errors, runner, execution }
 }
 
-test('real VS Code owned BYOK session executes controlled tools, bills exact usage, and resumes privately', { skip: !enabled, timeout: 150000 }, async t => {
-  const f = await fixture(t)
+if (require.main === module) test('real VS Code owned BYOK session executes controlled tools, bills exact usage, and resumes privately', { skip: !enabled, timeout: 150000 }, async t => {
+  const f = await fixture(t, { structured: true })
   fs.writeFileSync(path.join(f.target, 'candidate.txt'), 'native-vscode-candidate')
   fs.writeFileSync(path.join(f.target, 'AGENTS.md'), 'FOREIGN_VSCODE_PROMPT_MUST_NOT_LOAD')
   fs.writeFileSync(path.join(f.controller, 'private.txt'), 'PRIVATE_VSCODE_CONTROLLER')
@@ -79,11 +96,46 @@ test('real VS Code owned BYOK session executes controlled tools, bills exact usa
   assert.equal(f.requests[3].messages.some(message => message.role === 'tool'), false)
   assert.deepEqual(f.errors, [])
   assert.ok(f.requests.every(request => request.reasoning?.effort === 'low'), 'The pinned effort must reach the actual provider request')
+  assert.ok(f.requests.every(request => request.response_format?.json_schema?.strict === true), 'Every native request must carry the opted-in strict schema')
 })
 
 module.exports = { fixture }
 
-test('real VS Code concurrent owned sessions isolate sibling cancellation and drain', { skip: !enabled, timeout: 150000 }, async t => {
+if (require.main === module) test('real VS Code zero-tool reservation advertises no tools', { skip: !enabled, timeout: 90000 }, async t => {
+  const f = await fixture(t, { noTools: true })
+  const result = await f.execution.launch({ ...f.record, providerToolCallLimit: 0 })
+  assert.equal(result.ok, true)
+  assert.ok(f.requests.length > 0)
+  for (const request of f.requests) {
+    assert.deepEqual(request.tools || [], [])
+    assert.equal(request.response_format, undefined, 'structured output must remain off until the explicit capability opt-in')
+  }
+  assert.equal(result.toolBoundaryEvidence.receiptHashes.length, 0)
+})
+
+if (require.main === module) test('real VS Code rejects a terminal that violates the opted-in canonicalJson schema', { skip: !enabled, timeout: 90000 }, async t => {
+  const f = await fixture(t, { structured: true, noTools: true, respond: ({ res, body }) => {
+    assert.deepEqual(body.response_format?.json_schema, { name: 'autoprompt_result', strict: true, schema: { type: 'object', properties: { canonicalJson: { type: 'string' } }, required: ['canonicalJson'], additionalProperties: false } })
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ id: 'owned-schema-mismatch', model: 'fixture', choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: '{\"ok\":true}' } }], usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110, prompt_tokens_details: { cached_tokens: 20 }, completion_tokens_details: { reasoning_tokens: 2 } } }))
+  } })
+  await assert.rejects(f.execution.launch(f.record), { code: 'CHILD_RESULT_INVALID' })
+  assert.equal(f.requests.length, 1)
+  assert.deepEqual(f.errors, [])
+})
+
+if (require.main === module) test('real VS Code classifies prose-wrapped terminal JSON as an invalid child result', { skip: !enabled, timeout: 90000 }, async t => {
+  const f = await fixture(t, { structured: true, noTools: true, respond: ({ res, body }) => {
+    assert.equal(body.response_format?.json_schema?.strict, true)
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ id: 'owned-prose-wrapped-result', model: 'fixture', choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'Now I have the result.\n```json\n{"canonicalJson":"{\\"ok\\":true}"}\n```' } }], usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110, prompt_tokens_details: { cached_tokens: 20 }, completion_tokens_details: { reasoning_tokens: 2 } } }))
+  } })
+  await assert.rejects(f.execution.launch(f.record), { code: 'CHILD_RESULT_INVALID', message: 'Owned VS Code session failed' })
+  assert.equal(f.requests.length, 1)
+  assert.deepEqual(f.errors, [])
+})
+
+if (require.main === module) test('real VS Code concurrent owned sessions isolate sibling cancellation and drain', { skip: !enabled, timeout: 150000 }, async t => {
   const pending = new Map()
   const f = await fixture(t, { noTools: true, gate: count => new Promise(resolve => pending.set(count, resolve)) })
   t.after(() => { for (const release of pending.values()) release() })
@@ -112,7 +164,18 @@ test('real VS Code concurrent owned sessions isolate sibling cancellation and dr
   }
 })
 
-test('real VS Code owned BYOK live model reads the candidate through controlled tools', {
+if (require.main === module) test('real VS Code preserves a validated receipt when the provider rejects its finish reason', { skip: !enabled, timeout: 150000 }, async t => {
+  const f = await fixture(t, { noTools: true, respond: ({ res }) => {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ id: 'owned-rejected-receipt', model: 'fixture', choices: [{ index: 0, finish_reason: 'length', message: { role: 'assistant', content: '{"ok":true}' } }],
+      usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110, prompt_tokens_details: { cached_tokens: 20 }, completion_tokens_details: { reasoning_tokens: 2 } } }))
+  } })
+  const debits = []
+  await assert.rejects(f.execution.launch({ ...f.record, onUsageDelta: delta => { debits.push(delta); return { continue: true } } }), { code: 'CHILD_RUNTIME_FAILURE' })
+  assert.deepEqual(debits, [{ noncachedInput: 80, cachedInput: 20, output: 10, reasoning: 2 }])
+})
+
+if (require.main === module) test('real VS Code owned BYOK live model reads the candidate through controlled tools', {
   skip: !enabled || !process.env.AUTOPROMPT_VSCODE_LIVE_KEY_FILE, timeout: 150000,
 }, async t => {
   const f = await fixture(t, { noTools: true })

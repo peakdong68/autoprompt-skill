@@ -11,7 +11,8 @@
     "admissionPolicy",
     "attestationVerificationPolicy",
     "verificationAttestationSchema",
-    "providers"
+    "providers",
+    "reviewedLocalVerificationPolicy"
   ],
   "properties": {
     "$schema": {
@@ -80,23 +81,55 @@
         "failureStatus"
       ],
       "properties": {
-        "canonicalization": { "const": "stable-json-v1" },
-        "excludedSignedPaths": { "const": ["signature.value"] },
-        "trustedKeySource": { "const": "runtime-trusted-key-ring" },
-        "acceptedAlgorithms": { "const": ["ed25519", "ecdsa-p256-sha256"] },
+        "canonicalization": {
+          "const": "stable-json-v1"
+        },
+        "excludedSignedPaths": {
+          "const": [
+            "signature.value"
+          ]
+        },
+        "trustedKeySource": {
+          "const": "runtime-trusted-key-ring"
+        },
+        "acceptedAlgorithms": {
+          "const": [
+            "ed25519",
+            "ecdsa-p256-sha256"
+          ]
+        },
         "freshness": {
           "type": "object",
-          "required": ["issuedAtNotAfterVerificationTime", "expiresAtAfterVerificationTime"],
+          "required": [
+            "issuedAtNotAfterVerificationTime",
+            "expiresAtAfterVerificationTime"
+          ],
           "properties": {
-            "issuedAtNotAfterVerificationTime": { "const": true },
-            "expiresAtAfterVerificationTime": { "const": true }
+            "issuedAtNotAfterVerificationTime": {
+              "const": true
+            },
+            "expiresAtAfterVerificationTime": {
+              "const": true
+            }
           },
           "additionalProperties": false
         },
-        "requiredBindings": { "const": ["providerId", "runtimeIdentityHash", "activationNonce"] },
-        "requiredCapabilityRule": { "const": "every-required-capability-must-be-attested" },
-        "acceptedResult": { "const": "supported" },
-        "failureStatus": { "const": "PROVIDER_UNSUPPORTED" }
+        "requiredBindings": {
+          "const": [
+            "providerId",
+            "runtimeIdentityHash",
+            "activationNonce"
+          ]
+        },
+        "requiredCapabilityRule": {
+          "const": "every-required-capability-must-be-attested"
+        },
+        "acceptedResult": {
+          "const": "supported"
+        },
+        "failureStatus": {
+          "const": "PROVIDER_UNSUPPORTED"
+        }
       },
       "additionalProperties": false
     },
@@ -153,10 +186,49 @@
     },
     "providers": {
       "type": "array",
-      "minItems": 9,
-      "maxItems": 9,
+      "minItems": 11,
+      "maxItems": 11,
       "items": {
         "$ref": "#/$defs/provider"
+      }
+    },
+    "reviewedLocalVerificationPolicy": {
+      "const": {
+        "policy": "reviewed-local-release-v1",
+        "authority": "maintainer-authenticated-release-review",
+        "independentSignature": false,
+        "requiredReviewBindings": [
+          "provider",
+          "platform",
+          "architecture",
+          "native-executable-and-portable-dependencies",
+          "installed-runtime-minus-exact-trust-files",
+          "canary-implementation",
+          "eleven-distinct-capability-cases",
+          "reviewed-live-evidence",
+          "issuer",
+          "issued-at",
+          "expires-at"
+        ],
+        "requiredCanaryBindings": [
+          "activation-id",
+          "generation",
+          "random-challenge",
+          "request",
+          "target",
+          "connection",
+          "full-local-native-identity",
+          "installed-payload",
+          "enforcement-proof",
+          "review-digest",
+          "exact-observation-artifacts"
+        ],
+        "executionDeadline": "minimum-of-activation-expiry-review-expiry-and-bounded-batch-limit",
+        "requiredCapabilities": "all-eleven-actual-native-behavioral-cases",
+        "resume": "fresh-canary-and-exact-immutable-local-bindings",
+        "priorInvalidTrust": "refuse-without-fallback",
+        "supportedPlatform": "linux-with-verified-command-sandbox-and-durable-process-ownership",
+        "statusBeforeSuccessfulCanary": "unknown"
       }
     }
   },
@@ -204,7 +276,9 @@
             "prime",
             "omp",
             "deepseek",
-            "reasonix"
+            "reasonix",
+            "hermes",
+            "grok"
           ]
         },
         "issuer": {
@@ -378,13 +452,15 @@
             "prime",
             "omp",
             "deepseek",
-            "reasonix"
+            "reasonix",
+            "hermes",
+            "grok"
           ]
         },
         "priority": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 9
+          "maximum": 11
         },
         "implementationStatus": {
           "enum": [

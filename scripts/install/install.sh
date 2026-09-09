@@ -28,6 +28,25 @@
 
 set -u
 
+# macOS ships Bash 3.2, while install-lib.sh requires Bash 4.3 features.
+# Re-exec before sourcing it; this block itself stays Bash 3.2 compatible.
+if [[ "$(uname -s 2>/dev/null || true)" == Darwin ]] && (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 3) )); then
+  autoprompt_modern_bash=''
+  for autoprompt_bash_candidate in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+    if [[ -x "$autoprompt_bash_candidate" ]] && "$autoprompt_bash_candidate" -c '(( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 3) ))' >/dev/null 2>&1; then
+      autoprompt_modern_bash="$autoprompt_bash_candidate"; break
+    fi
+  done
+  if [[ -z "$autoprompt_modern_bash" ]] && command -v brew >/dev/null 2>&1; then
+    autoprompt_bash_prefix="$(brew --prefix bash 2>/dev/null || true)"
+    autoprompt_bash_candidate="$autoprompt_bash_prefix/bin/bash"
+    if [[ -x "$autoprompt_bash_candidate" ]] && "$autoprompt_bash_candidate" -c '(( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 3) ))' >/dev/null 2>&1; then autoprompt_modern_bash="$autoprompt_bash_candidate"; fi
+  fi
+  if [[ -n "$autoprompt_modern_bash" ]]; then exec "$autoprompt_modern_bash" "$0" "$@"; fi
+  printf 'Error: Bash 4.3 or newer is required on macOS. Install it with: brew install bash\n' >&2
+  exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB="$SCRIPT_DIR/lib/install-lib.sh"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -41,10 +60,14 @@ fi
 # shellcheck source=/dev/null
 . "$SCRIPT_DIR/harness-v2.sh"
 
-CLIENTS_ALL=(claude codex opencode kilo vscode prime omp deepseek reasonix)
+CLIENTS_ALL=(claude codex opencode kilo vscode prime omp deepseek hermes grok reasonix)
 
 # Per-run result rows for the matrix (RESULT=/SKIP= lines), filled in this shell.
 RESULT_ROWS=()
+# Destinations are kept out of the human-readable row grammar. Supported roots
+# can contain whitespace or marker-looking text such as "format=", so reparsing
+# RESULT_ROWS would silently truncate a successful destination.
+RESULT_PASS_DESTINATIONS=()
 ANY_FAIL=0
 RETAINED_RECOVERY=0
 LEGACY_CODEX_RECOVERY_NAME='.autoprompt-legacy-codex-recovery'
@@ -56,6 +79,22 @@ install_exit_code() {
     return
   fi
   printf '%s' "$ANY_FAIL"
+}
+
+add_pass_result() {
+  local client="$1" destination="$2" format="$3" detail="${4:-}"
+  local destination_index="${#RESULT_PASS_DESTINATIONS[@]}"
+  RESULT_ROWS+=("RESULT=PASS client=$client destination-index=$destination_index format=$format detail=$detail")
+  RESULT_PASS_DESTINATIONS+=("$destination")
+}
+
+result_destination_for_row() {
+  local line="$1" destination_index
+  destination_index="${line#* destination-index=}"
+  destination_index="${destination_index%% *}"
+  [[ "$destination_index" =~ ^[0-9]+$ ]] || return 1
+  [ "$destination_index" -lt "${#RESULT_PASS_DESTINATIONS[@]}" ] || return 1
+  printf '%s' "${RESULT_PASS_DESTINATIONS[destination_index]}"
 }
 
 usage() {
@@ -78,6 +117,8 @@ payload_file() {
     omp)      printf '%s' "$REPO_ROOT/agents/omp/SKILL.md" ;;
     deepseek) printf '%s' "$REPO_ROOT/agents/deepseek/SKILL.md" ;;
     reasonix) printf '%s' "$REPO_ROOT/agents/reasonix/SKILL.md" ;;
+    hermes) printf '%s' "$REPO_ROOT/agents/hermes/SKILL.md" ;;
+    grok) printf '%s' "$REPO_ROOT/agents/grok/SKILL.md" ;;
     *) return 1 ;;
   esac
 }
@@ -121,7 +162,7 @@ install_reasonix_lifecycle() {
   local destination
   destination="$(config_root reasonix)"
   if node "$REPO_ROOT/scripts/reasonix-package.cjs" install --root "$destination"; then
-    RESULT_ROWS+=("RESULT=PASS client=reasonix dest=$destination format=private-v2")
+    add_pass_result reasonix "$destination" private-v2
   else
     RESULT_ROWS+=("RESULT=FAIL client=reasonix stage=lifecycle")
     ANY_FAIL=1
@@ -158,7 +199,7 @@ install_prime_lifecycle() {
   fi
   printf 'Autoprompt install (prime): PASS - landed %s (48 files, rlmMaxDepth=4).\n' \
     "$destination" >&2
-  RESULT_ROWS+=("RESULT=PASS client=prime dest=$destination format=prime-package detail=files=48")
+  add_pass_result prime "$destination" prime-package files=48
 }
 
 # codex_config_file, extras source + destination helpers.
@@ -1221,12 +1262,13 @@ _landing_verify() {
 
 _landing_publish_success() {
   local client="$1" install_record="$2" verify_record="$3" landed format
+  # The final format marker is emitted by verify_install after the destination.
+  # '%' removes that shortest suffix, preserving spaces and earlier marker text
+  # in the verified destination itself.
   landed="${verify_record#client=* verify=pass dest=}"
   landed="${landed% format=*}"
   format="${verify_record##* format=}"
-  RESULT_ROWS+=(
-    "RESULT=PASS client=$client dest=$landed format=$format signal=verify=pass detail=$install_record"
-  )
+  add_pass_result "$client" "$landed" "$format" "$install_record"
 }
 
 install_landing() {
@@ -1605,12 +1647,13 @@ rollback_root() {
 }
 
 print_matrix() {
-  local line client detail
+  local line client detail index
   printf '\n==== Autoprompt install matrix ====\n'
-  for line in "${RESULT_ROWS[@]}"; do
+  for ((index = 0; index < ${#RESULT_ROWS[@]}; index++)); do
+    line="${RESULT_ROWS[index]}"
     client="${line#* client=}"; client="${client%% *}"
     case "$line" in
-      RESULT=PASS*) detail="${line#* dest=}"; printf '  PASS  %-9s dest=%s\n' "$client" "${detail%% *}" ;;
+      RESULT=PASS*) detail="$(result_destination_for_row "$line")"; printf '  PASS  %-9s dest=%s\n' "$client" "$detail" ;;
       RESULT=FAIL*) detail="${line#* stage=}"; printf '  FAIL  %-9s stage=%s\n' "$client" "${detail%% *}" ;;
       SKIP=*)       detail="${line#* reason=}"; printf '  SKIP  %-9s reason=%s\n' "$client" "${detail%% *}" ;;
     esac
@@ -1656,7 +1699,7 @@ report_root_success() {
     case "$line" in
       RESULT=PASS*)
         client="${line#* client=}"; client="${client%% *}"
-        landed="${line#* dest=}"; landed="${landed%% *}"
+        landed="$(result_destination_for_row "$line")" || return 1
         fmt="${line#* format=}"; fmt="${fmt%% *}"
         detail="${line#* detail=}"
         printf 'Autoprompt install (%s): PASS - landed %s (format %s, %s)\n' \

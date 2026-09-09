@@ -434,11 +434,113 @@ test('AP-ISO-002 canonical CLI activation reaches the private versioned role bun
     codexRuntimeManifest.payloadGeneration)
   assert.equal(fs.existsSync(path.join(context.root, 'agents')), false)
   const saved = JSON.parse(fs.readFileSync(
-    path.join(launched.options.env.CODEX_HOME, 'activation.json'), 'utf8',
+    launched.options.env.AUTOPROMPT_ACTIVATION_RECORD, 'utf8',
   ))
   assert.equal(saved.status, 'revoked')
   assert.equal(saved.capability.status, 'revoked')
   assert.match(streams.values().stdout, /status=0 revoked=true/)
+})
+
+test('AP-ISO-002A native Codex trust state cannot mutate the activation authority', {
+  timeout: CASE_TIMEOUT_MS,
+}, t => {
+  const context = makeCase(t, { foreignCompanion: false })
+  const prepared = prepare(context, ['native trust isolation'])
+  const authority = path.join(prepared.activationRoot, 'config.toml')
+  const nativeHome = prepared.probeEnvironment.CODEX_HOME
+  const nativeConfig = path.join(nativeHome, 'config.toml')
+  const authorityHash = sha256(authority)
+
+  assert.equal(nativeHome, activation.nativeCodexHomePath(prepared.activationRoot))
+  assert.notEqual(nativeHome, prepared.activationRoot)
+  assert.equal(prepared.probeEnvironment.HOME, nativeHome)
+  assert.equal(prepared.probeEnvironment.USERPROFILE, nativeHome)
+  assert.deepEqual(fs.readFileSync(nativeConfig), fs.readFileSync(authority))
+
+  // This uses the admitted pinned Codex executable against the projected
+  // profile before modeling the observed native project-trust append.
+  const snapshot = promptInputSnapshot(context, {
+    env: prepared.probeEnvironment,
+    profile: 'autoprompt',
+    prompt: prepared.record.supervisorEntry.prompt,
+  })
+  assert.equal(snapshot.activationVisible, true)
+  fs.appendFileSync(nativeConfig, `\n[projects.${JSON.stringify(context.target)}]\ntrust_level = "trusted"\n`)
+  assert.equal(sha256(authority), authorityHash)
+  assert.equal(activation.revokeAllActivations({
+    env: context.env, reason: 'native-trust-state-cleanup',
+  }).revoked, 1)
+
+  const resumed = prepare(context, ['native trust isolation'], {
+    now: new Date(FIXED_NOW.getTime() + 1_000), resume: prepared.activationId,
+  })
+  assert.equal(resumed.probeEnvironment.CODEX_HOME, nativeHome)
+  assert.deepEqual(fs.readFileSync(nativeConfig), fs.readFileSync(authority))
+  assert.equal(activation.revokeAllActivations({
+    env: context.env, reason: 'native-trust-state-resume-cleanup',
+  }).revoked, 1)
+
+  const tampered = prepare(context, ['authority tamper remains denied'])
+  fs.appendFileSync(path.join(tampered.activationRoot, 'config.toml'), '\n# tampered\n')
+  assert.throws(() => activation.revokeAllActivations({
+    env: context.env, reason: 'authority-tamper',
+  }), /activation-config binding is invalid/)
+})
+
+test('AP-ISO-002B native home reseeding rejects linked mutable configs and auth replacement', {
+  timeout: CASE_TIMEOUT_MS,
+}, t => {
+  for (const mode of ['symlink', 'hardlink']) {
+    const context = makeCase(t, { foreignCompanion: false })
+    const prepared = prepare(context, [`linked mutable config ${mode}`])
+    assert.equal(activation.revokeAllActivations({
+      env: context.env, reason: `linked-native-home-${mode}`,
+    }).revoked, 1)
+    const nativeConfig = path.join(prepared.probeEnvironment.CODEX_HOME, 'config.toml')
+    fs.unlinkSync(nativeConfig)
+    if (mode === 'symlink') {
+      const foreign = path.join(context.sandbox, 'foreign-config.toml')
+      fs.writeFileSync(foreign, '# foreign\n')
+      fs.symlinkSync(foreign, nativeConfig)
+    } else {
+      fs.linkSync(path.join(prepared.activationRoot, 'config.toml'), nativeConfig)
+    }
+    assert.throws(() => prepare(context, [`linked mutable config ${mode}`], {
+      now: new Date(FIXED_NOW.getTime() + 1_000), resume: prepared.activationId,
+    }), /activation-config-not-regular|activation-private-permissions-invalid|private-write-target-not-regular/)
+  }
+
+  const context = makeCase(t, { foreignCompanion: false })
+  const prepared = prepare(context, ['exclusive native auth'])
+  assert.equal(activation.revokeAllActivations({
+    env: context.env, reason: 'exclusive-auth-precondition',
+  }).revoked, 1)
+  const nativeAuth = path.join(prepared.probeEnvironment.CODEX_HOME, 'auth.json')
+  fs.writeFileSync(nativeAuth, '{"foreign":"pre-existing"}\n', { mode: 0o600 })
+  assert.throws(() => activation.launchActivation({
+    env: context.env,
+    missionArgs: ['exclusive native auth'],
+    resume: prepared.activationId,
+    spawnSync: activationProbeSpawn(),
+    target: context.target,
+    ttlSeconds: 600,
+    now: new Date(FIXED_NOW.getTime() + 1_000),
+    stdio: 'ignore',
+  }), error => error && error.code === 'EEXIST')
+
+  const linkedContext = makeCase(t, { foreignCompanion: false })
+  const linkedPrepared = prepare(linkedContext, ['linked native home revocation'])
+  const externalHome = path.join(linkedContext.home, 'foreign-native-home')
+  const externalAuth = path.join(externalHome, 'auth.json')
+  fs.mkdirSync(externalHome)
+  fs.writeFileSync(externalAuth, '{"foreign":"must-remain"}\n', { mode: 0o600 })
+  const linkedNativeHome = linkedPrepared.probeEnvironment.CODEX_HOME
+  fs.rmSync(linkedNativeHome, { recursive: true, force: true })
+  fs.symlinkSync(externalHome, linkedNativeHome)
+  assert.throws(() => activation.revokeAllActivations({
+    env: linkedContext.env, reason: 'linked-native-home-revocation',
+  }), /activation-private-permissions-invalid|private-state-directory-unsafe/)
+  assert.equal(fs.readFileSync(externalAuth, 'utf8'), '{"foreign":"must-remain"}\n')
 })
 
 test('AP-ISO-004 clean-home private model input excludes every ambient skill', {

@@ -41,6 +41,9 @@ const {
   createConcreteSupervisor,
   createDefaultRouteExecutor,
   createCheckerObservationBinding,
+  createCodexJsonlAccumulator,
+  checkerResultBoundToCommandExecutionEvidence,
+  canonicalCheckerVerificationAuthority,
   createCheckerScratchFactory,
   codexPhysicalExecutionReceipt,
   createDefaultRuntimeOptions,
@@ -56,6 +59,7 @@ const {
   launchCodexChildWithCheckerReassessment,
   providerRuntimeIdentityHash,
   renderPlanArtifact,
+  runAbortOwnedSupervisor,
   resolveTerminalReceiptCandidateHash,
   createRoadmapPlanLineageReceipt,
   resumePlanProjectionAccepted,
@@ -2482,6 +2486,85 @@ test('fresh ROADMAP elides every advisory planner and starts product verificatio
     'DETERMINISTIC_ROADMAP')
 })
 
+test('child dispatch preserves activation expiry and rejects an expired capability before launch', async t => {
+  const fixture = configureRoadmapCompositionHarness(t, [], { completeProduct: true })
+  const expiresAt = new Date(Date.now() - 1000).toISOString()
+  fixture.harness.runtimeOptions.activationExpiresAt = expiresAt
+  const checkedExpiries = []
+  const inspect = safeEnvironmentFactory()
+  fixture.harness.runtimeOptions.safeEnvFactory = (target, environment, options) => {
+    checkedExpiries.push(options.activationExpiresAt)
+    return inspect(target, environment, options)
+  }
+  const runtime = new CodexSupervisorRuntime(fixture.harness.runtimeOptions)
+  const result = await runtime.start()
+  assert.equal(result.outcome, 'FAILED', JSON.stringify(result))
+  assert.equal(result.terminalEnvelope.error.code, 'ACTIVATION_EXPIRED', JSON.stringify(result))
+  assert.deepEqual(checkedExpiries, [expiresAt])
+  assert.equal(fixture.harness.launches.length, 0)
+  assert.equal(runtime.childTokenReservations.size, 0)
+})
+
+for (const changedPointer of [false, true]) {
+test(`scratch confirmation authenticates the scheduler persisted report with ${changedPointer ? 'foreign' : 'exact'} pointer bytes`, async t => {
+  const fixture = configureRoadmapCompositionHarness(t, [], {
+    completeProduct: true, productCheckerCodes: ['PASS', 'PASS'],
+    canonicalResultPointers: true, changedScratchPointer: changedPointer,
+    productCheckerTransform(launch, base) {
+      const scratch = launch.checkerScratchBoundary
+      assert.ok(scratch)
+      const confirmation = launch.workItemId.includes('scratch-confirmation')
+      const harnessPath = path.join(scratch.writableScratchRoot, 'verify.cjs')
+      fs.writeFileSync(harnessPath, [
+        "const assert = require('node:assert/strict'), path = require('node:path')",
+        "const actual = require(path.join(process.argv[2], 'src/example.js'))",
+        confirmation ? "assert.equal(actual.length, 6)" : "assert.equal(actual, 'work-1')",
+        "console.log(JSON.stringify({passCount:1,failureCount:0}))",
+      ].join('\n'))
+      const command = `${process.execPath} ${harnessPath} ${scratch.frozenCandidateRoot}`
+      const record = { ...launch, continuationId: base.contextId,
+        requestEnvelopeHash: launch.canonicalAssignment.requestEnvelopeHash }
+      const accumulator = createCodexJsonlAccumulator(record)
+      accumulator.push(JSON.stringify({ type: 'item.started', item: {
+        id: 'scratch-proof', type: 'command_execution', command,
+      } }))
+      const executed = spawnSync(process.execPath, [harnessPath, scratch.frozenCandidateRoot], { encoding: 'utf8' })
+      assert.equal(executed.status, 0, executed.stderr)
+      accumulator.push(JSON.stringify({ type: 'item.completed', item: {
+        id: 'scratch-proof', type: 'command_execution', command,
+        status: 'completed', exit_code: 0, aggregated_output: executed.stdout,
+      } }))
+      const result = checkerResultBoundToCommandExecutionEvidence({
+        ...base, payload: { ...base.payload,
+          testOutcomes: launch.canonicalAssignment.checks.map(checkId => ({ checkId, status: 'PASS' })),
+          referenceMethod: checkerReferenceMethod(confirmation ? 'independent-model' : 'black-box-boundary', launch.workItemId),
+        },
+      }, accumulator.snapshot(), record)
+      assert.equal(result.cause.event, 'CHECK_SCRATCH_CONFIRMATION_REQUIRED')
+      assert.ok(canonicalCheckerVerificationAuthority(result))
+      return result
+    },
+  })
+  const outcome = await new CodexSupervisorRuntime(fixture.harness.runtimeOptions).start()
+  const primary = fixture.routeReturns.get('independent-check-1')
+  assert.ok(primary.transcriptEvidence, 'the real scheduler enriches its live return')
+  const durable = JSON.parse(fs.readFileSync(fixture.harness.record.resolve(
+    `work/results/${crypto.createHash('sha256').update('independent-check-1').digest('hex')}.json`), 'utf8'))
+  assert.equal(Object.hasOwn(durable, 'transcriptEvidence'), false,
+    'canonical persistence must retain its original exact terminal spelling')
+  const confirmation = fixture.routeRequests.get('independent-check-1-scratch-confirmation-1')
+  if (changedPointer) {
+    assert.equal(confirmation, undefined)
+    assert.match(JSON.stringify(outcome), /SCRATCH_PASS_CONFIRMATION_INCOMPLETE/)
+  } else {
+    assert.ok(confirmation, JSON.stringify(outcome.terminalEnvelope))
+    assert.equal(confirmation.fetchedEvidence.primaryScratchCoverage.resultHash,
+      crypto.createHash('sha256').update(stableStringify(durable)).digest('hex'))
+    assert.equal(outcome.outcome, 'DONE', JSON.stringify(outcome))
+  }
+})
+}
+
 test('an explicit 24k activation preserves the candidate when remaining quota cannot fit checking', async t => {
   let upstreamRequests = 0
   const upstream = http.createServer((_request, response) => {
@@ -2561,10 +2644,12 @@ test('an explicit 24k activation preserves the candidate when remaining quota ca
     profilePath: path.join(ROOT, 'agents', 'codex', 'autoprompt.config.toml'),
     checkerScratchVerifier: launch => launch.checkerScratchBoundary,
     providerSchemaRoot: tempDirectory(t, 'autoprompt-quota-starved-checker-schema-'),
-    cumulativeQuotaProxyFactory: options => startCodexCumulativeQuotaProxy({
-      ...options,
-      upstreamBaseUrl: `http://127.0.0.1:${upstream.address().port}/v1`,
-    }),
+    environmentOverlay: { OPENAI_BASE_URL: `http://127.0.0.1:${upstream.address().port}/v1` },
+    cumulativeQuotaProxyFactory: options => {
+      assert.equal(options.upstreamBaseUrl, `http://127.0.0.1:${upstream.address().port}/v1`,
+        'the production adapter must preserve the configured BYOK endpoint')
+      return startCodexCumulativeQuotaProxy(options)
+    },
     outputSchemaResolver: () => path.join(
       ROOT, 'agents', 'contracts', 'schemas', 'outcome.schema.json',
     ),
@@ -5106,7 +5191,13 @@ test('required local child can stay stdout-silent past the analyst watchdog and 
   assert.equal(timeoutStops, 0)
 })
 
-test('optional pre-route analyst absolute timeout drains once and conservative local work continues', async t => {
+for (const { drainErrorCode, expireCleanup = false, expireTerminal = false, pendingRequest = false } of [
+  ...['CHILD_CANCELLED', 'PROCESS_DRAIN_TIMEOUT', 'PROCESS_REGISTRY_FAILURE', 'USAGE_RECEIPT_INVALID'].map(drainErrorCode => ({ drainErrorCode })),
+  { drainErrorCode: 'CHILD_CANCELLED', expireCleanup: true },
+  { drainErrorCode: 'CHILD_CANCELLED', expireCleanup: true, expireTerminal: true },
+  { drainErrorCode: 'CHILD_CANCELLED', expireCleanup: true, pendingRequest: true },
+]) {
+test(`optional pre-route analyst absolute timeout settles ${drainErrorCode}${expireCleanup ? ' after cleanup expiry' : ''}${expireTerminal ? ' and bounded terminal failure' : ''}${pendingRequest ? ' with an unresolved provider allowance' : ''} before fallback`, async t => {
   const timerApi = manualTimerApi()
   const harness = makeHarness(t, {
     activationId: 'activation-analyst-timeout',
@@ -5116,6 +5207,8 @@ test('optional pre-route analyst absolute timeout drains once and conservative l
   let announceAnalyst
   const analystLaunched = new Promise(resolve => { announceAnalyst = resolve })
   let analystStops = 0
+  let finishAnalystDrain
+  let lateUsageAccounted = false
   let productLaunches = 0
   harness.runtimeOptions.onChildTransportTimeout = async input => {
     assert.equal(input.logicalRole, 'route-analyst')
@@ -5136,8 +5229,21 @@ test('optional pre-route analyst absolute timeout drains once and conservative l
     if (launch.logicalRole === 'route-analyst') {
       assert.equal(launch.onTransportActivity, undefined,
         'optional transport activity cannot extend the absolute route-analysis ceiling')
+      if (pendingRequest) launch.onProviderRequestStarted({
+        tokenLimit: launch.providerTokenLimit, maximumUnaccountedTokens: launch.providerTokenLimit,
+        requestOrdinal: 1, completedRequestCount: 0, accountedUsage: ZERO_USAGE, priorLeaseModelTokens: 0,
+      })
       announceAnalyst()
-      return new Promise(() => {})
+      return new Promise((resolve, reject) => {
+        launch.signal.addEventListener('abort', () => {
+          finishAnalystDrain = () => {
+            const usage = { noncachedInput: 7, cachedInput: 0, output: 2, reasoning: 0 }
+            launch.onUsageDelta(usage, usage)
+            lateUsageAccounted = true
+            reject(Object.assign(new Error('owned analyst cancelled after receipt drain'), { code: drainErrorCode }))
+          }
+        }, { once: true })
+      })
     }
     productLaunches += 1
     assert.equal(launch.onTransportActivity, undefined)
@@ -5146,15 +5252,60 @@ test('optional pre-route analyst absolute timeout drains once and conservative l
       contextId: `context:${launch.workItemId}`,
     })
   }
-  const started = new CodexSupervisorRuntime(harness.runtimeOptions).start()
+  const runtime = new CodexSupervisorRuntime(harness.runtimeOptions)
+  const started = runtime.start()
+  // The permanently stuck case must observe the terminal rejection without
+  // an unhandled rejection while the manual physical watchdogs advance.
+  let terminalSettled = false
+  const terminal = started.then(value => ({ value }), error => ({ error }))
+    .then(value => { terminalSettled = true; return value })
   await analystLaunched
   timerApi.advance(5)
   await flushMicrotasks(30)
-  const result = await started
-  assert.equal(result.outcome, 'DONE', JSON.stringify(result))
   assert.equal(analystStops, 1)
-  assert.equal(productLaunches, 1)
+  assert.equal(productLaunches, 0, 'fallback cannot release the analyst lease before receipt drain')
+  assert.equal(typeof finishAnalystDrain, 'function')
+  if (expireCleanup) {
+    timerApi.advance(60_000)
+    await flushMicrotasks(80)
+    assert.equal(terminalSettled, false, 'terminal completion must wait for the live accounting owner')
+    assert.equal(runtime.scheduler.getMetrics().counters.currentLiveChildren, 1)
+    assert.equal(runtime.childTokenReservations.size, 1)
+    assert.equal(productLaunches, 0)
+  }
+  if (expireTerminal) {
+    for (let attempt = 0; attempt < 8 && !terminalSettled; attempt += 1) {
+      timerApi.advance(60_000)
+      await flushMicrotasks(80)
+    }
+    assert.equal(terminalSettled, true, 'a stuck launch must not make global terminal drain unbounded')
+    const failed = await terminal
+    assert.equal(failed.error?.code, 'PROCESS_DRAIN_TIMEOUT')
+    assert.equal(runtime.scheduler.getMetrics().counters.currentLiveChildren, 1,
+      'failure does not fabricate physical completion or release the usage owner')
+    assert.equal(runtime.childTokenReservations.size, 1)
+  }
+  finishAnalystDrain()
+  if (expireTerminal) await Promise.all(runtime.pendingAnalystDrains.values())
+  const settled = await terminal
+  assert.equal(lateUsageAccounted, true, 'late exact usage must debit the still-live scheduler lease')
+  assert.equal(runtime.budget.snapshot().tokensUsed, 9)
+  assert.equal(runtime.scheduler.getMetrics().counters.currentLiveChildren, 0)
+  assert.equal(runtime.childTokenReservations.size, pendingRequest ? 1 : 0,
+    'an unresolved provider allowance must remain reserved, never released or replayed')
+  const fallbackAllowed = drainErrorCode === 'CHILD_CANCELLED' && !expireCleanup
+  if (pendingRequest) {
+    assert.equal(settled.error?.code, 'INCOMPLETE_USAGE_ACCOUNTING')
+  } else if (!expireTerminal) {
+    assert.equal(settled.error, undefined)
+    assert.equal(settled.value.outcome, fallbackAllowed ? 'DONE' : 'FAILED', JSON.stringify(settled))
+    assert.equal(settled.value.budget.tokensUsed, 9, 'terminal accounting includes the drained late response')
+  }
+  assert.equal(analystStops, 1)
+  assert.equal(productLaunches, fallbackAllowed ? 1 : 0)
 })
+
+}
 
 test('unknown billed analyst usage consumes the bounded 8k before conservative product fallback', async t => {
   const harness = makeHarness(t, {
@@ -8135,6 +8286,50 @@ test('same-tick finalization callers share one drain, one finalizer, and one imm
   assert.equal(harness.missionLock.releaseCalls, 1)
 })
 
+test('status-only native failure remains canonical through durable terminal selection and cleanup', async t => {
+  const durable = []
+  const missionHash = '1'.repeat(64)
+  const requestEnvelopeHash = '2'.repeat(64)
+  const harness = makeHarness(t, {
+    activationId: 'status-only-native-failure',
+    runId: 'status-only-native-failure-run',
+    runtimeOptions: {
+      runtimeStateProvider: () => ({
+        state: 'RELEASING_LOCK', workspaceEpoch: 1, requestEnvelopeHash,
+        activation: { id: 'status-only-native-failure', generation: 1, missionHash },
+      }),
+    },
+  })
+  harness.record.runId = 'status-only-native-failure-run'
+  harness.record.createOrVerifyTerminalFinalizationIntent = intent => { durable.push(intent); return intent }
+  const runtime = new CodexSupervisorRuntime(harness.runtimeOptions)
+  runtime.route = 'DIRECT'
+  runtime.record = harness.record
+  runtime.requestPointer = { hash: requestEnvelopeHash }
+  runtime.lease = harness.missionLock.acquire({ owner: 'status-only-native-failure' })
+  runtime.finalizer = await harness.runtimeOptions.finalizerFactory({ lease: runtime.lease })
+  const nativeFailure = {
+    status: 'CHILD_RUNTIME_FAILURE',
+    error: {
+      code: 'CHILD_RUNTIME_FAILURE',
+      message: 'Native child exited unsuccessfully',
+      details: { exitCode: 1, signal: null },
+    },
+  }
+
+  const result = await runtime._finish('FAILED', { terminalEnvelope: nativeFailure })
+
+  assert.equal(result.outcome, 'FAILED')
+  assert.deepEqual(result.terminalEnvelope, nativeFailure)
+  assert.equal(runtime.terminalFinalizationIntentDurable, true)
+  assert.equal(durable.length, 1)
+  assert.deepEqual(durable[0].terminalEnvelope, nativeFailure)
+  assert.equal(harness.processOwner.cancelled, 1)
+  assert.equal(harness.processOwner.drained, 1)
+  assert.equal(harness.finalizations.length, 1)
+  assert.equal(harness.missionLock.releaseCalls, 1)
+})
+
 test('same-tick pause, cancellation, and finalization have one first-writer settlement', async t => {
   const makeRuntime = async label => {
     const harness = makeHarness(t, { activationId: `settlement-${label}` })
@@ -8442,6 +8637,98 @@ test('concurrent start and explicit cancellation share one truthful terminal rel
   assert.equal(harness.finalizations.length, 1)
   assert.equal(harness.finalizations[0].outcome, 'CANCELLED')
   assert.equal(harness.missionLock.releaseCalls, 1)
+})
+
+test('signal cancellation prevents a late route analyst result from starting post-terminal decisions', async t => {
+  let announceAnalyst
+  let releaseAnalyst
+  let decisionCalls = 0
+  const analystStarted = new Promise(resolve => { announceAnalyst = resolve })
+  const analystResult = new Promise(resolve => { releaseAnalyst = resolve })
+  let accountingClosures = 0
+  let runtime
+  const harness = makeHarness(t, {
+    decideRoute: async () => {
+      decisionCalls += 1
+      return { decision: decision('DIRECT'), submittedAtMs: 0, usage: ZERO_USAGE }
+    },
+  })
+  harness.runtimeOptions.launcher = async launch => {
+    harness.launches.push(launch)
+    if (launch.logicalRole === 'route-analyst') {
+      announceAnalyst()
+      return analystResult
+    }
+    throw new Error(`post-terminal launch: ${launch.logicalRole}`)
+  }
+  harness.runtimeOptions.persistCancellationAccountingClosure = proof => {
+    assert.equal(proof.processesDrained, true)
+    assert.match(proof.processDrainEvidenceHash, /^[a-f0-9]{64}$/u)
+    assert.equal(runtime.pendingLaunchSettlements.size, 0,
+      'all launched settlements close before durable cancellation accounting')
+    accountingClosures += 1
+  }
+  runtime = new CodexSupervisorRuntime(harness.runtimeOptions)
+  const startRuntime = runtime.start.bind(runtime)
+  let startPromise
+  runtime.start = () => {
+    if (!startPromise) startPromise = startRuntime()
+    return startPromise
+  }
+  const controller = new AbortController()
+  const supervised = runAbortOwnedSupervisor(runtime, controller.signal)
+  await analystStarted
+  controller.abort('operator signal')
+  let cancellationSettled = false
+  const cancellation = supervised.then(result => {
+    cancellationSettled = true
+    return result
+  })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(cancellationSettled, false,
+    'terminal binding waits for the physically drained analyst settlement and its accounting')
+  assert.equal(harness.finalizations.length, 0)
+
+  // The native owner has drained. Its launcher now closes the exact scheduler
+  // lease and durable session; cancel joins this settlement, not runtime.start.
+  releaseAnalyst({
+    recommendation: recommendation('DIRECT'),
+    events: [{ type: 'analysis', summary: 'late ignored result' }],
+    elapsedMs: 1,
+    usage: ZERO_USAGE,
+  })
+  const cancelled = await cancellation
+  assert.equal(cancelled.outcome, 'CANCELLED')
+  assert.equal(harness.finalizations.length, 1)
+  assert.equal(harness.finalizations[0].outcome, 'CANCELLED')
+  assert.equal(accountingClosures, 1)
+  assert.deepEqual(await startPromise, cancelled)
+  assert.equal(decisionCalls, 0)
+  assert.equal(harness.launches.filter(item => item.logicalRole === 'route-analyst').length, 1)
+  assert.equal(harness.finalizations.length, 1)
+  assert.equal(harness.missionLock.releaseCalls, 1)
+})
+
+test('pre-aborted supervision cancels before the runtime startup barrier admits a lease', async t => {
+  const harness = makeHarness(t, {
+    activationId: 'pre-aborted-supervision',
+    runId: 'pre-aborted-supervision',
+  })
+  const runtime = new CodexSupervisorRuntime(harness.runtimeOptions)
+  let starts = 0
+  const startRuntime = runtime.start.bind(runtime)
+  runtime.start = () => {
+    starts += 1
+    return startRuntime()
+  }
+  const controller = new AbortController()
+  controller.abort('activation authorization expired')
+  const result = await runAbortOwnedSupervisor(runtime, controller.signal)
+  assert.equal(result.outcome, 'CANCELLED')
+  assert.equal(result.reason, 'activation authorization expired')
+  assert.equal(starts, 0)
+  assert.equal(harness.missionLock.acquireCalls, 0)
+  assert.deepEqual(harness.launches, [])
 })
 
 test('cancellation at every pre-execution startup seam prevents post-cancel work and shares one result', async t => {
@@ -10583,6 +10870,11 @@ test('createDefaultRuntimeOptions adopts a generation-one durable terminal inten
     activation: runtimeActivation,
     lease: generationOneLease,
   })
+  // A production runtime initializes the transcript before it can persist a
+  // terminal selection. This fixture opens the generation-one record directly
+  // to simulate a crash, so create the same empty, checksummed transcript
+  // before asking generation two to complete that durable intent.
+  openedRecord.initializeRouteTranscript()
   const request = openedRecord.loadRequest()
   const leaseBinding = generationOneOptions.missionLock.verifyCapability(generationOneLease)
   const eventBinding = {
@@ -10762,6 +11054,8 @@ test('cancellation intent is durable before scheduler disposal and process drain
         return { state: nextState }
       },
     },
+    now: Date.now,
+    activation: { id: 'activation-cancel-order', generation: 1 },
     lease: {}, starting: false, finished: false, finalizing: false, suspending: false,
     settledResult: null, scheduler: { dispose() { order.push('DISPOSE') } }, finalizer: {},
     terminalFinalizationIntent: null,
@@ -10773,6 +11067,94 @@ test('cancellation intent is durable before scheduler disposal and process drain
   const result = await runtime._cancelOnce('operator request')
   assert.equal(result.outcome, 'CANCELLED')
   assert.deepEqual(order.slice(0, 3), ['CANCEL_REQUESTED', 'DISPOSE', 'DRAIN'])
+})
+
+test('cancellation joins admitted worker rollback after process drain before terminal binding', async () => {
+  const order = []
+  const state = { state: 'RUN_WORK', activeMutation: { id: 'exact-live-permit' } }
+  let finishCleanup
+  const cleanup = new Promise(resolve => {
+    finishCleanup = () => {
+      state.activeMutation = null
+      order.push('WORKER_CLEANUP')
+      resolve()
+    }
+  })
+  const runtime = Object.create(CodexSupervisorRuntime.prototype)
+  Object.assign(runtime, {
+    options: {
+      runtimeStateProvider: () => state,
+      runtimeTransition: async ({ eventId, nextState }) => {
+        order.push(eventId)
+        state.state = nextState
+        return { state: nextState }
+      },
+    },
+    timerApi: { setTimeout, clearTimeout },
+    now: Date.now,
+    activation: { id: 'activation-cleanup-join', generation: 1 },
+    lease: {}, starting: false, finished: false, finalizing: false, suspending: false,
+    settledResult: null, scheduler: { dispose() { order.push('DISPOSE') } }, finalizer: {},
+    terminalFinalizationIntent: null,
+    pendingLaunchSettlements: new Set([cleanup]),
+    _enforceBudgetPhase: () => ({ accepted: true }),
+    _drainOwnedProcessesWithOneRetry: async () => { order.push('DRAIN') },
+    _bestEffortPostDrainCheckpoint: async () => null,
+    _finish: async (outcome, result) => {
+      assert.equal(state.activeMutation, null, 'terminal binding must observe the exact permit aborted')
+      order.push('FINISH')
+      return { outcome, ...result }
+    },
+  })
+  const cancellation = runtime._cancelOnce('activation authorization expired')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(order, ['CANCEL_REQUESTED', 'DISPOSE', 'DRAIN'])
+  finishCleanup()
+  const result = await cancellation
+  assert.equal(result.outcome, 'CANCELLED')
+  assert.deepEqual(order, ['CANCEL_REQUESTED', 'DISPOSE', 'DRAIN', 'WORKER_CLEANUP', 'FINISH'])
+})
+
+test('cancellation joins the rest of a mutating launch after its permit closes before finalization', async () => {
+  const order = []
+  const state = { state: 'RUN_WORK', activeMutation: null }
+  let finishSettlement
+  const settlement = new Promise(resolve => {
+    finishSettlement = () => { order.push('MUTATION_SETTLED'); resolve() }
+  })
+  const runtime = Object.create(CodexSupervisorRuntime.prototype)
+  Object.assign(runtime, {
+    options: {
+      runtimeStateProvider: () => state,
+      runtimeTransition: async ({ eventId, nextState }) => {
+        order.push(eventId)
+        state.state = nextState
+        return { state: nextState }
+      },
+    },
+    now: Date.now,
+    timerApi: { setTimeout, clearTimeout },
+    activation: { id: 'activation-late-mutation-settlement', generation: 1 },
+    lease: {}, starting: false, finished: false, finalizing: false, suspending: false,
+    settledResult: null, scheduler: { dispose() { order.push('DISPOSE') } }, finalizer: {},
+    terminalFinalizationIntent: null,
+    pendingLaunchSettlements: new Set([settlement]),
+    pendingMutationLaunchSettlements: new Set([settlement]),
+    _enforceBudgetPhase: () => ({ accepted: true }),
+    _drainOwnedProcessesWithOneRetry: async () => { order.push('DRAIN') },
+    _bestEffortPostDrainCheckpoint: async () => null,
+    _finish: async (outcome, result) => {
+      order.push('FINISH')
+      return { outcome, ...result }
+    },
+  })
+  const cancellation = runtime._cancelOnce('activation authorization expired')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(order, ['CANCEL_REQUESTED', 'DISPOSE', 'DRAIN'])
+  finishSettlement()
+  const result = await cancellation
+  assert.equal(result.outcome, 'CANCELLED')
+  assert.deepEqual(order, ['CANCEL_REQUESTED', 'DISPOSE', 'DRAIN', 'MUTATION_SETTLED', 'FINISH'])
 })
 
 test('live worker admission binds ownership and releases mutation authority even when workspace abort fails', async t => {
@@ -11153,6 +11535,11 @@ test('one actionable checker FAIL launches one same-executor full-set repair and
         assert.match(doctrine, /PASS requires a unique zero exit bound to the exact version being checked/u)
         assert.match(doctrine, /authenticated nonzero test failure may bind FAIL and drive repair/u)
         assert.match(doctrine, /consumed underlying identifiers in evidenceIds and an allowed referenceMethod/u)
+        assert.match(doctrine, /frozen deliverable hash is already held by the controller's immutable-version binding and is never an evidenceId/u)
+        assert.match(doctrine, /Individual files belonging to the exact version being checked are also the subject being checked/u)
+        assert.match(doctrine, /exclude their paths, identifiers, and hashes from evidenceIds/u)
+        assert.match(doctrine, /scratch-PASS confirmation must use evidenceIds disjoint from primaryScratchCoverage/u)
+        assert.match(doctrine, /do not rename, prefix, or relabel the same observation/u)
         assert.match(doctrine,
           /required consumer or independent check is unavailable, return CHECK_INCONCLUSIVE or RUNTIME_FAILURE/u)
         assert.match(doctrine,
@@ -14137,7 +14524,8 @@ test('first inconclusive checker evidence returns the usable candidate with one 
         checkerLaunches += 1
         assert.match(request.assignment,
           /(?:<python3\|node\|ruby\|perl\|sh> <absolute sealed scratch program>|<absolute sealed executable>) <absolute frozen exact-version path being checked>/u)
-        assert.match(request.assignment, /one direct JSON summary of at most 4 KiB/u)
+        assert.match(request.assignment, /positive integer passCount and failureCount:0/u)
+        assert.match(request.assignment, /increment failureCount, preserve the counted summary, and exit nonzero/u)
         assert.doesNotMatch(request.assignment, /redirect large stdout\/stderr/u)
         return {
           code,
@@ -15919,7 +16307,7 @@ test('default child environment is emitted and rechecked by the canonical local-
   fs.mkdirSync(ghConfigDir, { mode: 0o700 })
   fs.writeFileSync(profilePath, profile, { mode: 0o600 })
   const branch = spawnSync('git', ['-C', target, 'branch', '--show-current'], { encoding: 'utf8' }).stdout.trim()
-  const boundary = safeEnvironmentFactory()(target, process.env, {
+  const safetyOptions = {
     configIsolationPath: isolation,
     ghConfigDir,
     expectedBranch: branch,
@@ -15931,7 +16319,12 @@ test('default child environment is emitted and rechecked by the canonical local-
       selectedProfile: 'autoprompt',
       strictConfig: true,
     },
-  })
+  }
+  const inspect = safeEnvironmentFactory()
+  const boundary = inspect(target, process.env, { ...safetyOptions, activationExpiresAt: new Date(Date.now() + 60000).toISOString() })
+  assert.throws(() => inspect(target, process.env, { ...safetyOptions, activationExpiresAt: new Date(Date.now() - 1).toISOString() }), { code: 'ACTIVATION_EXPIRED' })
+  assert.throws(() => inspect(target, process.env, { ...safetyOptions, activationExpiresAt: 'invalid' }), { code: 'SAFE_GIT_ENV_INVALID' })
+  assert.equal(inspect(target, process.env, safetyOptions).attestation.mechanicallyEnforced, true, 'an omitted optional expiry still requires complete safety inspection')
   const { environment, attestation } = boundary
   assert.equal(environment.GIT_ALLOW_PROTOCOL, 'file')
   assert.equal(environment.GIT_CONFIG_GLOBAL, fs.realpathSync.native(isolation))
@@ -17743,6 +18136,13 @@ test('AP-CODEX-V2-036 concrete runtime repairs a checker FAIL in a bounded fresh
       processAdapter: createPersistentPidTreeAdapter({ controlRoot: pidTreeControlRoot }),
     },
   })
+  assert.equal(options.activationExpiresAt, expiresAt)
+  const childSafetyExpiries = []
+  const productionSafeEnvFactory = options.safeEnvFactory
+  options.safeEnvFactory = (target, environment, safetyOptions) => {
+    childSafetyExpiries.push(safetyOptions.activationExpiresAt)
+    return productionSafeEnvFactory(target, environment, safetyOptions)
+  }
   let factoryError = null
   const concreteRecordFactory = options.recordFactory
   options.recordFactory = async input => {
@@ -17763,6 +18163,8 @@ test('AP-CODEX-V2-036 concrete runtime repairs a checker FAIL in a bounded fresh
     4 + result.terminalEnvelope.checkCount)
   assert.equal(result.scheduler.rootAccounting.status, 'completed')
   assert.deepEqual(livePersistentPidTrees(pidTreeControlRoot), [])
+  assert.ok(childSafetyExpiries.length > 0)
+  assert.equal(childSafetyExpiries.every(value => value === expiresAt), true)
   const unsupportedDecision = {
     ...decision('DIRECT'),
     gateSelection: {
@@ -19079,6 +19481,9 @@ function configureRoadmapCompositionHarness(t, checkerCodes, options = {}) {
         result = { ...result, contextId: selectedContextId }
       }
     }
+    if (typeof options.productCheckerTransform === 'function' && launch.logicalRole.startsWith('independent-')) {
+      result = options.productCheckerTransform(launch, result)
+    }
     results.set(launch.workItemId, result)
     return result
   }
@@ -19120,6 +19525,19 @@ function configureRoadmapCompositionHarness(t, checkerCodes, options = {}) {
     ...(typeof options.transportQuarantinePointer === 'function'
       ? { transportQuarantinePointer: options.transportQuarantinePointer } : {}),
     resultPointer: workItemId => {
+      if (options.canonicalResultPointers) {
+        let resultPath = harness.record.resolve(`work/results/${crypto.createHash('sha256').update(workItemId).digest('hex')}.json`)
+        let bytes = fs.readFileSync(resultPath)
+        if (options.changedScratchPointer && workItemId === 'independent-check-1') {
+          const foreign = JSON.parse(bytes)
+          foreign.payload.referenceMethod.source = 'Another independent report'
+          bytes = Buffer.from(JSON.stringify(foreign))
+          resultPath = path.join(resultRoot, 'foreign-primary.json')
+          fs.writeFileSync(resultPath, bytes)
+        }
+        return { name: workItemId, path: resultPath,
+          hash: crypto.createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length }
+      }
       const result = routeReturns.get(workItemId) || results.get(workItemId)
       assert.ok(result, `missing composition result for ${workItemId}`)
       const bytes = Buffer.from(JSON.stringify(result), 'utf8')

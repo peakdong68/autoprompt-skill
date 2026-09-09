@@ -219,6 +219,34 @@
       "payloadDigest": "ec9d22813c6d295be0f216537de2a9d22188ec615369691312cfbdaff35eee63",
       "previousRecordDigest": "6f766ec85c81659add076e1b3c0d6841873dc5aec351a8c27f68805bd37646de",
       "recordDigest": "6c3cd62450065b306ccadfba7c1b5453ed948407c4d78e6f3a3a12b8513f6ae6"
+    },
+    {
+      "version": "1.0.36",
+      "payloadGeneration": "codex-v2.0.0-051d0a986540317b",
+      "payloadDigest": "051d0a986540317b718e555fdfca3aeb800029394a8e35bd77f1eee829e4db96",
+      "previousRecordDigest": "6c3cd62450065b306ccadfba7c1b5453ed948407c4d78e6f3a3a12b8513f6ae6",
+      "recordDigest": "e7b425d4adcdaff1ce1f6049ec323069d75cdcf079daff48960a7f0afbe32807"
+    },
+    {
+      "version": "1.0.37",
+      "payloadGeneration": "codex-v2.0.0-0c22035433d10e63",
+      "payloadDigest": "0c22035433d10e634b8d5a6682f25c3756b17b1fa394911f9fd1facc22a2d95c",
+      "previousRecordDigest": "e7b425d4adcdaff1ce1f6049ec323069d75cdcf079daff48960a7f0afbe32807",
+      "recordDigest": "72a1b40ebb0b8c2d879b2bff032353ec2079b55d9b8322ea4621d10c97656cea"
+    },
+    {
+      "version": "1.0.38",
+      "payloadGeneration": "codex-v2.0.0-77f7dc7d9e122f96",
+      "payloadDigest": "77f7dc7d9e122f962679a9c4487a6bccf6a1869ab8e31ffac6e2b621327ab783",
+      "previousRecordDigest": "72a1b40ebb0b8c2d879b2bff032353ec2079b55d9b8322ea4621d10c97656cea",
+      "recordDigest": "dd6ac764ea7f197348348c18d7470825fbfaa4bd653df5a0c99622b504c31c39"
+    },
+    {
+      "version": "1.0.39",
+      "payloadGeneration": "codex-v2.0.0-8f8f3a87a4ed11e1",
+      "payloadDigest": "8f8f3a87a4ed11e15bb781947c7b0a10df054215af404df5a61799ae5c2aa508",
+      "previousRecordDigest": "dd6ac764ea7f197348348c18d7470825fbfaa4bd653df5a0c99622b504c31c39",
+      "recordDigest": "aa30befbad87dd74adff03b08dae8991cb784e51ba0534fd40ef2ff5dcaeb26d"
     }
   ]
 }

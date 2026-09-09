@@ -17,15 +17,11 @@ const POWERSHELL = process.platform === 'win32' ? 'powershell.exe' : 'pwsh'
 const HAS_POWERSHELL = childProcess.spawnSync(POWERSHELL, [
   '-NoProfile', '-NonInteractive', '-Command', 'exit 0'
 ], { stdio: 'ignore', timeout: 10000 }).status === 0
-const GIT_BASH = process.platform === 'win32'
-  ? 'C:\\Program Files\\Git\\bin\\bash.exe'
-  : 'bash'
-const HAS_BASH = process.platform === 'win32'
-  ? fs.existsSync(GIT_BASH)
-  : childProcess.spawnSync(GIT_BASH, ['--version'], { stdio: 'ignore' }).status === 0
+const GIT_BASH = require('../helpers/resolve-bash.cjs').resolveBash()
+const HAS_BASH = Boolean(GIT_BASH)
 const PUBLIC_CLIENTS = [
   'claude', 'codex', 'opencode', 'kilo', 'vscode', 'prime',
-  'omp', 'deepseek', 'reasonix',
+  'omp', 'deepseek', 'hermes', 'grok', 'reasonix',
 ]
 const SHARED_LIFECYCLE_CLIENTS = PUBLIC_CLIENTS.filter(client => client !== 'prime')
 const CLIENT_COMMANDS = {
@@ -35,7 +31,9 @@ const CLIENT_COMMANDS = {
   kilo: ['kilo', 'kilo 7.4.22'],
   vscode: ['code', '1.133.0'],
   omp: ['omp', 'omp/17.4.0'],
-  deepseek: ['dsh', '0.1.0-rc.7'],
+  deepseek: ['dsh', '0.1.2-rc.1'],
+  hermes: ['hermes', 'hermes 0.21.1'],
+  grok: ['grok', 'grok 1.0.13'],
   reasonix: ['reasonix', 'reasonix v1.30.0']
 }
 const MANIFESTS = Object.fromEntries(SHARED_LIFECYCLE_CLIENTS.map(client => [
@@ -460,7 +458,7 @@ test('PowerShell resolver treats AUTOPROMPT_INSTALL_ROOT as the exact provider r
 })
 
 test('Git Bash resolver uses the same exact-root contract', {
-  skip: !fs.existsSync(GIT_BASH)
+  skip: process.platform !== 'win32' || !GIT_BASH
 }, () => {
   const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-root-resolve-sh-'))
   const customRoot = path.join(sandbox, 'provider-root')
@@ -491,6 +489,48 @@ test('Git Bash resolver uses the same exact-root contract', {
         '/skills/autoprompt/SKILL\\.md format='
       ))
     }
+  } finally {
+    fs.rmSync(sandbox, { recursive: true, force: true })
+  }
+})
+
+test('Bash installer reports a successful destination containing spaces and format markers exactly', {
+  skip: !HAS_BASH,
+  timeout: 180000
+}, () => {
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-install-display-'))
+  const context = makeLifecycleContext(sandbox, 'codex')
+  const customRoot = path.join(sandbox, 'config with spaces format=marker')
+  fs.mkdirSync(customRoot, { recursive: true })
+  const shellRoot = bashPath(customRoot)
+  const expected = `${shellRoot}/skills/autoprompt/SKILL.md`
+  const env = cleanEnvironment({
+    ...context.env,
+    AUTOPROMPT_INSTALL_ROOT: shellRoot,
+    HOME: bashPath(context.home),
+    USERPROFILE: bashPath(context.home),
+    XDG_CONFIG_HOME: bashPath(context.xdg),
+    PATH: `${bashPath(context.bin)}:/usr/bin:${process.env.PATH || ''}`,
+  })
+  try {
+    const completed = run(GIT_BASH, [bashPath(path.join(ROOT, 'scripts', 'install', 'install.sh')), 'codex'], { env })
+    assert.equal(completed.status, 0, `${completed.stdout}\n${completed.stderr}`)
+    assert.ok(completed.stdout.includes(`dest=${expected}`), completed.stdout)
+    assert.ok(completed.stderr.includes(`PASS - landed ${expected} (`), completed.stderr)
+    assert.equal(fs.existsSync(path.join(customRoot, 'skills', 'autoprompt', 'SKILL.md')), true)
+    assert.equal(completed.stdout.includes(`dest=${shellRoot}/skills/autoprompt/SKILL.md format=marker`), false)
+
+    const sharedRoot = path.join(sandbox, 'shared config with spaces format=marker')
+    fs.mkdirSync(sharedRoot, { recursive: true })
+    const sharedShellRoot = bashPath(sharedRoot)
+    const shared = run(GIT_BASH, [bashPath(path.join(ROOT, 'scripts', 'install', 'install.sh')), 'claude'], {
+      env: { ...env, AUTOPROMPT_INSTALL_ROOT: sharedShellRoot },
+    })
+    assert.equal(shared.status, 0, `${shared.stdout}\n${shared.stderr}`)
+    assert.ok(shared.stdout.includes(`dest=${sharedShellRoot}`), shared.stdout)
+    assert.equal(shared.stdout.includes(`dest=${sharedShellRoot} format=marker`), false)
+    assert.equal(shared.stderr, '')
+    assert.equal(fs.existsSync(path.join(sharedRoot, 'skills', 'autoprompt', 'SKILL.md')), true)
   } finally {
     fs.rmSync(sandbox, { recursive: true, force: true })
   }
@@ -579,7 +619,7 @@ test('PowerShell lifecycle entrypoints fail closed for invalid root contracts', 
 })
 
 test('Git Bash lifecycle entrypoints reject all, blocked, empty, relative, and root paths', {
-  skip: !fs.existsSync(GIT_BASH)
+  skip: process.platform !== 'win32' || !GIT_BASH
 }, () => {
   const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-root-reject-sh-'))
   const safeRoot = bashPath(path.join(sandbox, 'provider-root'))
@@ -824,6 +864,69 @@ test('PowerShell leaves an earlier managed snapshot untouched when rollback has 
       '-NoProfile',
       '-ExecutionPolicy', 'Bypass',
       '-Command', script
+    ])
+    assert.equal(completed.status, 0, `${completed.stdout}\n${completed.stderr}`)
+  } finally {
+    fs.rmSync(sandbox, { recursive: true, force: true })
+  }
+})
+
+test('PowerShell managed snapshots retain byte arrays and restore empty files exactly', {
+  skip: process.platform !== 'win32' && !HAS_POWERSHELL,
+}, () => {
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-snapshot-bytes-'))
+  const root = path.join(sandbox, 'root')
+  const oneByte = path.join(root, 'one-byte.bin')
+  const binary = path.join(root, 'binary.bin')
+  const empty = path.join(root, 'empty.bin')
+  const library = path.join(ROOT, 'scripts', 'install', 'lib', 'install-lib.ps1')
+  const expectedOneByte = Buffer.from([127])
+  const expected = Buffer.from([0, 255, 17])
+  fs.mkdirSync(root, { recursive: true })
+  fs.writeFileSync(oneByte, expectedOneByte)
+  fs.writeFileSync(binary, expected)
+  fs.writeFileSync(empty, Buffer.alloc(0))
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    `. ${psLiteral(library)}`,
+    `$root = ${psLiteral(root)}`,
+    `$oneByte = ${psLiteral(oneByte)}`,
+    `$binary = ${psLiteral(binary)}`,
+    `$empty = ${psLiteral(empty)}`,
+    `$expectedOneByte = ${psLiteral(expectedOneByte.toString('base64'))}`,
+    `$expected = ${psLiteral(expected.toString('base64'))}`,
+    '$snapshot = New-IdemManagedSnapshot -ConfigRoot $root -Paths @($oneByte, $binary, $empty)',
+    'if ($null -eq $snapshot) { throw "snapshot creation failed" }',
+    '$oneByteRecord = @($snapshot.Files | Where-Object { $_.Path -ceq $oneByte })',
+    '$binaryRecord = @($snapshot.Files | Where-Object { $_.Path -ceq $binary })',
+    '$emptyRecord = @($snapshot.Files | Where-Object { $_.Path -ceq $empty })',
+    'if ($oneByteRecord.Count -ne 1 -or $binaryRecord.Count -ne 1 -or $emptyRecord.Count -ne 1 -or $oneByteRecord[0].Bytes -isnot [byte[]] -or $oneByteRecord[0].Bytes.Length -ne 1 -or $binaryRecord[0].Bytes -isnot [byte[]] -or $emptyRecord[0].Bytes -isnot [byte[]] -or $emptyRecord[0].Bytes.Length -ne 0) { throw "in-memory snapshot byte type failed" }',
+    '$durable = Import-Clixml -LiteralPath $snapshot.RecoveryPath',
+    '$durableOneByte = @($durable.Files | Where-Object { $_.Path -ceq $oneByte })',
+    '$durableBinary = @($durable.Files | Where-Object { $_.Path -ceq $binary })',
+    '$durableEmpty = @($durable.Files | Where-Object { $_.Path -ceq $empty })',
+    'if ($durableOneByte.Count -ne 1 -or $durableBinary.Count -ne 1 -or $durableEmpty.Count -ne 1 -or $durableOneByte[0].Bytes -isnot [byte[]] -or $durableOneByte[0].Bytes.Length -ne 1 -or $durableBinary[0].Bytes -isnot [byte[]] -or $durableEmpty[0].Bytes -isnot [byte[]] -or $durableEmpty[0].Bytes.Length -ne 0) { throw "durable snapshot byte type failed" }',
+    '[IO.File]::WriteAllBytes($oneByte, [byte[]]@(1))',
+    '[IO.File]::WriteAllBytes($binary, [byte[]]@(1,2,3,4))',
+    'Remove-Item -LiteralPath $empty -Force',
+    'if (-not (Restore-IdemManagedSnapshot -Snapshot $snapshot)) { throw "snapshot restore failed" }',
+    'if ([Convert]::ToBase64String([IO.File]::ReadAllBytes($oneByte)) -cne $expectedOneByte) { throw "one-byte bytes not restored" }',
+    'if ([Convert]::ToBase64String([IO.File]::ReadAllBytes($binary)) -cne $expected) { throw "binary bytes not restored" }',
+    'if (-not (Test-Path -LiteralPath $empty -PathType Leaf)) { throw "empty file missing" }; if (((Get-Item -LiteralPath $empty).Length) -ne 0) { throw "empty file not restored" }',
+    'if (-not (Remove-IdemManagedRecovery -Snapshot $snapshot)) { throw "recovery cleanup failed" }',
+    '$legacyRecovery = Join-Path $root "legacy-object-array.clixml"',
+    '$legacy = @{ ConfigRoot = $root; ConfigRootExisted = $true; Files = @(@{ Path = $binary; Exists = $true; Bytes = [object[]]@([byte]0,[byte]255,[byte]17); LastWriteTimeUtc = (Get-Item -LiteralPath $binary).LastWriteTimeUtc }); Directories = @{}; ReceiptFiles = @(); ReceiptCreatedDirectories = @(); ReceiptEdits = @(); ConfigEditLastBackup = "none"; RecoveryPath = $legacyRecovery }',
+    '$legacy | Export-Clixml -LiteralPath $legacyRecovery -Depth 12',
+    '$legacyDurable = Import-Clixml -LiteralPath $legacyRecovery; $legacyDurable.RecoveryPath = $legacyRecovery',
+    'if (@($legacyDurable.Files).Count -ne 1 -or @($legacyDurable.Files[0].Bytes).Count -ne 3) { throw "legacy object-array durable readback failed" }',
+    '[IO.File]::WriteAllBytes($binary, [byte[]]@(9,9,9))',
+    'if (-not (Restore-IdemManagedSnapshot -Snapshot $legacyDurable)) { throw "legacy object-array restore failed" }',
+    'if ([Convert]::ToBase64String([IO.File]::ReadAllBytes($binary)) -cne $expected) { throw "legacy object-array bytes not restored" }',
+    'if (-not (Remove-IdemManagedRecovery -Snapshot $legacyDurable)) { throw "legacy recovery cleanup failed" }',
+  ].join('; ')
+  try {
+    const completed = run(POWERSHELL, [
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script,
     ])
     assert.equal(completed.status, 0, `${completed.stdout}\n${completed.stderr}`)
   } finally {
@@ -1258,7 +1361,7 @@ test('Bash upgrades and rolls back a synthetic receiptless legacy Codex install'
 })
 
 test('Git Bash custom Kilo root completes install, doctor, repair, and uninstall', {
-  skip: !fs.existsSync(GIT_BASH),
+  skip: process.platform !== 'win32' || !GIT_BASH,
   timeout: 720000
 }, () => {
   const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-root-kilo-sh-'))

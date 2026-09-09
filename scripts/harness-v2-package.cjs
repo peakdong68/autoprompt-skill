@@ -12,14 +12,28 @@ const { ReasonixError: PackageError, readBound, privateDirectory, sha256, writeP
 const LEGACY = require('./install/harness-v2-legacy.json').providers
 const primeMigration = require('./harness-v2-prime-migration.cjs')
 const ROOT = path.resolve(__dirname, '..')
-const PROVIDERS = Object.freeze(['claude', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek'])
-const REQUIRED = ['scripts/harness-v2-package.cjs', 'scripts/harness-v2-configure.cjs', 'scripts/harness-v2-native.cjs', 'scripts/harness-v2-transport.cjs', 'scripts/harness-v2-admission.cjs', 'scripts/harness-v2-trust/evidence.json', 'scripts/harness-v2-trust/trusted-public-keys.json', 'scripts/local-only-safety.cjs', 'scripts/install/operation-lock.cjs', 'scripts/install/harness-v2-legacy.json']
+const PROVIDERS = Object.freeze(['claude', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek', 'hermes', 'grok'])
+const REQUIRED = ['scripts/harness-v2-package.cjs', 'scripts/harness-v2-configure.cjs', 'scripts/harness-v2-native.cjs', 'scripts/harness-v2-transport.cjs', 'scripts/harness-v2-native-wire-projection.cjs', 'scripts/harness-v2-request-quota.cjs', 'scripts/harness-v2-quota-relay.cjs', 'scripts/harness-v2-quota-connection.cjs', 'scripts/harness-v2-admission.cjs', 'scripts/harness-v2-trust/evidence.json', 'scripts/harness-v2-trust/trusted-public-keys.json', 'scripts/local-only-safety.cjs', 'scripts/install/operation-lock.cjs', 'scripts/install/harness-v2-legacy.json']
 // These are the closed actual-binary conformance suites invoked by the public
 // diagnostic. They are runtime assets, not the general source test suite.
 const CONFORMANCE_ASSETS = Object.freeze([
   'tests/source/harness-v2-adapter-native.test.cjs',
+  'tests/source/harness-v2-claude-capability-native.test.cjs',
+  'tests/source/harness-v2-deepseek-capability-native.test.cjs',
+  'tests/source/harness-v2-hermes-capability-native.test.cjs',
+  'tests/source/harness-v2-grok-capability-native.test.cjs',
+  'tests/source/harness-v2-vscode-capability-native.test.cjs',
+  'tests/source/harness-v2-opencode-capability-native.test.cjs',
+  'tests/source/harness-v2-pi-capability-native.test.cjs',
+  'tests/source/harness-v2-reasonix-capability-native.test.cjs',
   'tests/source/harness-v2-pi-adapter-native.test.cjs',
   'tests/source/harness-v2-vscode-owned-native.test.cjs',
+  'tests/source/harness-v2-hermes-adapter-native.test.cjs',
+  'tests/source/harness-v2-windows-shim.test.cjs',
+  'tests/source/harness-v2-grok.test.cjs',
+  'tests/source/harness-v2-grok-proxy.test.cjs',
+  'tests/source/harness-v2-grok-sandbox.test.cjs',
+  'tests/source/harness-v2-grok-adapter-native.test.cjs',
   'tests/source/reasonix-controlled-native.test.cjs',
   'tests/helpers/harness-native-service.cjs',
   'tests/helpers/harness-pi-native-service.cjs',
@@ -46,6 +60,8 @@ function rootCandidate(provider, env = process.env, cwd = process.cwd()) {
     case 'vscode': root = path.join(home, '.copilot'); break
     case 'prime': root = env.PRIME_AGENT_CODING_AGENT_DIR || path.join(home, '.prime', 'agent'); break
     case 'deepseek': root = env.DSH_HOME || path.join(home, '.dsh'); break
+    case 'grok': root = env.GROK_HOME || path.join(home, '.grok'); break
+    case 'hermes': root = env.HERMES_HOME || path.join(home, '.hermes'); break
     case 'omp': {
       const profile = String(env.OMP_PROFILE ?? env.PI_PROFILE ?? '').trim()
       if (profile && profile !== 'default' && (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(profile) || profile.endsWith('.') || /^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])(?:\.|$)/i.test(profile))) fail('INVALID_INPUT', 'Invalid OMP profile')
@@ -112,6 +128,7 @@ function sourceInventory(provider, sourceRoot = ROOT) {
   // New dependencies extend the next generation without invalidating older
   // receipts before their transactional upgrade can run.
   helpers.push('scripts/install/prime-settings.cjs')
+  if (path.resolve(sourceRoot) === ROOT || fs.existsSync(path.join(sourceRoot, 'scripts/darwin-runtime-setup.cjs'))) helpers.push('scripts/darwin-runtime-setup.cjs')
   for (const entry of scriptEntries) if (entry.isDirectory() && entry.name.startsWith('harness-v2-')) trees.push(`scripts/${entry.name}`)
   // Lifecycle fault fixtures intentionally contain only the runtime closure.
   // Only those explicit alternate source roots may omit diagnostic assets;
@@ -120,7 +137,11 @@ function sourceInventory(provider, sourceRoot = ROOT) {
   if (path.resolve(sourceRoot) === ROOT && availableConformanceAssets.length !== CONFORMANCE_ASSETS.length) {
     fail('PAYLOAD_INVALID', 'Published v2 runtime is missing a required native conformance asset')
   }
-  const names = [...new Set([...REQUIRED, ...availableConformanceAssets, ...helpers, ...trees.flatMap(tree => walk(sourcePath(sourceRoot, tree)).map(file => `${tree}/${file}`))])].sort()
+  // npm omits this dependency changelog from its bundled package. It is not
+  // executable runtime content; exclude it from source installs as well so a
+  // reviewed source closure has the same identity after packing/installing.
+  const names = [...new Set([...REQUIRED, ...availableConformanceAssets, ...helpers, ...trees.flatMap(tree => walk(sourcePath(sourceRoot, tree)).map(file => `${tree}/${file}`))])]
+    .filter(file => file !== 'node_modules/@iarna/toml/CHANGELOG.md').sort()
   const files = Object.fromEntries(names.map(file => {
     const source = sourcePath(sourceRoot, file)
     // Check ancestors as well as the final file; readBound refuses hard links.
@@ -152,7 +173,7 @@ function legacyCandidates(provider) {
   const originals = LEGACY[provider]
   const candidates = { ...originals }
   // Old explicit roots and old home/XDG-root installs are both recognized.
-  const prefixes = { claude: ['.claude'], opencode: ['opencode'], kilo: ['kilo', '.kilo'], vscode: ['.copilot', '.github'], omp: [], deepseek: [], prime: [] }[provider]
+  const prefixes = { claude: ['.claude'], opencode: ['opencode'], kilo: ['kilo', '.kilo'], vscode: ['.copilot', '.github'], omp: [], deepseek: [], hermes: [], grok: [], prime: [] }[provider]
   for (const prefix of prefixes) for (const [relative, hashes] of Object.entries(originals)) candidates[`${prefix}/${relative}`] = hashes
   return candidates
 }

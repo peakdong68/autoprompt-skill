@@ -9,9 +9,10 @@ const pkg = require('../../scripts/harness-v2-package.cjs')
 const { acquire, release } = require('../../scripts/install/operation-lock.cjs')
 const ROOT = path.resolve(__dirname, '../..')
 const CLI = path.join(ROOT, 'scripts/harness-v2-package.cjs')
-const BINARIES = { claude: ['claude', '2.1.141'], opencode: ['opencode', '1.5.7'], kilo: ['kilo', '7.1.0'], vscode: ['code', '1.133.0'], prime: ['prime-agent', '0.7.2'], omp: ['omp', '17.4.0'], deepseek: ['dsh', '0.1.0-rc.7'] }
+const BINARIES = { claude: ['claude', '2.1.232'], opencode: ['opencode', '1.18.18'], kilo: ['kilo', '7.4.22'], vscode: ['code', '1.133.0'], prime: ['prime-agent', '0.7.2'], omp: ['omp', '17.4.0'], deepseek: ['dsh', '0.1.2-rc.1'], hermes: ['hermes', '0.21.1'], grok: ['grok', '1.0.13'], reasonix: ['reasonix', 'reasonix v1.30.0'] }
 function context(t) {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-v2-lifecycle-'))
+  // Canonicalize this newly created fixture only; production path guards still reject aliases.
+  const directory = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-v2-lifecycle-')))
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
   return directory
 }
@@ -22,11 +23,15 @@ const original = require('../helpers/legacy-provider-fixture.cjs').readLegacyFix
 function versionEnvironment(directory, provider, root) {
   const bin = path.join(directory, 'bin')
   const [name, version] = BINARIES[provider]
-  const executable = path.join(bin, name)
+  const executable = path.join(bin, process.platform === 'win32' ? `${name}.cmd` : name)
   // This sentinel permits only a version probe. Any native workload invocation fails.
-  write(executable, `#!/bin/sh\ncase "$1" in --version|-v) printf '%s\\n' '${version}' ;; *) echo 'VERSION PROBE ONLY' >&2; exit 93 ;; esac\n`)
+  write(executable, process.platform === 'win32'
+    ? `@echo off\r\nif "%~1"=="--version" goto version\r\nif "%~1"=="-v" goto version\r\nexit /b 93\r\n:version\r\necho ${version}\r\n`
+    : `#!/bin/sh\ncase "$1" in --version|-v) printf '%s\\n' '${version}' ;; *) echo 'VERSION PROBE ONLY' >&2; exit 93 ;; esac\n`)
   fs.chmodSync(executable, 0o700)
-  return { ...process.env, HOME: path.join(directory, 'home'), XDG_CONFIG_HOME: path.join(directory, 'xdg'), AUTOPROMPT_INSTALL_ROOT: root, PATH: [bin, path.dirname(process.execPath), process.env.PATH].join(path.delimiter) }
+  const env = { ...process.env, HOME: path.join(directory, 'home'), USERPROFILE: path.join(directory, 'home'), APPDATA: path.join(directory, 'appdata'), XDG_CONFIG_HOME: path.join(directory, 'xdg'), AUTOPROMPT_INSTALL_ROOT: root, PATH: [bin, path.dirname(process.execPath), process.env.PATH].join(path.delimiter) }
+  delete env.CODEX_HOME
+  return env
 }
 function cloneSource(directory) {
   const source = path.join(directory, 'source')
@@ -41,7 +46,7 @@ function cloneSource(directory) {
 test('native config roots and manual discovery destinations use provider roots', () => {
   const home = path.resolve(os.tmpdir(), 'v2-roots-home')
   const env = { HOME: home, XDG_CONFIG_HOME: path.join(home, 'xdg'), AUTOPROMPT_WORKSPACE_ROOT: path.join(home, 'project') }
-  const expected = { claude: '.claude', opencode: 'xdg/opencode', kilo: 'xdg/kilo', vscode: '.copilot', prime: '.prime/agent', omp: '.omp/agent', deepseek: '.dsh' }
+  const expected = { claude: '.claude', opencode: 'xdg/opencode', kilo: 'xdg/kilo', vscode: '.copilot', prime: '.prime/agent', omp: '.omp/agent', deepseek: '.dsh', hermes: '.hermes', grok: '.grok' }
   for (const provider of pkg.PROVIDERS) {
     assert.equal(pkg.resolveRoot(provider, env), path.join(home, expected[provider]))
     assert.equal(pkg.resolveRoot(provider, { ...env, AUTOPROMPT_INSTALL_ROOT: path.join(home, 'override') }), path.join(home, 'override'))
@@ -58,7 +63,7 @@ test('native config roots and manual discovery destinations use provider roots',
 test('macOS home and provider overrides resolve without assuming Linux XDG directories', { skip: process.platform === 'win32' }, () => {
   const home = '/Users/Example User'
   const env = { HOME: home }
-  const expected = { claude: '.claude', opencode: '.config/opencode', kilo: '.config/kilo', vscode: '.copilot', prime: '.prime/agent', omp: '.omp/agent', deepseek: '.dsh' }
+  const expected = { claude: '.claude', opencode: '.config/opencode', kilo: '.config/kilo', vscode: '.copilot', prime: '.prime/agent', omp: '.omp/agent', deepseek: '.dsh', hermes: '.hermes', grok: '.grok' }
   for (const provider of pkg.PROVIDERS) assert.equal(pkg.resolveRoot(provider, env), path.join(home, expected[provider]))
   assert.equal(pkg.resolveRoot('claude', { ...env, CLAUDE_CONFIG_DIR: `${home}/Library/Application Support/Claude` }), `${home}/Library/Application Support/Claude`)
   assert.equal(pkg.resolveRoot('omp', { ...env, PI_CONFIG_DIR: `${home}/Library/Application Support/OMP`, OMP_PROFILE: 'work' }), `${home}/Library/Application Support/OMP/profiles/work/agent`)
@@ -234,56 +239,84 @@ test('operation leases reject concurrent lifecycle mutation', t => {
   pkg.uninstall('claude', root)
 })
 
-for (const provider of pkg.PROVIDERS) test(`${provider}: public package process and shell lifecycle use private v2 only`, { skip: process.platform === 'win32' }, t => {
+for (const provider of [...pkg.PROVIDERS, 'reasonix']) test(`${provider}: public package process and shell lifecycle use private v2 only`, { skip: process.platform === 'win32' }, t => {
   const directory = context(t), root = path.join(directory, 'config'), env = versionEnvironment(directory, provider, root)
   for (const [script, args] of [['install', []], ['doctor', ['--strict']], ['uninstall', []]]) {
     const result = cp.spawnSync('bash', [path.join(ROOT, 'scripts/install', `${script}.sh`), provider, ...args], { encoding: 'utf8', cwd: directory, env, timeout: 120000 })
     ok(result)
     if (script === 'install') {
-      ok(run(CLI, ['verify', provider, '--root', root], env, directory))
+      const verifyCli = provider === 'reasonix' ? path.join(ROOT, 'scripts/reasonix-package.cjs') : CLI
+      const verifyArgs = provider === 'reasonix' ? ['verify', '--root', root] : ['verify', provider, '--root', root]
+      ok(run(verifyCli, verifyArgs, env, directory))
       assert.equal(fs.existsSync(path.join(root, '.autoprompt-install-receipt.json')), false)
       assert.equal(fs.existsSync(path.join(root, 'agents/ap-manager.md')), false)
     }
   }
-  assert.equal(fs.existsSync(pkg.launcherPath(provider, root)), false)
+  const launcher = provider === 'reasonix' ? path.join(root, 'skills/autoprompt/SKILL.md') : pkg.launcherPath(provider, root)
+  assert.equal(fs.existsSync(launcher), false)
 })
 
 const powershell = process.platform === 'win32' ? 'powershell.exe' : 'pwsh'
 const hasPowerShell = cp.spawnSync(powershell, ['-NoProfile', '-NonInteractive', '-Command', 'exit 0']).status === 0
-test('PowerShell entrypoints parse and route all seven providers to the private lifecycle', { skip: !hasPowerShell }, () => {
+test('PowerShell entrypoints parse and route all nine shared providers to the private lifecycle', { skip: !hasPowerShell }, () => {
   const files = ['install', 'doctor', 'uninstall', 'harness-v2'].map(name => path.join(ROOT, 'scripts/install', `${name}.ps1`))
   const command = files.map(file => `$errors = $null; [void][System.Management.Automation.Language.Parser]::ParseFile('${file.replaceAll("'", "''")}', [ref]$null, [ref]$errors); if ($errors.Count) { throw ($errors | Out-String) }`).join('; ')
   const result = cp.spawnSync(powershell, ['-NoProfile', '-NonInteractive', '-Command', command], { encoding: 'utf8' })
   ok(result)
 })
 
-for (const provider of pkg.PROVIDERS) test(`${provider}: PowerShell installs, verifies and removes its private v2 payload`, { skip: !hasPowerShell || process.platform === 'win32' }, t => {
+for (const provider of [...pkg.PROVIDERS, 'reasonix']) test(`${provider}: PowerShell installs, verifies and removes its private v2 payload`, { skip: !hasPowerShell, timeout: 600000 }, t => {
   const directory = context(t), root = path.join(directory, 'config with spaces'), env = versionEnvironment(directory, provider, root)
-  for (const [script, extra] of [['install', []], ['doctor', ['-Strict']], ['uninstall', []]]) {
-    const result = cp.spawnSync(powershell, ['-NoProfile', '-NonInteractive', '-File', path.join(ROOT, 'scripts/install', `${script}.ps1`), provider, ...extra],
-      { encoding: 'utf8', cwd: directory, env, timeout: 120000 })
-    ok(result)
-    if (script === 'install') {
-      ok(run(CLI, ['verify', provider, '--root', root], env, directory))
-      assert.equal(fs.existsSync(path.join(root, 'agents/ap-manager.md')), false)
-    }
-  }
-  assert.equal(fs.existsSync(pkg.launcherPath(provider, root)), false)
+  const reasonix = require('../../scripts/reasonix-package.cjs')
+  const verify = () => provider === 'reasonix' ? reasonix.verify(root) : pkg.verify(provider, root)
+  const receiptFile = path.join(root, provider === 'reasonix' ? reasonix.RECEIPT : pkg.receiptName(provider))
+  const invoke = (script, extra = []) => cp.spawnSync(powershell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(ROOT, 'scripts/install', `${script}.ps1`), provider, ...extra],
+    { encoding: 'utf8', cwd: directory, env, timeout: 120000 })
+  const sentinel = path.join(root, 'keep-user.txt'), sibling = path.join(directory, 'keep-sibling.txt')
+  write(sentinel, 'keep user\n'); write(sibling, 'keep sibling\n')
+  ok(invoke('install'))
+  const installed = verify()
+  assert.equal(installed.status, 'verified')
+  assert.equal(fs.existsSync(path.join(root, 'agents/ap-manager.md')), false)
+  assert.equal(fs.existsSync(path.join(root, 'skills/ap-manager/SKILL.md')), false)
+  ok(invoke('doctor', ['-Strict']))
+  const relative = Object.keys(installed.files).find(file => file.endsWith('/GATES.md') || file === 'GATES.md')
+  assert.ok(relative, 'receipt binds a real runtime doctrine file')
+  const target = path.join(installed.bundle, relative), originalBytes = fs.readFileSync(target)
+  const alteredBytes = Buffer.concat([originalBytes, Buffer.from('\nfixture-private-bundle-drift\n')])
+  fs.writeFileSync(target, alteredBytes)
+  assert.throws(verify, { code: 'PAYLOAD_INVALID' })
+  const refusedDoctor = invoke('doctor', ['-Strict'])
+  assert.ifError(refusedDoctor.error)
+  assert.ok(Number.isSafeInteger(refusedDoctor.status) && refusedDoctor.status > 0, `${refusedDoctor.stdout}\n${refusedDoctor.stderr}`)
+  // A registered bundle with drift is refused, not silently overwritten by install.
+  const refusedInstall = invoke('install')
+  assert.ifError(refusedInstall.error)
+  assert.ok(Number.isSafeInteger(refusedInstall.status) && refusedInstall.status > 0, `${refusedInstall.stdout}\n${refusedInstall.stderr}`)
+  assert.deepEqual(fs.readFileSync(target), alteredBytes)
+  fs.writeFileSync(target, originalBytes)
+  ok(invoke('install'))
+  assert.equal(verify().payloadDigest, installed.payloadDigest)
+  ok(invoke('doctor', ['-Strict']))
+  ok(invoke('uninstall'))
+  assert.equal(fs.existsSync(installed.bundle), false)
+  assert.equal(fs.existsSync(receiptFile), false)
+  const launcher = provider === 'reasonix' ? path.join(root, 'skills/autoprompt/SKILL.md') : pkg.launcherPath(provider, root)
+  assert.equal(fs.existsSync(launcher), false)
+  assert.equal(fs.readFileSync(sentinel, 'utf8'), 'keep user\n')
+  assert.equal(fs.readFileSync(sibling, 'utf8'), 'keep sibling\n')
 })
 
-test('reasonix: PowerShell installs, verifies and removes its private v2 payload', { skip: !hasPowerShell || process.platform === 'win32' }, t => {
-  const directory = context(t), root = path.join(directory, 'reasonix config with spaces')
-  const env = versionEnvironment(directory, 'claude', root)
-  const binary = path.join(directory, 'bin/reasonix')
-  write(binary, '#!/bin/sh\ncase "$1" in --version|-v) printf "%s\\n" "reasonix v1.30.0" ;; *) exit 93 ;; esac\n')
-  fs.chmodSync(binary, 0o700)
-  const reasonix = require('../../scripts/reasonix-package.cjs')
-  let installed
-  for (const [script, extra] of [['install', []], ['doctor', ['-Strict']], ['uninstall', []]]) {
-    ok(cp.spawnSync(powershell, ['-NoProfile', '-NonInteractive', '-File', path.join(ROOT, 'scripts/install', `${script}.ps1`), 'reasonix', ...extra],
-      { encoding: 'utf8', cwd: directory, env, timeout: 120000 }))
-    if (script === 'install') installed = reasonix.verify(root)
-  }
-  assert.equal(fs.existsSync(reasonix.bundlePath(root, installed)), false)
-  assert.equal(fs.existsSync(path.join(root, reasonix.RECEIPT)), false)
+for (const provider of ['grok', 'hermes']) test(`${provider}: absent v2 uninstall is an explicit no-op in the POSIX installer`, { skip: process.platform === 'win32' }, t => {
+  const directory = context(t), root = path.join(directory, 'empty config'), env = versionEnvironment(directory, provider, root)
+  const bashResult = cp.spawnSync('bash', [path.join(ROOT, 'scripts/install/uninstall.sh'), provider], { encoding: 'utf8', cwd: directory, env, timeout: 120000 })
+  ok(bashResult)
+  assert.match(bashResult.stdout, new RegExp(`SKIP\\s+${provider}\\s+reason=no-receipt`))
+})
+
+for (const provider of ['grok', 'hermes']) test(`${provider}: absent v2 uninstall is an explicit no-op in the PowerShell installer`, { skip: !hasPowerShell }, t => {
+  const directory = context(t), root = path.join(directory, 'empty config'), env = versionEnvironment(directory, provider, root)
+  const powershellResult = cp.spawnSync(powershell, ['-NoProfile', '-NonInteractive', '-File', path.join(ROOT, 'scripts/install/uninstall.ps1'), provider], { encoding: 'utf8', cwd: directory, env, timeout: 120000 })
+  ok(powershellResult)
+  assert.match(powershellResult.stdout, new RegExp(`SKIP\\s+${provider}\\s+reason=no-receipt`))
 })

@@ -1,6 +1,6 @@
 {
   "name": "autoprompt-skill",
-  "version": "1.0.4",
+  "version": "2.0.0-beta.1",
   "description": "Autoprompt is a coding-agent skill for explicit routing, bounded delegation, and evidence-backed checks.",
   "license": "MIT",
   "publishConfig": {
@@ -15,6 +15,16 @@
   "files": [
     "bin/",
     "scripts/codex-configure.cjs",
+    "scripts/darwin-runtime-setup.cjs",
+    "scripts/provider-closure.cjs",
+    "scripts/hermes-runtime-closure.cjs",
+    "scripts/lima-runtime.cjs",
+    "scripts/lima-runtime-guest.cjs",
+    "scripts/lima-runtime-guest-lifecycle.cjs",
+    "scripts/lima-runtime-guest-worker.cjs",
+    "scripts/lima-runtime-vscode-display.cjs",
+    "scripts/wsl-runtime.cjs",
+    "scripts/wsl-runtime.ps1",
     "scripts/codex-runtime-identity.cjs",
     "scripts/local-only-safety.cjs",
     "scripts/harness-provider-config.cjs",
@@ -47,6 +57,8 @@
     "assets/",
     "docs/CODE_OF_CONDUCT.md",
     "docs/CONTRIBUTING.md",
+    "docs/CONTRIBUTORS.md",
+    "docs/lima-runtime.md",
     "docs/SECURITY.md",
     "docs/SUPPORT.md",
     "docs/benchmarks/codex-canary-2026-08-22.md",
@@ -66,18 +78,36 @@
     "scripts/reasonix-package.cjs",
     "scripts/reasonix-configure.cjs",
     "tests/source/harness-v2-adapter-native.test.cjs",
+    "tests/source/harness-v2-claude-capability-native.test.cjs",
+    "tests/source/harness-v2-deepseek-capability-native.test.cjs",
+    "tests/source/harness-v2-hermes-capability-native.test.cjs",
+    "tests/source/harness-v2-grok-capability-native.test.cjs",
+    "tests/source/harness-v2-vscode-capability-native.test.cjs",
+    "tests/source/harness-v2-opencode-capability-native.test.cjs",
+    "tests/source/harness-v2-pi-capability-native.test.cjs",
+    "tests/source/harness-v2-reasonix-capability-native.test.cjs",
     "tests/source/harness-v2-pi-adapter-native.test.cjs",
     "tests/source/harness-v2-vscode-owned-native.test.cjs",
+    "tests/source/harness-v2-hermes-adapter-native.test.cjs",
+    "tests/source/harness-v2-windows-shim.test.cjs",
+    "tests/source/harness-v2-grok.test.cjs",
+    "tests/source/harness-v2-grok-proxy.test.cjs",
+    "tests/source/harness-v2-grok-sandbox.test.cjs",
+    "tests/source/harness-v2-grok-adapter-native.test.cjs",
     "tests/source/reasonix-controlled-native.test.cjs",
     "tests/helpers/harness-native-service.cjs",
-    "tests/helpers/harness-pi-native-service.cjs"
+    "tests/helpers/harness-pi-native-service.cjs",
+    "agents/hermes/",
+    "agents/manifests/hermes-runtime.json",
+    "agents/grok/",
+    "agents/manifests/grok-runtime.json"
   ],
   "scripts": {
     "normalize:shell": "node scripts/normalize-shell-line-endings.cjs",
     "pretest": "npm run normalize:shell",
     "test": "npm run test:cli && npm run test:providers && npm run test:benchmark && npm run test:reasonix && npm run test:harness-v2",
-    "test:cli": "node --test tests/source/autoprompt-cli.test.cjs tests/source/codex-configure.test.cjs tests/source/npm-package.test.cjs tests/source/public-provider-boundary.test.cjs tests/source/release-notes.test.cjs tests/source/source-test-contract.test.cjs tests/source/test-codex-source-discovery.test.cjs",
-    "test:providers": "node scripts/generate-provider-contracts.cjs --check && node scripts/runtime-payload.cjs --check && node --test tests/source/provider-generation.test.cjs tests/source/runtime-payload.test.cjs tests/source/vscode-custom-agent-fixture.test.cjs tests/source/provider-compatibility-registry.test.cjs tests/source/codex-current-parity.test.cjs tests/source/prime-provider.test.cjs tests/source/provider-entry-contract.test.cjs tests/source/supervisor-mode-contract.test.cjs tests/source/custom-claude-formatter.test.cjs tests/source/powershell-hash-fallback.test.cjs tests/source/harness-provider-config.test.cjs",
+    "test:cli": "node --test tests/source/autoprompt-cli.test.cjs tests/source/autoprompt-stdin.test.cjs tests/source/codex-configure.test.cjs tests/source/npm-package.test.cjs tests/source/public-provider-boundary.test.cjs tests/source/release-notes.test.cjs tests/source/source-test-contract.test.cjs tests/source/test-codex-source-discovery.test.cjs tests/source/autoprompt-update-semver.test.cjs",
+    "test:providers": "node scripts/generate-provider-contracts.cjs --check && node scripts/runtime-payload.cjs --check && node --test tests/source/provider-generation.test.cjs tests/source/runtime-payload.test.cjs tests/source/vscode-custom-agent-fixture.test.cjs tests/source/provider-compatibility-registry.test.cjs tests/source/codex-current-parity.test.cjs tests/source/prime-provider.test.cjs tests/source/provider-entry-contract.test.cjs tests/source/supervisor-mode-contract.test.cjs tests/source/custom-claude-formatter.test.cjs tests/source/powershell-hash-fallback.test.cjs tests/source/harness-provider-config.test.cjs tests/source/installer-python-resolver.test.cjs tests/source/deepseek-tool-allowlist.test.cjs",
     "test:benchmark": "node --test tests/source/benchmark-evidence-v2.test.cjs tests/source/benchmark-evidence-test-closures.test.cjs tests/benchmarks/autoprompt-benchmark.test.cjs",
     "test:codex-core": "node scripts/run-codex-source-tests.cjs",
     "benchmark:run": "node scripts/benchmark-evidence/runner.cjs",
@@ -87,11 +117,12 @@
     "test:codex-artifact": "node --test --test-concurrency=1 tests/source/codex-artifact.test.cjs",
     "test:codex-lifecycle": "node --test --test-concurrency=1 tests/source/codex-receipt-lifecycle.test.cjs tests/source/packed-codex-lifecycle.test.cjs tests/source/codex-artifact.test.cjs",
     "test:lifecycle": "node --test --test-concurrency=1 tests/source/claude-lifecycle.test.cjs tests/source/kilo-provider.test.cjs tests/source/opencode-lifecycle.test.cjs tests/source/vscode-lifecycle.test.cjs tests/source/prime-lifecycle.test.cjs tests/source/new-harness-lifecycle.test.cjs tests/source/packed-new-harness-lifecycle.test.cjs tests/source/install-custom-root.test.cjs tests/source/codex-receipt-lifecycle.test.cjs tests/source/packed-codex-lifecycle.test.cjs tests/source/codex-artifact.test.cjs tests/source/codex-version-probe-isolation.test.cjs tests/source/install-extras-runtime-path.test.cjs tests/source/opencode-launch-wrapper.test.cjs tests/source/powershell-home-precedence.test.cjs tests/source/posix-shell-performance.test.cjs",
-    "verify": "npm test && npm run test:codex-core && npm run test:lifecycle",
+    "verify": "npm test && npm run test:codex-core && npm run test:lifecycle && npm run test:platform",
     "prepack": "npm test",
     "prepublishOnly": "npm run verify && npm run benchmark:release-quality-gate",
-    "test:reasonix": "node --test tests/source/reasonix-v2.test.cjs tests/source/reasonix-native.test.cjs tests/source/reasonix-native-credentials.test.cjs tests/source/reasonix-controlled-native.test.cjs",
+    "test:reasonix": "node --test tests/source/reasonix-v2.test.cjs tests/source/reasonix-native.test.cjs tests/source/reasonix-native-credentials.test.cjs tests/source/reasonix-controlled-native.test.cjs tests/source/reasonix-native-todo.test.cjs",
     "test:harness-v2": "node scripts/run-harness-v2-source-tests.cjs",
+    "test:platform": "node --test tests/source/darwin-filesystem.test.cjs tests/source/darwin-filesystem-wrapper.test.cjs tests/source/darwin-runtime-setup.test.cjs tests/source/darwin-process.test.cjs tests/source/windows-filesystem.test.cjs tests/source/windows-filesystem-wrapper.test.cjs tests/source/windows-appcontainer.test.cjs tests/source/windows-appcontainer-resources.test.cjs tests/source/lima-runtime.test.cjs tests/source/lima-runtime-vscode-display.test.cjs tests/source/provider-closure.test.cjs tests/source/hermes-runtime-closure.test.cjs tests/source/wsl-runtime.test.cjs",
     "conformance:harness-v2": "node scripts/harness-v2-conformance.cjs"
   },
   "engines": {
@@ -119,7 +150,9 @@
     "orchestration",
     "reasonix",
     "deepseek-harness",
-    "vscode"
+    "vscode",
+    "hermes-agent",
+    "grok-build"
   ],
   "bundleDependencies": [
     "@iarna/toml",
@@ -128,5 +161,8 @@
   "dependencies": {
     "@iarna/toml": "2.2.5",
     "yaml": "2.9.0"
+  },
+  "devDependencies": {
+    "cmd-shim": "7.0.0"
   }
 }

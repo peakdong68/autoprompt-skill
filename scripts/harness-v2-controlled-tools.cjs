@@ -7,10 +7,11 @@ const fs = require('node:fs')
 const boundary = require('./harness-v2-tool-boundary.cjs')
 const { readBound, sha256 } = require('../agents/reasonix/workflow/native.js')
 
-const PROVIDERS = Object.freeze(['claude', 'opencode', 'kilo', 'reasonix', 'prime', 'omp', 'deepseek', 'vscode'])
+const PROVIDERS = Object.freeze(['claude', 'opencode', 'kilo', 'reasonix', 'prime', 'omp', 'deepseek', 'vscode', 'hermes', 'grok'])
 const SERVER = 'autoprompt_owned'
 const SUPPORTED = new Set(PROVIDERS)
 const NAMES = new Set(boundary.TOOLS.map(tool => tool.name))
+const NOT_STARTED_CODES = new Set(['TOOL_PATH_DENIED', 'TOOL_PATH_INVALID'])
 
 function fail(code, message) { throw new boundary.BoundaryError(code, message) }
 function toolName(provider, name) {
@@ -64,6 +65,19 @@ function parseResult(output) {
   if (sha256(bytes) !== result.outputSha256 || !Buffer.from(result.output).equals(bytes)) {
     fail('TOOL_OUTPUT_INCOMPLETE', 'Native tool output was changed, truncated, or is not losslessly representable as UTF-8')
   }
+  if (result.executionState === 'NOT_STARTED') {
+    const expected = result.code === 'TOOL_PATH_DENIED'
+      ? 'TOOL_PATH_DENIED: Command cwd is outside the assigned readable roots'
+      : result.code === 'TOOL_PATH_INVALID'
+        ? 'TOOL_PATH_INVALID: Command cwd must be an existing assigned directory' : null
+    if (result.tool !== 'bash' || result.status !== 'failed' || !NOT_STARTED_CODES.has(result.code) ||
+        result.exitCode !== null || typeof result.command !== 'string' || !result.command || result.output !== expected ||
+        JSON.stringify(Object.keys(result).sort()) !== JSON.stringify(['code', 'command', 'executionState', 'exitCode', 'output', 'outputSha256', 'status', 'tool'])) {
+      fail('TOOL_OUTPUT_INCOMPLETE', 'Controlled no-spawn command result has an invalid shape')
+    }
+    return result
+  }
+  if (Object.hasOwn(result, 'executionState')) fail('TOOL_OUTPUT_INCOMPLETE', 'Controlled tool execution state is invalid')
   if (result.tool === 'bash' && (typeof result.command !== 'string' ||
       !Number.isInteger(result.exitCode) || result.truncated || result.cancelled || result.timedOut || result.background !== false)) {
     fail('TOOL_OUTPUT_INCOMPLETE', 'Controlled command lacks exact foreground completion evidence')
@@ -77,7 +91,7 @@ class ReceiptVerifier {
     this.boundary = load(prepared, provider)
     this.consumed = new Set()
   }
-  verify(name, args, output, nativeError) {
+  verify(name, args, output, nativeError, expectedReceiptHash) {
     const decoded = decodeToolName(this.provider, name)
     if (!decoded) fail('ROLE_POLICY_DENIED', 'A native built-in or foreign MCP tool escaped the controlled projection')
     const result = parseResult(output)
@@ -85,9 +99,12 @@ class ReceiptVerifier {
       fail('TOOL_RECEIPT_INVALID', 'Native tool identity or status disagrees with its controller result')
     }
     const argsHash = sha256(boundary.canonicalJson(args)), resultHash = sha256(boundary.canonicalJson(result))
+    if (expectedReceiptHash !== undefined && !/^[a-f0-9]{64}$/.test(expectedReceiptHash || '')) fail('TOOL_RECEIPT_INVALID', 'Native tool result has no exact controller receipt identity')
     const matches = boundary.readReceipts(this.boundary).filter(receipt => !this.consumed.has(receipt.hash) &&
+      (expectedReceiptHash === undefined || receipt.hash === expectedReceiptHash) &&
       receipt.tool === decoded && receipt.argsSha256 === argsHash && receipt.resultSha256 === resultHash &&
-      receipt.outputSha256 === result.outputSha256 && receipt.status === result.status && receipt.exitCode === (result.exitCode ?? null))
+      receipt.outputSha256 === result.outputSha256 && receipt.status === result.status && receipt.exitCode === (result.exitCode ?? null) &&
+      (result.executionState === 'NOT_STARTED' ? receipt.executionState === 'NOT_STARTED' : receipt.executionState === undefined))
     if (!matches.length) fail('TOOL_RECEIPT_INVALID', 'Native tool result has no matching controller-owned execution receipt')
     // Identical repeated calls are legal. Every occurrence consumes one distinct
     // journal entry; no entry can stand in for two native calls.

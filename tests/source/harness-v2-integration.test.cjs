@@ -94,7 +94,7 @@ function runCli(root, argv, env) {
   return { ...result, output: fs.readFileSync(outputPath, 'utf8') }
 }
 
-for (const provider of ['reasonix', 'claude', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek']) {
+for (const provider of ['reasonix', 'claude', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek', 'hermes', 'grok']) {
   test(`real public ${provider} CLI loads its installed v2 bundle and refuses an absent native process`, { timeout: 60000 }, () => {
     const root = temporary(`harness-v2-cli-${provider}-`)
     try {

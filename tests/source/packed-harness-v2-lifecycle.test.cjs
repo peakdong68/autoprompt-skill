@@ -49,7 +49,7 @@ function packedEnvironment(directory, bin) {
   const xdg = path.join(directory, 'xdg config with spaces')
   const appData = path.join(directory, 'appdata with spaces')
   const localAppData = path.join(directory, 'localappdata with spaces')
-  for (const folder of [home, xdg, appData, localAppData, bin]) fs.mkdirSync(folder, { recursive: true })
+  for (const folder of [home, xdg, appData, localAppData, bin, path.join(directory, 'temp with spaces')]) fs.mkdirSync(folder, { recursive: true })
   return {
     ...process.env,
     APPDATA: appData,
@@ -67,7 +67,7 @@ function packedEnvironment(directory, bin) {
   }
 }
 
-test('packed artifact installs and verifies all seven providers without the checkout or network', { timeout: 900000 }, async t => {
+test('packed artifact installs and verifies all public providers without the checkout or network', { timeout: 900000 }, async t => {
   // The space in this prefix is deliberate: it exercises npm, Node, and the
   // installer ports with paths that need quoting on every supported host.
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt packed v2-'))
@@ -90,7 +90,7 @@ test('packed artifact installs and verifies all seven providers without the chec
   assert.ok(fs.existsSync(path.join(source, 'scripts/install/harness-v2-legacy.json')))
   const helper = path.join(source, 'scripts/harness-v2-package.cjs')
   const publicCli = path.join(source, 'bin/autoprompt.cjs')
-  const versions = { claude: ['claude', '2.1.141'], opencode: ['opencode', '1.5.7'], kilo: ['kilo', '7.1.0'], vscode: ['code', '1.133.0'], prime: ['prime-agent', '0.7.2'], omp: ['omp', '17.4.0'], deepseek: ['dsh', '0.1.0-rc.7'] }
+  const versions = { claude: ['claude', '2.1.141'], opencode: ['opencode', '1.5.7'], kilo: ['kilo', '7.1.0'], vscode: ['code', '1.133.0'], prime: ['prime-agent', '0.7.2'], omp: ['omp', '17.4.0'], deepseek: ['dsh', '0.1.0-rc.7'], hermes: ['hermes', '0.21.1'], grok: ['grok', '1.0.13'] }
   for (const provider of pkg.PROVIDERS) await t.test(provider, () => {
     const root = path.join(directory, 'roots', provider)
     const [command, version] = versions[provider]
@@ -118,6 +118,23 @@ test('packed artifact installs and verifies all seven providers without the chec
     assert.equal(fs.readFileSync(path.join(root, 'config.json'), 'utf8'), 'custom config stays byte-for-byte\n')
     assert.equal(fs.readFileSync(path.join(root, 'agents/custom.md'), 'utf8'), 'custom role\n')
   })
+
+  // Provider-specific packages must also work through the same installed CLI.
+  // Version-only fixtures prove installer dispatch, never native admission.
+  for (const [provider, version, model] of [['codex', 'codex-cli 0.148.0', 'gpt-5.6-luna'], ['reasonix', 'reasonix 1.30.0', 'provider/test-model']]) {
+    writeVersionProbe(bin, provider, version)
+    await t.test(`public CLI ${provider}`, () => {
+      const root = path.join(directory, 'provider-specific roots', provider)
+      write(path.join(root, 'unrelated.txt'), 'preserve provider-specific user data\n')
+      const invoke = args => execute(process.execPath, [publicCli, ...args], { cwd: directory, env })
+      ok(invoke(['install', provider, '--root', root]))
+      ok(invoke(['configure', provider, '--agents', model, '--root', root]))
+      ok(invoke(['doctor', provider, '--strict', '--root', root]))
+      ok(invoke(['install', provider, '--root', root]))
+      ok(invoke(['uninstall', provider, '--root', root]))
+      assert.equal(fs.readFileSync(path.join(root, 'unrelated.txt'), 'utf8'), 'preserve provider-specific user data\n')
+    })
+  }
 
   // Exercise the packed PowerShell entrypoints with the same artifact. On
   // Linux this uses the pinned pwsh binary; on Windows it uses powershell.exe.

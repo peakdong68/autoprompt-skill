@@ -27,21 +27,7 @@ const SAFE_RESOLVED = JSON.stringify({
   },
 }, null, 2)
 
-function findBash() {
-  const candidates = process.platform === 'win32'
-    ? [
-        path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Git', 'bin', 'bash.exe'),
-        path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Git', 'bin', 'bash.exe'),
-        'bash',
-      ]
-    : ['bash']
-
-  for (const candidate of candidates) {
-    const probe = childProcess.spawnSync(candidate, ['--version'], { encoding: 'utf8' })
-    if (probe.status === 0) return candidate
-  }
-  return null
-}
+const { resolveBash: findBash } = require('../helpers/resolve-bash.cjs')
 
 function toPosixPath(value) {
   if (process.platform !== 'win32') return value

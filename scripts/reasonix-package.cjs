@@ -12,10 +12,13 @@ const RECEIPT = '.autoprompt-reasonix-v2.json'
 const SHIM = '---\nname: autoprompt\ndescription: "Start explicitly requested Autoprompt v2 work in Reasonix."\ninvocation: manual\n---\n\nRun `autoprompt activate reasonix --target <absolute-project-path> -- <mission>` in a terminal. The launcher starts the private v2 controller. Loading this skill alone never starts or resumes work.\n'
 const TREES = ['agents/reasonix', 'agents/codex', 'agents/contracts', 'node_modules/@iarna/toml']
 const BUNDLE_PACKAGE = '{"name":"@autoprompt-skill/reasonix-runtime","version":"2.0.0","private":true,"type":"commonjs"}\n'
-const FILES = ['scripts/local-only-safety.cjs', 'scripts/reasonix-package.cjs', 'scripts/reasonix-configure.cjs', 'scripts/install/operation-lock.cjs',
+const FILES = ['scripts/local-only-safety.cjs', 'scripts/darwin-runtime-setup.cjs', 'scripts/reasonix-package.cjs', 'scripts/reasonix-configure.cjs', 'scripts/install/operation-lock.cjs',
   'scripts/harness-v2-tool-boundary.cjs', 'scripts/harness-v2-tool-server.cjs', 'scripts/harness-v2-controlled-tools.cjs',
-  'scripts/harness-v2-conformance.cjs', 'scripts/harness-v2-local-admission.cjs', 'scripts/harness-v2-package.cjs', 'scripts/harness-v2-native.cjs']
-const CONFORMANCE_ASSETS = ['tests/source/reasonix-controlled-native.test.cjs']
+  'scripts/harness-v2-conformance.cjs', 'scripts/harness-v2-local-admission.cjs', 'scripts/harness-v2-package.cjs', 'scripts/harness-v2-native.cjs', 'scripts/harness-v2-native-wire-projection.cjs', 'scripts/harness-v2-request-quota.cjs', 'scripts/harness-v2-quota-relay.cjs', 'scripts/harness-v2-quota-connection.cjs',
+  'scripts/harness-v2-canary.cjs', 'scripts/harness-v2-closed-canary.cjs', 'scripts/harness-v2-trust/evidence.json',
+  'scripts/harness-v2-trust/trusted-public-keys.json', 'scripts/harness-v2-admission.cjs',
+  'scripts/harness-v2-prime-migration.cjs', 'scripts/install/harness-v2-legacy.json', 'scripts/install/prime-settings.cjs']
+const CONFORMANCE_ASSETS = ['tests/source/reasonix-controlled-native.test.cjs', 'tests/source/harness-v2-reasonix-capability-native.test.cjs']
 
 function absoluteRoot(root) {
   if (typeof root !== 'string' || !path.isAbsolute(root) || /[\0\r\n]/.test(root) || path.resolve(root) === path.parse(root).root) {
@@ -63,7 +66,10 @@ function sourceInventory(root = ROOT) {
   if (path.resolve(root) === ROOT && assets.length !== CONFORMANCE_ASSETS.length) {
     throw new ReasonixError('PAYLOAD_INVALID', 'Published Reasonix runtime is missing a required native conformance asset')
   }
-  const files = [...FILES, ...assets, ...TREES.flatMap(tree => walk(sourcePath(root, tree)).map(file => `${tree}/${file}`))].sort()
+  // Match npm's bundled dependency closure, which omits this non-runtime
+  // changelog, so source and packed reviewed identities remain identical.
+  const files = [...FILES, ...assets, ...TREES.flatMap(tree => walk(sourcePath(root, tree)).map(file => `${tree}/${file}`))]
+    .filter(file => file !== 'node_modules/@iarna/toml/CHANGELOG.md').sort()
   const hashes = Object.fromEntries(files.map(file => [file, sha256(readBound(sourcePath(root, file)))]))
   const digest = sha256(JSON.stringify(hashes))
   return { schemaVersion: 2, provider: 'reasonix', contractVersion: '2.0.0', payloadGeneration: `reasonix-v2.0.0-${digest.slice(0, 16)}`, payloadDigest: digest, files: hashes }

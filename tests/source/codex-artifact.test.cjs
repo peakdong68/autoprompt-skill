@@ -54,6 +54,7 @@ function createExternallySignedReleaseFixture(sandbox) {
     'scripts/runtime-payload.cjs',
     'scripts/codex-runtime-identity.cjs',
     'scripts/codex-configure.cjs',
+    'scripts/darwin-runtime-setup.cjs',
     'scripts/benchmark-evidence/core.cjs',
     'agents/manifests/codex-runtime.json',
   ]
@@ -531,6 +532,7 @@ test('independent Codex artifact uses a hermetic externally signed PASS fixture 
     file === 'scripts/runtime-payload.cjs' ||
     file === 'scripts/codex-runtime-identity.cjs' ||
     file === 'scripts/codex-configure.cjs' ||
+    file === 'scripts/darwin-runtime-setup.cjs' ||
     file === 'scripts/local-only-safety.cjs' ||
     file === 'scripts/benchmark-evidence/core.cjs' ||
     file === 'release-history.json' ||

@@ -17,7 +17,8 @@ const MARKER = 'skills/autoprompt/.autoprompt-runtime-manifest.json'
 const VERSIONS = {
   claude: ['claude', '2.1.141'], codex: ['codex', 'codex-cli 0.148.0'],
   opencode: ['opencode', '1.5.7'], kilo: ['kilo', '7.1.0'], vscode: ['code', '1.133.0'],
-  prime: ['prime-agent', '0.7.2'], omp: ['omp', '17.4.0'], deepseek: ['dsh', '0.1.0-rc.7'],
+  prime: ['prime-agent', '0.7.2'], omp: ['omp', '17.4.0'], deepseek: ['dsh', '0.1.2-rc.1'],
+  hermes: ['hermes', '0.21.1'], grok: ['grok', '1.0.13'],
   reasonix: ['reasonix', 'reasonix v1.30.0'],
 }
 
@@ -45,7 +46,7 @@ function npmCli() {
 function environment(directory) {
   const env = { ...process.env }
   for (const key of ['AUTOPROMPT_INSTALL_ROOT', 'CODEX_HOME', 'CLAUDE_CONFIG_DIR', 'PRIME_AGENT_CODING_AGENT_DIR',
-    'OMP_PROFILE', 'PI_PROFILE', 'PI_CONFIG_DIR', 'PI_CODING_AGENT_DIR', 'DSH_HOME', 'REASONIX_HOME',
+    'OMP_PROFILE', 'PI_PROFILE', 'PI_CONFIG_DIR', 'PI_CODING_AGENT_DIR', 'DSH_HOME', 'HERMES_HOME', 'GROK_HOME', 'REASONIX_HOME',
     'AUTOPROMPT_WORKSPACE_ROOT', 'NODE_PATH']) delete env[key]
   for (const key of Object.keys(env)) if (key.toLowerCase() === 'npm_config_dry_run') delete env[key]
   Object.assign(env, {
@@ -220,10 +221,10 @@ test('packed public Codex and all-provider lifecycles remove receipt-bound v2 bu
 
 for (const port of ['bash', 'powershell']) test(`${port}: Codex v2 scope requires a receipt-bound marker and excludes other generations, traversal and non-directory parents`, t => {
   const executable = port === 'bash'
-    ? (process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash')
+    ? require('../helpers/resolve-bash.cjs').resolveBash()
     : (process.platform === 'win32' ? 'powershell.exe' : 'pwsh')
   const probeArgs = port === 'bash' ? ['--version'] : ['-NoProfile', '-NonInteractive', '-Command', 'exit 0']
-  if (run(executable, probeArgs).status !== 0) { t.skip(`${executable} unavailable`); return }
+  if (!executable || run(executable, probeArgs).status !== 0) { t.skip(`${executable} unavailable`); return }
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-codex-scope-'))
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
   const env = environment(directory)

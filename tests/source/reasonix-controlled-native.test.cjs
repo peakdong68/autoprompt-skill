@@ -14,6 +14,7 @@ const toml = require('@iarna/toml')
 const native = require('../../agents/reasonix/workflow/native.js')
 const { ReasonixEventStream, ReasonixExecAdapter, prepareReasonixBoundary } = require('../../agents/reasonix/workflow/transport.js')
 const core = require('../../agents/codex/workflow/phase-budget.js')
+const { validateJsonSchema } = require('../../agents/codex/workflow/json-schema-validator.js')
 const { ProcessOwner, createPosixProcessAdapter, prepareProcessLaunchEnvironment } = require('../../agents/codex/workflow/process-owner.js')
 const boundary = require('../../scripts/harness-v2-tool-boundary.cjs')
 const controlled = require('../../scripts/harness-v2-controlled-tools.cjs')
@@ -27,8 +28,12 @@ function fixture(t, readOnly = true, cleanup = true) {
   const env = isolatedEnvironment(root)
   const target = path.join(root, 'target'), controller = path.join(root, 'controller'), nativeRoot = path.join(controller, 'native')
   for (const dir of [target, controller, nativeRoot]) fs.mkdirSync(dir, { mode: 0o700 })
-  const projection = core.createCanonicalMissionProjection('Read the assigned workspace and return the exact result.')
-  const record = { activationId: 'reasonix-local-test', generation: 1, workItemId: 'check-1', sessionId: crypto.randomUUID(), reservationId: crypto.randomUUID(),
+  const challenge = process.env.AUTOPROMPT_CLOSED_CANARY_CHALLENGE || crypto.randomBytes(32).toString('base64url')
+  const activationId = process.env.AUTOPROMPT_CLOSED_CANARY_ACTIVATION_ID || 'reasonix-local-test'
+  const generation = Number(process.env.AUTOPROMPT_CLOSED_CANARY_GENERATION || 1)
+  if (!/^[A-Za-z0-9_-]{43}$/.test(challenge) || !/^[A-Za-z0-9_-]{1,160}$/.test(activationId) || !Number.isSafeInteger(generation) || generation < 1) throw new Error('invalid native canary binding')
+  const projection = core.createCanonicalMissionProjection(`Read the assigned workspace and return the exact result. CLOSED_CANARY_CHALLENGE:${challenge}`)
+  const record = { activationId, generation, workItemId: 'check-1', sessionId: crypto.randomUUID(), reservationId: crypto.randomUUID(),
     logicalRole: 'worker', providerRole: 'ap-worker', physicalRole: 'ap-worker', canonicalMission: projection.canonicalMission,
     dispatch: { requestPointer: { hash: native.sha256('local request envelope') } }, workingDirectory: target,
   }
@@ -39,7 +44,7 @@ function fixture(t, readOnly = true, cleanup = true) {
   const scratch = path.join(launchRoot, 'scratch')
   const schema = path.join(controller, 'schema.json')
   fs.writeFileSync(schema, JSON.stringify({ type: 'object', properties: { ok: { const: true } }, required: ['ok'], additionalProperties: false }))
-  return { root, env, target, controller, nativeRoot, record, sessionRoot, launchRoot, scratch, schema }
+  return { root, env, target, controller, nativeRoot, record, sessionRoot, launchRoot, scratch, schema, challenge, projection }
 }
 
 function streamFixture(t) {
@@ -83,7 +88,7 @@ async function realFixture(t, actions, options = {}) {
     fs.rmSync(f.root, { recursive: true, force: true })
   })
   const executable = native.probeExecutable({ executable: process.env.AUTOPROMPT_REASONIX_TEST_CLI, env: f.env })
-  const requests = [], events = [], errors = [], deltas = [], authenticated = []
+  const requests = [], events = [], errors = [], deltas = [], authenticated = [], providerEvents = []
   const credential = options.credential || 'fixture'
   server = http.createServer(async (req, res) => {
     try {
@@ -103,6 +108,7 @@ async function realFixture(t, actions, options = {}) {
       const delta = action ? { role: 'assistant', tool_calls: [{ index: 0, id: `owned-${requestNumber}`, type: 'function', function: {
         name: action.name || 'use_capability', arguments: JSON.stringify(action.name ? args : {
           action: 'call', capability_id: `mcp-tool:autoprompt_owned/${action.tool}`, arguments: args,
+          reason: 'Use the assigned controller capability',
         }),
       } }] } : { role: 'assistant', content: JSON.stringify(options.result || { ok: true }) }
       res.writeHead(200, { 'content-type': 'text/event-stream' })
@@ -112,20 +118,41 @@ async function realFixture(t, actions, options = {}) {
     } catch (error) { errors.push(error.message); res.writeHead(500); res.end() }
   })
   const processAdapter = createPosixProcessAdapter()
-  owner = new ProcessOwner({ adapter: processAdapter, registryPath: path.join(f.controller, 'process-registry.json'), pollMs: 10 })
+  let registryPath = path.join(f.controller, 'process-registry.json')
+  const ownershipRoot = process.env.AUTOPROMPT_CLOSED_CANARY_OWNERSHIP_ROOT
+  if (ownershipRoot) {
+    if (!path.isAbsolute(ownershipRoot) || process.env.AUTOPROMPT_CLOSED_CANARY_PROVIDER !== 'reasonix') throw new Error('invalid native canary owner binding')
+    const directory = path.join(ownershipRoot, `reasonix-${crypto.randomUUID()}`)
+    fs.mkdirSync(directory, { mode: 0o700 })
+    registryPath = path.join(directory, 'processes.json')
+    fs.writeFileSync(path.join(directory, 'registration.json'), JSON.stringify({ schemaVersion: 1, provider: 'reasonix', activationId: f.record.activationId,
+      generation: f.record.generation, challenge: f.challenge, registryPath }), { mode: 0o600, flag: 'wx' })
+  }
+  owner = new ProcessOwner({ adapter: processAdapter, registryPath, pollMs: 10 })
   const proxy = path.join(f.controller, 'proxy')
   fs.mkdirSync(proxy, { mode: 0o700 })
   const runner = new core.OwnedCodexProxyRunner({ processOwner: owner, controlRoot: proxy, targetKey: 'reasonix-controlled-native', pollMs: 10 })
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
   const adapter = new ReasonixExecAdapter({ runner, nativeRoot: f.nativeRoot, executableBinding: executable, targetPath: f.target,
-    connection: { default_model: 'fixture', providers: [{ name: 'fixture', kind: 'openai', model: 'fixture', base_url: `http://127.0.0.1:${server.address().port}/v1`, api_key_env: 'FIXTURE_KEY' }] },
+    connection: typeof options.connection === 'function' ? options.connection(server.address().port) : options.connection || { default_model: 'fixture', providers: [{ name: 'fixture', kind: 'openai', model: 'fixture', base_url: `http://127.0.0.1:${server.address().port}/v1`, api_key_env: 'FIXTURE_KEY' }] },
     credentialEnvironment: { FIXTURE_KEY: credential, UNRELATED_SECRET: 'not-a-configured-provider-key' }, outputSchemaResolver: () => f.schema, rolePrompt: () => 'Perform only the assigned work and return JSON.',
   })
   const launch = async (overrides = {}) => {
     const record = { ...f.record, ...overrides }
     record.environment = prepareProcessLaunchEnvironment(processAdapter, record.reservationId, f.env)
     record.onEvent = event => events.push(event)
-    record.onUsageDelta = delta => { deltas.push(delta); return { continue: true } }
+    const suppliedUsage = overrides.onUsageDelta
+    record.onUsageDelta = (delta, cumulative, evidence) => {
+      deltas.push(delta)
+      return suppliedUsage ? suppliedUsage(delta, cumulative, evidence) : { continue: true }
+    }
+    for (const hook of ['onProviderRequestStarted', 'onProviderRequestSettled', 'onUnknownProviderSpend']) {
+      const supplied = overrides[hook]
+      record[hook] = evidence => {
+        providerEvents.push({ hook, evidence })
+        return supplied?.(evidence)
+      }
+    }
     const timeout = new AbortController()
     const timer = setTimeout(() => timeout.abort(), 30000)
     record.signal = overrides.signal || timeout.signal
@@ -145,7 +172,7 @@ async function realFixture(t, actions, options = {}) {
       throw error
     } finally { clearTimeout(timer) }
   }
-  return { ...f, requests, events, errors, deltas, authenticated, adapter, runner, owner, launch }
+  return { ...f, requests, events, errors, deltas, authenticated, providerEvents, adapter, runner, owner, launch }
 }
 
 function assertNativeSurface(f) {
@@ -156,7 +183,7 @@ function assertNativeSurface(f) {
     const names = (request.tools || []).map(tool => tool.function?.name)
     // v1.30 always registers ask (denied) and the stable capability proxy. The
     // six exact MCP permission identities are not provider-visible schemas.
-    assert.deepEqual(names.slice().sort(), ['ask', 'use_capability'], `Unexpected native tool surface: ${JSON.stringify(names)}`)
+    assert.deepEqual(names.slice().sort(), ['ask', 'todo_write', 'use_capability'], `Unexpected native tool surface: ${JSON.stringify(names)}`)
   }
 }
 
@@ -194,10 +221,11 @@ if (require.main === module) {
     // A caller-supplied command must never replace the fixed owned server.
     prepared.serverSpec = { command: '/foreign/server' }
     const config = toml.parse(native.renderConfig({ connection: { providers: [] }, systemPrompt: 'owned', targetPath: f.target, scratchPath: scratch, readOnly: true, toolBoundary: prepared }))
-    assert.deepEqual(config.tools.enabled, ['use_capability'])
+    assert.deepEqual(config.tools.enabled, ['use_capability', 'todo_write'])
     assert.equal(config.permissions.mode, 'deny')
-    assert.deepEqual(config.permissions.allow, [...native.CONTROLLED_TOOLS])
-    for (const tool of [...native.FORBIDDEN_TOOLS, ...native.CONTROLLED_DENIED_TOOLS]) assert.ok(config.permissions.deny.includes(tool))
+    assert.deepEqual(config.permissions.allow, [...native.CONTROLLED_TOOLS, ...native.CONTROLLED_NATIVE_TOOLS])
+    for (const tool of [...native.FORBIDDEN_TOOLS, ...native.CONTROLLED_DENIED_TOOLS].filter(name => !native.CONTROLLED_NATIVE_TOOLS.includes(name))) assert.ok(config.permissions.deny.includes(tool))
+    assert.ok(!config.permissions.deny.includes('todo_write'))
     assert.ok(!config.permissions.allow.includes('use_capability'))
     assert.ok(config.permissions.allow.every(name => !name.includes('*')))
     assert.equal(config.plugins.length, 1)
@@ -207,6 +235,28 @@ if (require.main === module) {
       '--policy', prepared.policyPath, '--sha256', prepared.policySha256])
     assert.equal(config.sandbox.bash, 'enforce'); assert.equal(config.sandbox.network, false)
     for (const name of native.CONTROLLED_TOOLS) assert.ok(controlled.decodeToolName('reasonix', name))
+  })
+
+  test('Reasonix projects a closed six-capability call envelope for the generic native proxy', () => {
+    const target = '/owned/target', scratch = '/owned/scratch'
+    const projection = require('../../agents/reasonix/workflow/transport.js').controlledToolProtocolProjection(target, scratch)
+    assert.match(projection[0], /Never omit action/)
+    assert.match(projection[0], /never use action "list"/)
+    const schema = JSON.parse(projection[1]), examples = JSON.parse(projection[3])
+    assert.equal(schema.oneOf.length, 6)
+    assert.deepEqual(schema.oneOf.map(variant => variant.properties.capability_id.const), native.CONTROLLED_CAPABILITIES)
+    for (const variant of schema.oneOf) {
+      assert.equal(variant.additionalProperties, false)
+      assert.deepEqual(variant.required, ['action', 'capability_id', 'arguments'])
+      assert.equal(variant.properties.action.const, 'call')
+    }
+    for (const example of Object.values(examples)) assert.equal(validateJsonSchema(schema, example).valid, true)
+    for (const malformed of [
+      { capability_id: native.CONTROLLED_CAPABILITIES[0], arguments: { path: target } },
+      { action: 'list' },
+      { action: 'call', capability_id: 'mcp-tool:autoprompt_owned/catalog', arguments: {} },
+      { action: 'call', capability_id: native.CONTROLLED_CAPABILITIES[0], arguments: { path: target }, extra: true },
+    ]) assert.equal(validateJsonSchema(schema, malformed).valid, false)
   })
 
   test('Reasonix refuses changed tool identity, argument substitution, and reused completed IDs', () => {
@@ -290,7 +340,7 @@ if (require.main === module) {
         'tool:mcp__autoprompt_owned__list', 'mcp-tool:autoprompt_owned/list ', 'mcp-tool:autoprompt_owned/%6cist',
       ].map(capability_id => ({ ...valid, capability_id })),
       ...[null, [], '[]', 1].map(args => ({ ...valid, arguments: args })),
-      { action: 'call', capability_id: valid.capability_id }, { ...valid, reason: 'ignored field' },
+      { action: 'call', capability_id: valid.capability_id }, { ...valid, reason: { invalid: true } },
       { ...valid, command: 'true' }, { ...valid, capabilityId: valid.capability_id },
     ]
     for (const args of invalid) {
@@ -299,6 +349,90 @@ if (require.main === module) {
       assert.equal(stream.toolCount, 0)
     }
     assert.deepEqual(boundary.readReceipts(prepared), [])
+  })
+
+  test('Reasonix observes bounded missing-action rejections without executing or certifying them', async t => {
+    const { prepared, target } = streamFixture(t)
+    const args = { capability_id: 'mcp-tool:autoprompt_owned/list', arguments: { path: target } }
+    const missing = { id: 'missing-action', name: 'use_capability', args: JSON.stringify(args), readOnly: true }
+    const error = 'unknown action ""; use list, inspect, call, or decline'
+    const rejected = { ...missing, err: error, output: `error: ${error}` }
+    const emit = (stream, kind, tool) => stream.push(JSON.stringify({ kind, tool }))
+    const observed = [], products = []
+    const stream = new ReasonixEventStream({ toolBoundary: prepared, continuationId: 'context', onToolCallObserved: call => observed.push(call), onFirstProductSignal: signal => products.push(signal) })
+    // The real native model emitted four missing-action calls concurrently.
+    // Observe the whole rejected batch before its corrected owned call.
+    const parallel = [missing, ...[1, 2, 3].map(index => ({ ...missing, id: `parallel-${index}` }))]
+    for (const tool of parallel) emit(stream, 'tool_dispatch', tool)
+    assert.equal(stream.activeTools.size, 4)
+    for (const tool of [...parallel].reverse()) emit(stream, 'tool_result', { ...rejected, id: tool.id })
+    assert.equal(stream.activeTools.size, 0)
+    assert.deepEqual(stream.receiptVerifier.finish(), [])
+    assert.deepEqual(products, [])
+    const corrected = proxyTool('corrected-action', 'list', args.arguments)
+    emit(stream, 'tool_dispatch', corrected)
+    const result = await boundary.executeTool(prepared.policy, 'list', args.arguments)
+    boundary.appendReceipt(prepared, 'list', args.arguments, result, new Date().toISOString())
+    emit(stream, 'tool_result', { ...corrected, output: JSON.stringify(result) })
+    assert.equal(stream.receiptVerifier.finish().length, 1)
+    assert.equal(observed.length, 5)
+    assert.throws(() => emit(stream, 'tool_dispatch', missing), { code: 'TRANSPORT_INVALID' })
+    for (const override of [{ err: undefined, output: '{}' }, { output: 'different error' }, { readOnly: false },
+      { resolvedName: 'mcp__autoprompt_owned__list' }, { execution: { exitCode: 0 } }, { capabilityId: args.capability_id }]) {
+      const invalid = new ReasonixEventStream({ toolBoundary: prepared })
+      emit(invalid, 'tool_dispatch', missing)
+      assert.throws(() => emit(invalid, 'tool_result', { ...rejected, ...override }), /Reasonix/)
+    }
+    const bounded = new ReasonixEventStream({ toolBoundary: prepared })
+    for (let index = 0; index < 8; index++) {
+      emit(bounded, 'tool_dispatch', { ...missing, id: `rejected-${index}` })
+      emit(bounded, 'tool_result', { ...rejected, id: `rejected-${index}` })
+    }
+    assert.throws(() => emit(bounded, 'tool_dispatch', { ...missing, id: 'exhausted' }), { code: 'ROLE_POLICY_DENIED' })
+    for (const extra of [{ action: '' }, { capability_id: 'mcp-tool:foreign/list' }, { extra: true }]) {
+      const invalid = new ReasonixEventStream({ toolBoundary: prepared })
+      assert.throws(() => emit(invalid, 'tool_dispatch', { ...missing, args: JSON.stringify({ ...args, ...extra }) }), { code: 'ROLE_POLICY_DENIED' })
+    }
+    // The existing journal contains the actual list execution above. A stream
+    // claiming only an argument rejection cannot hide that unconsumed effect.
+    const hiddenExecution = new ReasonixEventStream({ toolBoundary: prepared })
+    emit(hiddenExecution, 'tool_dispatch', missing)
+    emit(hiddenExecution, 'tool_result', rejected)
+    assert.throws(() => hiddenExecution.receiptVerifier.finish(), { code: 'TOOL_RECEIPT_INVALID' })
+  })
+
+  test('Reasonix preserves exact native malformed owned-ID errors for bounded correction', async t => {
+    const { prepared, target } = streamFixture(t)
+    const products = [], stream = new ReasonixEventStream({ toolBoundary: prepared, onFirstProductSignal: event => products.push(event) })
+    const emit = (s, kind, tool) => s.push(JSON.stringify({ kind, tool }))
+    for (const name of ['read', 'list', 'search', 'write', 'edit', 'bash']) {
+      const args = { action: 'call', capability_id: `mcp-tool:autoprompt_owned:${name}`, arguments: { path: target } }
+      const tool = { id: `malformed-${name}`, name: 'use_capability', args: JSON.stringify(args), readOnly: true }
+      const err = `invalid mcp-tool id "${args.capability_id}"; want mcp-tool:<server>/<tool>`
+      const rejected = { ...tool, err, output: `error: ${err}` }
+      emit(stream, 'tool_dispatch', tool); emit(stream, 'tool_result', rejected)
+      for (const override of [{ err: undefined, output: '{}' }, { output: 'different error' }, { readOnly: false },
+        { resolvedName: `mcp__autoprompt_owned__${name}` }, { capabilityId: args.capability_id }, { execution: { exitCode: 0 } }]) {
+        const invalid = new ReasonixEventStream({ toolBoundary: prepared })
+        emit(invalid, 'tool_dispatch', tool)
+        assert.throws(() => emit(invalid, 'tool_result', { ...rejected, ...override }), /Reasonix/)
+      }
+    }
+    assert.deepEqual(stream.receiptVerifier.finish(), [])
+    assert.deepEqual(products, [])
+    const args = { path: target }, corrected = proxyTool('corrected-slash', 'list', args)
+    emit(stream, 'tool_dispatch', corrected)
+    const result = await boundary.executeTool(prepared.policy, 'list', args)
+    boundary.appendReceipt(prepared, 'list', args, result, new Date().toISOString())
+    emit(stream, 'tool_result', { ...corrected, output: JSON.stringify(result) })
+    assert.equal(stream.receiptVerifier.finish().length, 1)
+    for (const extra of [{ capability_id: 'mcp-tool:foreign:write' }, { action: 'inspect' }, { arguments: [] }, { extra: true }]) {
+      const invalid = new ReasonixEventStream({ toolBoundary: prepared })
+      const args = { action: 'call', capability_id: 'mcp-tool:autoprompt_owned:write', arguments: {}, ...extra }
+      assert.throws(() => emit(invalid, 'tool_dispatch', { id: 'foreign', name: 'use_capability', args: JSON.stringify(args), readOnly: true }), { code: 'ROLE_POLICY_DENIED' })
+    }
+    const hidden = new ReasonixEventStream({ toolBoundary: prepared })
+    assert.throws(() => hidden.receiptVerifier.finish(), { code: 'TOOL_RECEIPT_INVALID' })
   })
 
   test('Reasonix controlled proxy binds nested arguments, resolved targets, refreshed events and exact receipts', async t => {
@@ -319,7 +453,7 @@ if (require.main === module) {
       }
     }
     const observed = [], products = [], items = []
-    const stream = new ReasonixEventStream({ toolBoundary: prepared, onToolCallObserved: call => observed.push(call), onFirstProductSignal: signal => products.push(signal) })
+    const stream = new ReasonixEventStream({ continuationId: 'known-resume-context', toolBoundary: prepared, onToolCallObserved: call => observed.push(call), onFirstProductSignal: signal => products.push(signal) })
     const emit = stream.emit.bind(stream)
     stream.emit = event => { items.push(event); emit(event) }
     stream.push(JSON.stringify({ kind: 'tool_dispatch', tool: { id: tool.id, name: tool.name, partial: true } }))
@@ -407,6 +541,41 @@ if (require.main === module) {
     assert.equal(fs.existsSync(args.path), false)
   })
 
+  test('Reasonix normalizes a receipt-bound no-spawn cwd denial and permits a later foreground retry', async t => {
+    const { prepared, scratch } = streamFixture(t)
+    const deniedArgs = { command: 'printf must-not-run', cwd: path.join(scratch, 'missing-cwd'), timeoutMs: 3000 }
+    const denied = await boundary.executeTool(prepared.policy, 'bash', deniedArgs)
+    assert.equal(denied.executionState, 'NOT_STARTED')
+    boundary.appendReceipt(prepared, 'bash', deniedArgs, denied, new Date().toISOString())
+    const stream = new ReasonixEventStream({ toolBoundary: prepared })
+    const events = [], emit = stream.emit.bind(stream)
+    stream.emit = event => { events.push(event); emit(event) }
+    const tool = proxyTool('no-spawn', 'bash', deniedArgs), raw = JSON.stringify(denied)
+    const err = `plugin tool reported error: ${raw}`
+    stream.push(JSON.stringify({ kind: 'tool_dispatch', tool }))
+    stream.push(JSON.stringify({ kind: 'tool_result', tool: { ...tool, output: `error: ${err}\n${raw}`, err } }))
+    assert.deepEqual(events.map(event => event.type), ['item.started', 'item.failed'])
+    const terminal = events.at(-1).item
+    assert.equal(terminal.type, 'command_execution')
+    assert.equal(terminal.command, deniedArgs.command)
+    assert.equal(terminal.exit_code, null)
+    assert.equal(terminal.controllerReceiptDisposition, 'NOT_STARTED')
+    assert.equal(terminal.preExecutionDenied, true)
+    assert.equal(stream.receiptVerifier.finish().length, 1)
+
+    const sandbox = await boundary.probeCommandSandbox()
+    if (!sandbox.supported) return t.diagnostic(`No exact Reasonix retry on unsupported sandbox: ${sandbox.code || sandbox.backend}`)
+    const retryArgs = { command: 'printf exact-retry', cwd: scratch, timeoutMs: 3000 }
+    const retry = await boundary.executeTool(prepared.policy, 'bash', retryArgs)
+    boundary.appendReceipt(prepared, 'bash', retryArgs, retry, new Date().toISOString())
+    const retryTool = proxyTool('foreground-retry', 'bash', retryArgs)
+    stream.push(JSON.stringify({ kind: 'tool_dispatch', tool: retryTool }))
+    stream.push(JSON.stringify({ kind: 'tool_result', tool: { ...retryTool, output: JSON.stringify(retry) } }))
+    assert.equal(events.at(-1).type, 'item.completed')
+    assert.equal(events.at(-1).item.exit_code, 0)
+    assert.equal(stream.receiptVerifier.finish().length, 2)
+  })
+
   test('Reasonix checker boundary reads the frozen candidate and writes only authenticated disjoint scratch', async t => {
     const f = fixture(t), scratch = path.join(f.root, 'checker-scratch')
     native.privateDirectory(f.launchRoot)
@@ -428,7 +597,7 @@ if (require.main === module) {
     let runs = 0
     const adapter = new ReasonixExecAdapter({ runner: { run: async () => { runs++ }, stop: async () => ({ drained: true }) },
       nativeRoot: f.nativeRoot, targetPath: f.root, connection: { providers: [] },
-      executableBinding: { path: process.execPath, sha256: native.sha256(native.readBound(process.execPath)) },
+      executableBinding: { path: process.execPath, sha256: native.sha256(native.readBound(process.execPath)), runtimeIdentity: require('../../scripts/harness-v2-native.cjs').runtimeDependencyIdentity(process.execPath) },
       rolePrompt: () => 'owned', outputSchemaResolver: () => f.schema,
     })
     await assert.rejects(adapter.launch({ ...f.record, workingDirectory: f.root }), { code: 'ROLE_POLICY_DENIED' })
@@ -455,6 +624,30 @@ if (require.main === module) {
     assert.throws(() => verifier.verify(name, args, JSON.stringify(result), false), { code: 'TOOL_RECEIPT_INVALID' })
   })
 
+  test('real Reasonix zero-tool role removes executable builtins and MCP grants', { skip: !enabled, timeout: 90000 }, async t => {
+    const f = await realFixture(t, [])
+    const output = await f.launch({ providerToolCallLimit: 0 })
+    assert.equal(output.ok, true)
+    assert.ok(f.requests.length > 0)
+    // Reasonix 1.30 always advertises its host ask/capability frontends.
+    // They remain denied; no builtin, todo, or owned MCP grant is registered.
+    for (const request of f.requests) assert.ok((request.tools || []).every(tool => ['ask', 'use_capability'].includes(tool.function?.name)))
+    const config = toml.parse(fs.readFileSync(path.join(f.launchRoot, 'home', 'config.toml'), 'utf8'))
+    assert.deepEqual(config.permissions.allow || [], [])
+    assert.deepEqual(config.plugins || [], [])
+    assert.equal(config.permissions.mode, 'deny')
+    assert.ok(config.permissions.deny.includes('ask'))
+    assert.ok(config.permissions.deny.includes('use_capability'))
+    assert.equal(output.toolReceiptHashes.length, 0)
+    assertToolLeaseReleased(f)
+  })
+
+  test('real Reasonix zero-tool role refuses a model-requested native checklist', { skip: !enabled, timeout: 90000 }, async t => {
+    const f = await realFixture(t, [{ name: 'todo_write', args: { todos: [{ content: 'Forbidden checklist', status: 'pending' }] } }])
+    await assert.rejects(f.launch({ providerToolCallLimit: 0 }), { code: 'ROLE_POLICY_DENIED' })
+    assertToolLeaseReleased(f)
+  })
+
   test('real Reasonix production adapter keeps candidate read-only, scratch writable, controller private, and resumes', { skip: !enabled, timeout: 90000 }, async t => {
     const sandbox = await boundary.probeCommandSandbox()
     assert.equal(sandbox.supported, true, JSON.stringify(sandbox))
@@ -471,6 +664,12 @@ if (require.main === module) {
     assert.equal(fs.readFileSync(path.join(f.target, 'candidate.txt'), 'utf8'), 'actual-candidate-6317')
     assert.equal(fs.readFileSync(path.join(f.scratch, 'checked.txt'), 'utf8'), 'checked')
     assert.equal(JSON.stringify(f.requests).includes('controller-secret-must-not-leak'), false)
+    const projected = JSON.stringify(f.requests)
+    assert.ok(projected.includes('REQUIRED use_capability WIRE CONTRACT'))
+    assert.ok(projected.includes('Never omit action'))
+    assert.ok(projected.includes('mcp-tool:autoprompt_owned/bash'))
+    assert.ok(projected.includes('omit cwd unless it is exactly the controller-provided workspace or private scratch absolute path'))
+    assert.ok(projected.includes('FINAL RESPONSE WIRE FORMAT: your final assistant message must be exactly one JSON object.'))
     assertNativeSurface(f)
     const resumed = await f.launch({ reservationId: crypto.randomUUID(), continuationId: output.contextId })
     assert.equal(resumed.contextId, output.contextId)
@@ -480,11 +679,45 @@ if (require.main === module) {
     assert.notEqual(fresh.contextId, output.contextId)
   })
 
+  test('real Reasonix production adapter distinguishes a no-spawn cwd denial from its exact foreground retry', { skip: !enabled, timeout: 90000 }, async t => {
+    const f = await realFixture(t, [
+      { tool: 'bash', args: f => ({ command: 'printf must-not-run', cwd: path.join(f.sessionRoot, 'cwd'), timeoutMs: 3000 }) },
+      { tool: 'bash', args: f => ({ command: 'printf exact-retry', cwd: f.scratch, timeoutMs: 3000 }) },
+    ])
+    const output = await f.launch()
+    assert.equal(output.ok, true)
+    assert.equal(output.toolReceiptHashes.length, 2)
+    assert.equal(output.transportEvidence.commandExecutionFailures.count, 0)
+    assert.equal(output.transportEvidence.verificationObservations.count, 0)
+    const results = f.events.filter(event => event.kind === 'tool_result').map(event => resultPayload(event.tool))
+    assert.equal(results.length, 2)
+    assert.equal(results[0].executionState, 'NOT_STARTED')
+    assert.equal(results[0].exitCode, null)
+    assert.equal(results[0].command, 'printf must-not-run')
+    assert.equal(results[1].status, 'completed')
+    assert.equal(results[1].exitCode, 0)
+    assertNativeSurface(f)
+  })
+
   test('real Reasonix production adapter writes only its assigned target and validates terminal schema', { skip: !enabled, timeout: 90000 }, async t => {
     const f = await realFixture(t, [{ tool: 'write', args: f => ({ path: path.join(f.target, 'output.txt'), content: 'actual-controlled-write' }) }], { readOnly: false, result: { ok: false } })
     await assert.rejects(f.launch(), { code: 'CHILD_RESULT_INVALID' })
     assert.equal(fs.readFileSync(path.join(f.target, 'output.txt'), 'utf8'), 'actual-controlled-write')
     assertNativeSurface(f)
+  })
+
+  test('real Reasonix production adapter permits one native todo checklist and two receipt-bound production writes', { skip: !enabled, timeout: 90000 }, async t => {
+    const f = await realFixture(t, [
+      { name:'todo_write', args:{ todos:[{ content:'Write one.cjs', status:'in_progress', step_id:'one' }, { content:'Write two.cjs', status:'pending', step_id:'two' }] } },
+      { tool:'write', args:() => ({ path:path.join(f.target, 'one.cjs'), content:'module.exports=1\n' }) },
+      { tool:'write', args:() => ({ path:path.join(f.target, 'two.cjs'), content:'module.exports=2\n' }) },
+    ], { readOnly:false })
+    const output = await f.launch()
+    assert.equal(output.ok, true)
+    assert.equal(fs.readFileSync(path.join(f.target, 'one.cjs'), 'utf8'), 'module.exports=1\n')
+    assert.equal(fs.readFileSync(path.join(f.target, 'two.cjs'), 'utf8'), 'module.exports=2\n')
+    assert.equal(output.toolReceiptHashes.length, 2)
+    assert.ok(f.events.some(event => event.kind === 'tool_result' && event.tool?.name === 'todo_write' && /^Todos updated: 2 total — 0 completed, 1 in progress, 1 pending\.$/.test(event.tool.output || '')))
   })
 
   test('real Reasonix authenticates from its private home without exposing credentials to controlled tools', { skip: !enabled, timeout: 60000 }, async t => {
@@ -642,6 +875,86 @@ if (require.main === module) {
     assert.equal(stopped.drained, true)
     assert.ok(stopped.alreadyTerminal || stopped.terminal?.ownershipId)
   })
+
+  test('real Reasonix quota relay admits and accounts one private OpenAI request exactly once', { skip: !enabled || process.platform === 'win32', timeout: 60000 }, async t => {
+    const f = await realFixture(t, [], { connection: port => ({
+      default_model: 'vendor/fixture',
+      providers: [{ name: 'fixture', kind: 'openai', model: 'vendor/fixture', base_url: `http://127.0.0.1:${port}/v1`, api_key_env: 'FIXTURE_KEY', reasoning_effort: 'low' }],
+    }) })
+    const usageEvidence = []
+    const output = await f.launch({
+      assignment: { model: 'vendor/fixture', effort: 'low' },
+      providerTokenLimit: Number.MAX_SAFE_INTEGER,
+      onUsageDelta(delta, cumulative, evidence) {
+        usageEvidence.push({ delta, cumulative, evidence })
+        return { continue: true }
+      },
+    })
+    assert.equal(output.ok, true)
+    assertNativeSurface(f)
+    assert.deepEqual(f.deltas, [{ noncachedInput: 80, cachedInput: 20, output: 10, reasoning: 2 }], 'relay usage is the sole scheduler debit')
+    assert.equal(usageEvidence.length, 1)
+    assert.deepEqual(usageEvidence[0].cumulative, { noncachedInput: 80, cachedInput: 20, output: 10, reasoning: 2 })
+    assert.equal(usageEvidence[0].evidence.requestOrdinal, 1)
+    assert.deepEqual(f.providerEvents.map(event => event.hook), ['onProviderRequestStarted', 'onProviderRequestSettled'])
+    assert.equal(f.providerEvents[0].evidence.requestOrdinal, 1)
+    assert.equal(f.providerEvents[1].evidence.disposition, 'ACCOUNTED')
+    assert.equal(f.requests.length, 1, 'the actual native request crossed only the private relay')
+    assert.ok(Number.isSafeInteger(f.requests[0].max_tokens) && f.requests[0].max_tokens > 0 && f.requests[0].max_tokens <= 4096,
+      'the relay forwarded a bounded native output cap')
+    assert.equal(f.requests[0].model, 'vendor/fixture', 'the native CLI preserved the selected vendor-slash model ID')
+    assert.equal(f.requests[0].reasoning_effort, 'low', 'the relay preserved the explicit low-effort provider request')
+  })
+
+  test('real Reasonix quota preparation observes cancellation before a native process can start', { skip: !enabled || process.platform === 'win32', timeout: 60000 }, async t => {
+    const f = await realFixture(t, []), abort = new AbortController()
+    const relay = require('../../scripts/harness-v2-quota-relay.cjs').createQuotaRelay
+    f.adapter.quotaRelayFactory = async options => {
+      abort.abort()
+      return relay(options)
+    }
+    await assert.rejects(f.launch({ providerTokenLimit: 50000, signal: abort.signal }), { code: 'CHILD_CANCELLED' })
+    assert.equal(f.requests.length, 0)
+    assert.deepEqual(f.owner.ownershipIdentities(), [])
+  })
+
+  test('real Reasonix quota relay rejects an overridden native provider route before launch', { skip: !enabled || process.platform === 'win32', timeout: 60000 }, async t => {
+    const f = await realFixture(t, [], { connection: {
+      default_model: 'fixture',
+      providers: [{ name: 'fixture', kind: 'openai', model: 'fixture', base_url: 'http://127.0.0.1:1/v1', request_url: 'http://127.0.0.1:1/escape', api_key_env: 'FIXTURE_KEY' }],
+    } })
+    await assert.rejects(f.launch({ providerTokenLimit: 50000 }), { code: 'PROVIDER_UNSUPPORTED' })
+    assert.equal(f.requests.length, 0)
+    assert.deepEqual(f.providerEvents, [])
+  })
+
+  test('real Reasonix cancellation retains complete native usage delivered during drain', { skip: !enabled || process.platform === 'win32', timeout: 60000 }, async t => {
+    const f = await realFixture(t, []), abort = new AbortController()
+    const run = f.runner.run.bind(f.runner); let intercepted = false
+    f.runner.run = spec => run({ ...spec, onStdoutLine: line => {
+      const event = JSON.parse(line)
+      if (event.kind === 'usage' && event.usage?.promptTokens > 0 && !intercepted) { intercepted = true; abort.abort() }
+      spec.onStdoutLine(line)
+    } })
+    await assert.rejects(f.launch({ signal: abort.signal }), { code:'CHILD_CANCELLED' })
+    assert.equal(intercepted, true)
+    assert.ok(f.deltas.some(delta => delta.noncachedInput > 0))
+  })
 }
 
-module.exports = { runReadIsolation }
+module.exports = { runReadIsolation, realFixture, resultPayload, assertNativeSurface }
+
+
+test('Reasonix terminal presentation preserves one canonical object and rejects competing results', () => {
+  const schema = { type: 'object', properties: { ok: { const: true } }, required: ['ok'], additionalProperties: false }
+  for (const text of ['{"ok":true}', '```json\n{"ok":true}\n```', 'All tests passed. Now I return the canonical result JSON.\n\n```json\n{"ok":true}\n```', '```json\n{"ok":true}\n```\nCompleted.']) {
+    const result = native.parseTerminal(text)
+    assert.deepEqual(result, { ok: true })
+    assert.equal(validateJsonSchema(schema, result).valid, true)
+  }
+  for (const text of ['Summary {"ok":true}', '```\n{"ok":true}\n```', '```json\n[true]\n```', '```json\n{"ok":true} {"ok":false}\n```', '{"ok":false}\n```json\n{"ok":true}\n```', '```json\n{"ok":true}\n```\n[false]', '```json\n{"ok":true}\n```\n```json\n{"ok":false}\n```']) {
+    assert.throws(() => native.parseTerminal(text), { code: 'CHILD_RESULT_INVALID' })
+  }
+  // A prose success claim cannot override a failing canonical value.
+  assert.equal(validateJsonSchema(schema, native.parseTerminal('Success: ok is true.\n```json\n{"ok":false}\n```')).valid, false)
+})

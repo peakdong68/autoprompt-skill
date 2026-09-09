@@ -9,8 +9,8 @@ const test = require('node:test')
 const { pinnedCodexCli } = require('../helpers/pinned-codex-cli.cjs')
 const { pinnedCodexPackageFixture } = require('../helpers/pinned-codex-package.cjs')
 
-test('actual pinned native adapter supports both authentication modes and independent red/repair/green', {
-  timeout: 120000,
+test('actual pinned native adapter keeps built-in and GLM BYOK coverage across authentication modes and independent red/repair/green', {
+  timeout: 180000,
   skip: process.platform !== 'linux' && 'this native network-isolation fixture requires Linux',
 }, async t => {
   const installedCli = pinnedCodexCli()
@@ -56,7 +56,7 @@ test('actual pinned native adapter supports both authentication modes and indepe
       // unshare's parent-death binding performs the descendant kill.
       child.kill('SIGTERM')
       forceTimer = setTimeout(() => child.kill('SIGKILL'), 2000)
-    }, 100000)
+    }, 165000)
     child.stdout.on('data', chunk => { stdout += chunk })
     child.stderr.on('data', chunk => { stderr += chunk })
     child.on('error', error => { clearTimeout(timer); clearTimeout(forceTimer); reject(error) })
@@ -69,7 +69,10 @@ test('actual pinned native adapter supports both authentication modes and indepe
   assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`)
   const evidence = JSON.parse(result.stdout.trim())
   assert.equal(evidence.networkIsolation, 'private-loopback-only')
-  assert.deepEqual(evidence.summary.map(item => item.mode), ['apikey', 'chatgpt'])
+  assert.deepEqual(evidence.summary.map(item => [item.model, item.mode]), [
+    ['gpt-5.6-sol', 'apikey'], ['gpt-5.6-sol', 'chatgpt'],
+    ['z-ai/glm-5.3-flash', 'apikey'], ['z-ai/glm-5.3-flash', 'chatgpt'],
+  ])
   assert.ok(evidence.summary.every(item => item.independentRed === 1 && item.independentGreen === 0))
   for (const item of evidence.summary) {
     for (const launch of [item.original, item.repaired]) {

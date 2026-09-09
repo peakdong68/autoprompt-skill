@@ -133,7 +133,8 @@ test('AP-RUN-032 r10 terminal control emission carries generation and sequence',
   assert.match(stateSource,
     /activationId: current\.activation\.id,\s+generation: current\.activation\.generation,\s+sequence: current\.sequence \+ 1,/)
   assert.match(stateSource,
-    /activationId: current\.activation\.id,\s+generation: current\.activation\.generation,\s+sequence: sourceEvent\.sequence,/)
+    /eventSequence: sourceEvent\.sequence,[\s\S]{0,2400}sequence: current\.sequence,/,
+    'release terminal binds the entering intent while sequencing after its validated cancellation cleanup suffix')
   assert.match(finalizerSource,
     /'runId', 'activationId', 'generation', 'sequence', 'missionHash'/,
     'terminal replay/validation must compare the emitted control authority')

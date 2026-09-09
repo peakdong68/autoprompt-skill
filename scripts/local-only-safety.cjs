@@ -942,6 +942,10 @@ function verifyReasonixEnforcementProof(repository, environment, proof) {
     if (releaseEvidence.status !== 'passed' || matchingKeys.length !== 1 || key.independent !== true || key.issuer !== attestation?.issuer ||
         !Array.isArray(key.providers) || !key.providers.includes('reasonix') || /autoprompt.*activation/i.test(attestation?.issuer || '') || !identity || identity.provider !== 'reasonix' ||
         identity.platform !== process.platform || identity.architecture !== process.arch ||
+        identity.executablePath !== proof.nativeExecutable || !identity.nativeRuntimeIdentity ||
+        !/^[a-f0-9]{64}$/.test(identity.nativeRuntimeIdentity.sha256 || '') ||
+        !Number.isSafeInteger(identity.nativeRuntimeIdentity.fileCount) || identity.nativeRuntimeIdentity.fileCount < 1 ||
+        !Number.isSafeInteger(identity.nativeRuntimeIdentity.packageCount) || identity.nativeRuntimeIdentity.packageCount < 0 ||
         attestation.providerId !== 'reasonix' || attestation.result !== 'supported' ||
         attestation.verificationMethod !== 'live-conformance-suite' || attestation.signature.algorithm !== 'ed25519' ||
         Date.parse(attestation.issuedAt) > Date.now() || !(Date.parse(attestation.expiresAt) > Date.now()) ||
@@ -964,9 +968,22 @@ function verifyReasonixEnforcementProof(repository, environment, proof) {
         crypto.createHash('sha256').update(fs.readFileSync(proof.nativeExecutable)).digest('hex') !== identity.executableSha256) {
       throw new OperationalError('Reasonix enforcement executable changed')
     }
-    for (const [relative, hash] of Object.entries(identity.files || {})) {
+    const installRoot = path.resolve(bundle, '../../..')
+    const receipt = JSON.parse(fs.readFileSync(path.join(installRoot, '.autoprompt-reasonix-v2.json')))
+    const excludedTrust = new Set(['agents/contracts/reasonix-live-conformance-evidence.json', 'agents/contracts/reasonix-trusted-public-keys.json'])
+    if (receipt.provider !== 'reasonix' || receipt.contractVersion !== '2.0.0' || receipt.schemaVersion !== 2 ||
+        digest(JSON.stringify(receipt.files)) !== receipt.payloadDigest ||
+        path.basename(bundle) !== `reasonix-v2.0.0-${receipt.payloadDigest.slice(0, 16)}`) {
+      throw new OperationalError('Reasonix capability evidence is not bound to its installed receipt')
+    }
+    const receiptFiles = Object.fromEntries(Object.entries(receipt.files).filter(([file]) => !excludedTrust.has(file))
+      .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0))
+    if (JSON.stringify(receiptFiles) !== JSON.stringify(identity.files)) throw new OperationalError('Reasonix identity omits receipt-bound files')
+    for (const [relative, hash] of Object.entries(receipt.files)) {
       const file = path.resolve(bundle, relative)
-      if (!pathWithin(bundle, file)) throw new OperationalError('Reasonix runtime evidence path escapes its bundle')
+      if (path.isAbsolute(relative) || relative.includes('\\') || relative.includes(':') ||
+          relative.split('/').some(part => !part || part === '.' || part === '..') ||
+          !/^[a-f0-9]{64}$/.test(hash) || !pathWithin(bundle, file)) throw new OperationalError('Reasonix runtime evidence path escapes its bundle')
       const item = fs.lstatSync(file)
       if (!item.isFile() || item.isSymbolicLink() || item.nlink !== 1 ||
           crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex') !== hash) throw new OperationalError('Reasonix enforcement runtime changed')
@@ -980,21 +997,29 @@ function verifyReasonixEnforcementProof(repository, environment, proof) {
   }
 }
 
-const NATIVE_V2_PROVIDERS = Object.freeze(['claude', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek'])
+const NATIVE_V2_PROVIDERS = Object.freeze(['claude', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek', 'hermes', 'grok'])
 
 function verifyHarnessV2EnforcementProof(repository, environment, proof) {
   const evidence = { provider: proof.provider, profilePath: proof.profilePath }
   const failures = []
   try {
     const provider = proof.provider
-    if (proof.schemaVersion !== 1 || !NATIVE_V2_PROVIDERS.includes(provider)) throw new OperationalError('Unsupported native enforcement proof')
+    if (proof.schemaVersion !== 1 || (!NATIVE_V2_PROVIDERS.includes(provider) && !(provider === 'reasonix' && proof.admissionTrust?.kind === 'reviewed-local-pending'))) throw new OperationalError('Unsupported native enforcement proof')
     const profile = path.resolve(proof.profilePath)
     const privateBytes = file => {
-      const item = fs.lstatSync(file)
-      if (!item.isFile() || item.isSymbolicLink() || item.nlink !== 1 || fs.realpathSync.native(file) !== file) {
+      const item = fs.lstatSync(file, { bigint: true })
+      if (!item.isFile() || item.isSymbolicLink() || item.nlink !== 1n || fs.realpathSync.native(file) !== file) {
         throw new OperationalError('Native proof resources must be regular files without linked ancestors')
       }
-      return fs.readFileSync(file)
+      const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0))
+      const unchanged = stat => ['dev', 'ino', 'size', 'mtimeNs', 'ctimeNs', 'nlink'].every(key => stat[key] === item[key])
+      try {
+        if (!unchanged(fs.fstatSync(fd, { bigint: true }))) throw new OperationalError('Native proof resource changed while opening')
+        const bytes = fs.readFileSync(fd)
+        if (!unchanged(fs.fstatSync(fd, { bigint: true })) || !unchanged(fs.lstatSync(file, { bigint: true })) ||
+            fs.realpathSync.native(file) !== file) throw new OperationalError('Native proof resource changed while reading')
+        return bytes
+      } finally { fs.closeSync(fd) }
     }
     const item = fs.lstatSync(profile)
     if (pathEqual(profile, repository.worktreeRoot) || pathWithin(repository.worktreeRoot, profile) ||
@@ -1030,6 +1055,58 @@ function verifyHarnessV2EnforcementProof(repository, environment, proof) {
     const evidencePath = 'scripts/harness-v2-trust/evidence.json'
     const keyPath = 'scripts/harness-v2-trust/trusted-public-keys.json'
     const trust = proof.admissionTrust
+    if (trust?.kind === 'reviewed-local-pending') {
+      const hash = value => crypto.createHash('sha256').update(value).digest('hex')
+      const receipt = JSON.parse(privateBytes(path.join(installRoot, `.autoprompt-${provider}-v2.json`)))
+      if (receipt.provider !== provider || receipt.contractVersion !== '2.0.0' || receipt.schemaVersion !== 2 ||
+          hash(JSON.stringify(receipt.files)) !== receipt.payloadDigest ||
+          path.basename(bundle) !== `${provider}-v2.0.0-${receipt.payloadDigest.slice(0, 16)}`) {
+        throw new OperationalError('Local canary is not bound to the installed receipt')
+      }
+      for (const [relative, digest] of Object.entries(receipt.files)) {
+        if (path.isAbsolute(relative) || relative.includes('\\') || relative.includes(':') ||
+            relative.split('/').some(part => !part || part === '.' || part === '..') ||
+            !/^[a-f0-9]{64}$/.test(digest) || hash(privateBytes(path.join(bundle, relative))) !== digest) {
+          throw new OperationalError('Local canary installed runtime changed')
+        }
+      }
+      const record = JSON.parse(privateBytes(path.join(activationRoot, 'activation.json')))
+      const inspectedTarget = fs.realpathSync.native(repository.worktreeRoot)
+      // The same controller enforces the original target and its private
+      // materialized worker/checker clones. These exact namespaces are created
+      // outside every model's writable roots; arbitrary sibling repositories
+      // and descendants of a worker checkout are not activation targets.
+      const privateRelative = path.relative(activationRoot, inspectedTarget).split(path.sep).join('/')
+      const ownedClone = /^(?:worker-workspaces\/workspaces\/[a-f0-9]{40}|checker-snapshots\/[a-f0-9]{64}-[a-f0-9]{16})$/.test(privateRelative)
+      if (record.activationRoot !== activationRoot ||
+          activationRoot !== path.join(installRoot, '.autoprompt-private', 'activations', record.activationId) ||
+          (record.target?.realpath !== inspectedTarget && !ownedClone) ||
+          record.executable?.path !== proof.nativeExecutable ||
+          hash(fs.readFileSync(proof.nativeExecutable)) !== record.executable.sha256 ||
+          fs.realpathSync.native(proof.nativeExecutable) !== proof.nativeExecutable) {
+        throw new OperationalError('Local canary target or executable binding changed')
+      }
+      const proofFile = path.join(activationRoot, 'enforcement-proof.json')
+      const proofBytes = privateBytes(proofFile), diskProof = JSON.parse(proofBytes)
+      if (diskProof.profileSha256 !== proof.profileSha256 || diskProof.nativeExecutable !== proof.nativeExecutable ||
+          diskProof.admissionTrust?.reviewDigest !== trust.reviewDigest) throw new OperationalError('Local canary enforcement proof changed')
+      const release = JSON.parse(privateBytes(path.join(bundle, evidencePath)))
+      const review = require('./harness-v2-canary.cjs').selectReview(release.reviewedLocalRecords, provider, { ...receipt, bundle }, record.executable)
+      if (!review) throw new OperationalError('Local canary release review is missing')
+      const artifactRoot = path.join(activationRoot, 'reviewed-local-canary', `generation-${record.capability?.generation}`)
+      if (!Array.isArray(record.reviewedLocalCanary?.artifacts)) throw new OperationalError('Local canary has not completed')
+      const artifacts = record.reviewedLocalCanary.artifacts.map(item => {
+        if (!item || !/^[A-Za-z]+$/.test(item.capability || '') ||
+            item.path !== path.join(artifactRoot, `${item.capability}.json`)) throw new OperationalError('Local canary artifact path changed')
+        return { ...item, bytes: privateBytes(item.path) }
+      })
+      const admitted = require('./harness-v2-canary.cjs').verifyActivationProof({ provider,
+        installed: { ...receipt, bundle }, record, proof: diskProof, proofSha256: hash(proofBytes), review, artifacts })
+      evidence.profileSha256 = proof.profileSha256
+      evidence.reviewDigest = admitted.reviewDigest
+      evidence.admissionMode = 'reviewed-release-with-local-canary'
+      return { provider: channel(true, true, evidence, []), shell: channel(true, true, evidence, []) }
+    }
     let trustDirectory = bundle, trustEvidence = evidencePath, trustKeys = keyPath
     if (trust?.kind === 'explicit-private-import') {
       const expected = path.join(installRoot, '.autoprompt-private', 'conformance', 'v2', provider)
@@ -1213,9 +1290,9 @@ function inspect(repository, expectedBranch, environment = process.env, options 
 
   const repositoryOk = checks.every(item => item.status === 'pass')
   const githubCli = inspectGithubCliBoundary(repository, environment)
-  const proof = options.enforcementProof?.provider === 'reasonix'
+  const proof = options.enforcementProof?.provider === 'reasonix' && options.enforcementProof?.admissionTrust?.kind !== 'reviewed-local-pending'
     ? verifyReasonixEnforcementProof(repository, environment, options.enforcementProof)
-    : NATIVE_V2_PROVIDERS.includes(options.enforcementProof?.provider)
+    : (NATIVE_V2_PROVIDERS.includes(options.enforcementProof?.provider) || options.enforcementProof?.provider === 'reasonix')
       ? verifyHarnessV2EnforcementProof(repository, environment, options.enforcementProof)
       : verifyCodexEnforcementProof(repository, environment, options.enforcementProof)
   const channels = {
@@ -1505,5 +1582,6 @@ module.exports = {
   localPathFromUrl,
   main,
   parseArgs,
+  repair,
   verifyCodexEnforcementProof,
 }

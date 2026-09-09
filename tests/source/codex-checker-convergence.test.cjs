@@ -19,6 +19,8 @@ const {
   normalizeCheckerOutcomeIdentity,
 } = require('../../agents/codex/workflow/phase-budget.js')
 const { stableStringify } = require('../../agents/codex/workflow/event-log.js')
+const { buildContextFreeBrief, writeRequestEnvelope, PROVIDER_CAPABILITY_FIELDS } =
+  require('../../agents/codex/workflow/context-envelope.js')
 const { createRouteDecision } = require('../../agents/codex/workflow/route-decision.js')
 const router = require('../../agents/codex/workflow/router.js')
 
@@ -843,6 +845,85 @@ test('duplicate or competing sealed failure receipts stay inconclusive despite a
   }
 })
 
+test('authenticated unstarted harness refusal preserves the attempt but counts only the executed retry', t => {
+  const fixture = scratchFixture(t)
+  const command = providerCommand(
+    `python3 ${JSON.stringify(fixture.harness)} ${JSON.stringify(fixture.candidate)}`,
+  )
+  const accumulator = createCodexJsonlAccumulator({
+    ...fixture.context, controllerAuthenticatedNativeProjection: true,
+  })
+  const start = id => accumulator.push(JSON.stringify({
+    type: 'item.started', item: { id, type: 'command_execution', command },
+  }))
+  const refusal = { type: 'item.failed', item: {
+    id: 'refused', type: 'command_execution', command, status: 'failed', exit_code: null,
+    preExecutionDenied: true, controllerReceiptDisposition: 'NOT_STARTED',
+    aggregated_output: JSON.stringify({ code: 'TOOL_PATH_DENIED' }),
+  } }
+  start('refused')
+  assert.equal(accumulator.snapshot().verificationObservations.scratchHarnessInvocationCount, 1,
+    'attest an apparent harness start before any execution can modify its bytes')
+  accumulator.push(JSON.stringify(refusal))
+  const refused = accumulator.snapshot()
+  assert.equal(refused.activeWorkSettled, true)
+  assert.equal(refused.commandExecutionFailures.count, 0)
+  assert.equal(refused.verificationObservations.count, 0)
+  assert.equal(refused.verificationObservations.scratchHarnessInvocationCount, 0)
+  assert.deepEqual(refused.verificationObservations.scratchHarnessInvocations, [])
+  assert.equal(refused.eventCount, 2, 'the denied tool attempt remains in the transcript')
+
+  start('retry')
+  accumulator.push(JSON.stringify(refusal))
+  assert.equal(accumulator.snapshot().verificationObservations.scratchHarnessInvocationCount, 1,
+    'a duplicate refusal cannot erase a different active invocation')
+  const run = spawnSync('python3', [fixture.harness, fixture.candidate], {
+    cwd: fixture.context.workingDirectory, encoding: 'utf8', timeout: 10000,
+  })
+  assert.equal(run.status, 1, run.stderr)
+  accumulator.push(JSON.stringify({ type: 'item.completed', item: {
+    id: 'retry', type: 'command_execution', command, status: 'failed',
+    exit_code: run.status, aggregated_output: run.stdout,
+  } }))
+  const final = accumulator.snapshot()
+  assert.equal(final.activeWorkSettled, true)
+  assert.equal(final.commandExecutionFailures.count, 1)
+  assert.equal(final.verificationObservations.count, 1)
+  assert.equal(final.verificationObservations.scratchHarnessInvocationCount, 1)
+  assert.equal(final.verificationObservations.scratchHarnessInvocations[0].count, 1)
+  assert.equal(final.verificationObservations.boundsExceeded, false)
+})
+
+test('raw or contradictory unstarted markers cannot erase an attested scratch invocation', t => {
+  const fixture = scratchFixture(t)
+  const command = providerCommand(
+    `python3 ${JSON.stringify(fixture.harness)} ${JSON.stringify(fixture.candidate)}`,
+  )
+  for (const [name, trusted, type, fields] of [
+    ['raw native marker', false, 'item.failed', {}],
+    ['different command', true, 'item.failed', { command: 'true' }],
+    ['different tool identity', true, 'item.failed', { id: 'other' }],
+    ['actual exit status', true, 'item.failed', { exit_code: 1 }],
+    ['wrong receipt disposition', true, 'item.failed', { controllerReceiptDisposition: 'STARTED' }],
+    ['missing denial marker', true, 'item.failed', { preExecutionDenied: false }],
+    ['completion marker', true, 'item.completed', {}],
+    ['cancelled marker', true, 'item.cancelled', {}],
+  ]) {
+    const accumulator = createCodexJsonlAccumulator({
+      ...fixture.context, controllerAuthenticatedNativeProjection: trusted,
+    })
+    accumulator.push(JSON.stringify({ type: 'item.started', item: {
+      id: 'attempt', type: 'command_execution', command,
+    } }))
+    accumulator.push(JSON.stringify({ type, item: {
+      id: 'attempt', type: 'command_execution', command, status: 'failed', exit_code: null,
+      preExecutionDenied: true, controllerReceiptDisposition: 'NOT_STARTED',
+      aggregated_output: 'denied', ...fields,
+    } }))
+    assert.equal(accumulator.snapshot().verificationObservations.scratchHarnessInvocationCount, 1, name)
+  }
+})
+
 test('a malformed first scratch execution remains bound when a later execution yields a valid FAIL', t => {
   const fixture = scratchFixture(t)
   const command = providerCommand(
@@ -1022,6 +1103,141 @@ test('single-seat provisional scratch PASS receives one bounded independent conf
     'independent-check-1',
   )
 })
+
+for (const coverageMode of ['inline', 'durable-large', 'foreign-result', 'tampered-bytes', 'unbound-enrichment']) {
+test(`mixed-case real scratch observations use ${coverageMode} coverage for fresh confirmation`, async t => {
+  const targetPath = cleanRepository(t)
+  const launches = []
+  const pointers = new Map()
+  const evidenceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-primary-coverage-'))
+  t.after(() => fs.rmSync(evidenceRoot, { recursive: true, force: true }))
+  const requestPointer = writeRequestEnvelope(evidenceRoot, 'Independently inspect the frozen candidate.')
+  let originalPrimary = null
+  const operation = createDefaultRouteExecutor({
+    ...routeOptions(t, targetPath),
+    ...(coverageMode === 'inline' ? {} : { resultPointer: id => pointers.get(id) || null }),
+  })({
+    route: 'DIRECT', decision: directDecision(1),
+    launch: async request => {
+      launches.push(request.workItemId)
+      if (request.workItemId === 'work-1') return structuredWorkerResult()
+      assert.notDeepEqual([...request.checks].sort(),
+        [...request.checks].sort((a, b) => a.localeCompare(b)),
+        'This regression must exercise check IDs whose locale and canonical orders differ')
+      const f = scratchFixture(t)
+      const harness = path.join(f.checkerScratchBoundary.writableScratchRoot, 'verify.cjs')
+      const confirmation = request.workItemId.includes('scratch-confirmation')
+      if (confirmation && coverageMode !== 'inline') {
+        const coverage = request.fetchedEvidence.primaryScratchCoverage
+        assert.deepEqual(Object.keys(coverage).sort(), ['checkerId', 'evidencePointer', 'resultHash'])
+        const pointer = coverage.evidencePointer
+        const persisted = JSON.parse(fs.readFileSync(pointer.path, 'utf8'))
+        assert.ok(pointer.bytes > 16 * 1024)
+        assert.equal(digest(fs.readFileSync(pointer.path)), pointer.hash)
+        assert.deepEqual(persisted, originalPrimary)
+        assert.equal(digest(stableStringify(persisted)), coverage.resultHash)
+        assert.ok(canonicalCheckerVerificationAuthority(persisted, request.checks))
+        assert.ok(request.evidencePointers.some(item => item.hash === pointer.hash))
+        assert.ok(request.evidenceHashes.includes(pointer.hash))
+        const contextInput = {
+          ...request, route: 'DIRECT', role: 'ap-fresh-verifier', requestPointer,
+          providerCapabilities: Object.fromEntries(PROVIDER_CAPABILITY_FIELDS.map(key => [key, true])),
+        }
+        const oldFetchedEvidence = { ...request.fetchedEvidence, primaryScratchCoverage: {
+          checkerId: coverage.checkerId, resultHash: coverage.resultHash,
+          testOutcomes: persisted.payload.testOutcomes,
+          verificationAuthority: persisted.payload.verificationAuthority,
+          referenceMethod: persisted.payload.referenceMethod,
+        } }
+        assert.throws(() => buildContextFreeBrief({ ...contextInput, fetchedEvidence: oldFetchedEvidence }),
+          error => error.code === 'CONTEXT_COMPONENT_TOO_LARGE')
+        const dispatch = buildContextFreeBrief(contextInput)
+        assert.ok(dispatch.contextBudget.componentBytes.fetchedEvidence <= 16384)
+        assert.ok(dispatch.contextBudget.totalEnvelopeBytes <= 24576)
+      }
+      fs.writeFileSync(harness, [
+        `// Independent execution context: ${request.workItemId}`,
+        "const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict')",
+        "const actual = fs.readFileSync(path.join(process.argv[2], 'subject.txt'), 'utf8')",
+        confirmation ? "assert.equal(actual.length, 17); assert.ok(actual.endsWith('\\n'))"
+          : "assert.equal(actual, 'frozen candidate\\n')",
+        `console.log(JSON.stringify({passCount:${confirmation ? 2 : 1},failureCount:0}))`,
+      ].join('\n'))
+      const record = {
+        logicalRole: request.logicalRole, workItemId: request.workItemId,
+        candidateHash: request.candidateHash, requestEnvelopeHash: H,
+        continuationId: `native-context:${request.workItemId}`,
+        workingDirectory: f.checkerScratchBoundary.writableScratchRoot,
+        canonicalAssignment: {
+          assignmentId: request.workItemId, requestEnvelopeHash: H, checks: request.checks,
+          verificationObservationBinding: createCheckerObservationBinding({
+            assignmentId: request.workItemId, candidateHash: request.candidateHash,
+            requestEnvelopeHash: H, checkIds: request.checks,
+          }),
+        },
+        checkerScratchBoundary: {
+          ...f.checkerScratchBoundary, schemaVersion: 2, runId: 'mixed-case-scratch',
+          checkerId: request.oracle, candidateHash: request.candidateHash,
+        },
+      }
+      const command = `${process.execPath} ${harness} ${f.candidate}`
+      const accumulator = createCodexJsonlAccumulator(record)
+      accumulator.push(JSON.stringify({ type: 'item.started', item: {
+        id: 'actual-scratch', type: 'command_execution', command,
+      } }))
+      const executed = spawnSync(process.execPath, [harness, f.candidate], { encoding: 'utf8' })
+      assert.equal(executed.status, 0, executed.stderr)
+      accumulator.push(JSON.stringify({ type: 'item.completed', item: {
+        id: 'actual-scratch', type: 'command_execution', command,
+        status: 'completed', exit_code: executed.status, aggregated_output: executed.stdout,
+      } }))
+      const result = checkerResultBoundToCommandExecutionEvidence({
+        code: 'PASS', payload: {
+          testOutcomes: request.checks.map(checkId => ({ checkId, status: 'PASS' })),
+          evidenceIds: [`sha256:${digest(executed.stdout + request.workItemId)}`],
+          referenceMethod: scratchReferenceMethod(request.workItemId,
+            confirmation ? 'independent-model' : 'black-box-boundary'),
+        },
+      }, accumulator.snapshot(), record)
+      if (!confirmation && coverageMode !== 'inline') {
+        // Full, valid claim strings remain in the durable report, never truncated in dispatch.
+        result.payload.referenceMethod.positiveInvariants = Array.from({ length: 48 }, (_, index) =>
+          `Independent coverage claim ${index}: ` + 'The frozen candidate preserves the required text and boundary. '.repeat(7))
+        originalPrimary = structuredClone(result)
+        const persisted = structuredClone(result)
+        if (coverageMode === 'foreign-result') persisted.payload.referenceMethod.source = 'Another checker result'
+        const bytes = Buffer.from(JSON.stringify(persisted))
+        const resultPath = path.join(evidenceRoot, `${request.workItemId}.json`)
+        fs.writeFileSync(resultPath, bytes)
+        pointers.set(request.workItemId, {
+          name: request.workItemId, path: resultPath, bytes: bytes.length, hash: digest(bytes),
+        })
+        if (coverageMode === 'tampered-bytes') fs.appendFileSync(resultPath, ' ')
+      }
+      assert.equal(result.cause?.event, 'CHECK_SCRATCH_CONFIRMATION_REQUIRED')
+      assert.ok(canonicalCheckerVerificationAuthority(result, request.checks),
+        'The controller must accept the authority produced from its own complete command observation')
+      // A supplied look-alike diagnostic is not the scheduler's private
+      // association with an exact durable result and must not be stripped.
+      if (coverageMode === 'unbound-enrichment') return {
+        ...result, transcriptEvidence: { schemaVersion: 1, eventCount: 0 },
+      }
+      return result
+    },
+    completeRetainedLease: () => {}, resumeAdoptedLaunches: async () => ({}), resumeState: null,
+  })
+  if (['foreign-result', 'tampered-bytes', 'unbound-enrichment'].includes(coverageMode)) {
+    await assert.rejects(operation, error => error.code ===
+      (coverageMode === 'tampered-bytes' ? 'PLAN_CHECK_EVIDENCE_MISSING' : 'SCRATCH_PASS_CONFIRMATION_INCOMPLETE'))
+    assert.deepEqual(launches, ['work-1', 'independent-check-1'])
+    return
+  }
+  const outcome = await operation
+  assert.deepEqual(launches, ['work-1', 'independent-check-1', 'independent-check-1-scratch-confirmation-1'])
+  assert.equal(outcome.outcome, 'DONE', JSON.stringify(outcome))
+  assert.equal(outcome.terminalEnvelope.status, 'DONE', JSON.stringify(outcome))
+})
+}
 
 test('malformed single-seat scratch confirmation returns the candidate without correction or retry', async t => {
   const targetPath = cleanRepository(t)

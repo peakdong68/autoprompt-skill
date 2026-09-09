@@ -20,6 +20,7 @@ const {
   createSafeChildGitEnvironment,
   discoverRepository,
   inspect,
+  repair: repairLocalOnlySafety,
 } = require('./local-only-safety.cjs')
 const {
   physicalProviderRole,
@@ -54,6 +55,10 @@ const ENFORCEMENT_PROOF = 'enforcement-proof.json'
 const SUPERVISOR_RUNTIME_RECEIPT = 'supervisor-runtime-binding.json'
 const GIT_EMPTY_CONFIG = 'git-empty.config'
 const GH_CONFIG_DIRECTORY = 'gh-config'
+// Codex persists project-trust entries in CODEX_HOME/config.toml during a
+// normal native session. The activation copy is an immutable authority
+// receipt, so native state must live in a separate, owner-only home.
+const CODEX_NATIVE_HOME_DIRECTORY = 'n'
 const DISCOVERY_SKILL_RELATIVE = path.join('skills', 'autoprompt', 'SKILL.md')
 const PRIVATE_BUNDLE_DIRECTORY = path.join('.autoprompt-private', 'bundles')
 const CODEX_TRUSTED_KEY_RING = path.join(
@@ -134,9 +139,10 @@ const ROLE_TIER = new Map(TIERS.flatMap((roles, tier) => roles.map(role => [role
 class ConfigureError extends Error {}
 class ProviderUnsupportedError extends ConfigureError {
   constructor(reason, details = null) {
-    const suffix = details
+    const suffix = details && Object.hasOwn(details, 'file')
       ? ` file=${details.file} expected=${details.expected} actual=${details.actual}`
-      : ''
+      : details && details.cause ? ` cause=${details.cause}`
+        : details && Object.hasOwn(details, 'actual') ? ` actual=${details.actual}` : ''
     super(`PROVIDER_UNSUPPORTED provider=codex reason=${reason}${suffix}`)
     this.code = 'PROVIDER_UNSUPPORTED'
     this.reason = reason
@@ -636,10 +642,18 @@ const processOwner = new ownerModule.ProcessOwner({
     })
     unsupported('local-conformance-process-probe-failed', {
       expected: 'one bounded owned process must drain and crash recovery must leave no target process',
-      actual: String(result?.error?.code || result?.signal || result?.status ||
-        result?.stderr || 'unknown').slice(0, 768) +
-        ` cleanup=${String(cleanup?.error?.code || cleanup?.signal || cleanup?.status ||
-          cleanup?.stderr || 'unknown').slice(0, 256)}`,
+      actual: JSON.stringify({
+        status: result?.status ?? null,
+        error: result?.error?.code || null,
+        signal: result?.signal || null,
+        stderr: String(result?.stderr || '').trim().slice(0, 768),
+        cleanup: {
+          status: cleanup?.status ?? null,
+          error: cleanup?.error?.code || null,
+          signal: cleanup?.signal || null,
+          stderr: String(cleanup?.stderr || '').trim().slice(0, 256),
+        },
+      }),
     })
   }
   let processProbe
@@ -876,14 +890,14 @@ function writeJsonPrivate(file, value) {
   writePrivateFile(file, Buffer.from(`${JSON.stringify(value, null, 2)}\n`, 'utf8'))
 }
 
-function writeJsonPrivateExclusive(file, value) {
+function writePrivateFileExclusive(file, bytes, mode = 0o600) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 })
   const parent = path.dirname(file)
   const parentBinding = directoryBinding(parent, 'private-exclusive-parent')
-  const descriptor = fs.openSync(file, 'wx', 0o600)
+  const descriptor = fs.openSync(file, 'wx', mode)
   let opened
   try {
-    fs.writeFileSync(descriptor, Buffer.from(`${JSON.stringify(value, null, 2)}\n`, 'utf8'))
+    fs.writeFileSync(descriptor, bytes)
     fs.fsyncSync(descriptor)
     opened = fs.fstatSync(descriptor, { bigint: true })
   } finally {
@@ -892,7 +906,11 @@ function writeJsonPrivateExclusive(file, value) {
   assertDirectoryBinding(parent, parentBinding, 'private-exclusive-parent')
   const landed = assertRegularUnlinked(file, 'private-exclusive-target')
   if (!opened || !sameFileIdentity(opened, landed)) unsupported('private-exclusive-target-raced')
-  try { fs.chmodSync(file, 0o600) } catch {}
+  try { fs.chmodSync(file, mode) } catch {}
+}
+
+function writeJsonPrivateExclusive(file, value) {
+  writePrivateFileExclusive(file, Buffer.from(`${JSON.stringify(value, null, 2)}\n`, 'utf8'))
 }
 
 function assertRegularUnlinked(file, label) {
@@ -949,6 +967,10 @@ function validateWindowsSandboxIdentity(bytes) {
   return identity
 }
 
+function windowsSandboxIdentityPath(activationRoot) {
+  return path.join(nativeCodexHomePath(activationRoot), 'cap_sid')
+}
+
 function installWindowsSandboxIdentity(root, activationRoot) {
   if (process.platform !== 'win32') return null
   const source = path.join(root, 'cap_sid')
@@ -961,7 +983,13 @@ function installWindowsSandboxIdentity(root, activationRoot) {
     unsupported('codex-windows-sandbox-identity-invalid')
   }
   validateWindowsSandboxIdentity(bytes)
-  const destination = path.join(activationRoot, 'cap_sid')
+  // Native Codex reads its sandbox identity from CODEX_HOME. Keep it beside
+  // the mutable native config, while the authority config at activationRoot
+  // remains immutable and hash-bound.
+  const nativeHome = ensurePrivateDirectory(
+    activationRoot, nativeCodexHomePath(activationRoot), true,
+  )
+  const destination = windowsSandboxIdentityPath(activationRoot)
   writePrivateFile(destination, bytes)
   return {
     kind: 'windows-cap-sid-v1',
@@ -1013,7 +1041,7 @@ function verifyWindowsSandboxIdentity(activationRoot, binding) {
     if (binding !== null) unsupported('codex-windows-sandbox-identity-unexpected')
     return null
   }
-  const expectedPath = path.join(activationRoot, 'cap_sid')
+  const expectedPath = windowsSandboxIdentityPath(activationRoot)
   if (!binding || binding.kind !== 'windows-cap-sid-v1' ||
       comparable(binding.path) !== comparable(expectedPath) ||
       !/^[a-f0-9]{64}$/.test(binding.sha256 || '') ||
@@ -1071,7 +1099,10 @@ function protectActivationRoot(activationRoot, recurse = false) {
     const established = safeRunRoot.ensureWindowsPrivateAcl(activationRoot)
     const audited = safeRunRoot.auditPrivatePermissions(activationRoot, {
       recurse,
-      allowedOwnerReadableFiles: [path.join(activationRoot, 'installation_id')],
+      allowedOwnerReadableFiles: [
+        path.join(activationRoot, 'installation_id'),
+        path.join(nativeCodexHomePath(activationRoot), 'installation_id'),
+      ],
     })
     return {
       auditedPaths: audited.paths || 1,
@@ -1082,11 +1113,233 @@ function protectActivationRoot(activationRoot, recurse = false) {
   }
 }
 
+// Codex creates a small amount of state below CODEX_HOME while answering
+// otherwise read-only probes (for example its local goals database).  Node's
+// spawn API inherits the caller's umask, so an ordinary 022/002 shell can
+// make that state group/world-readable before the activation audit runs.
+// Limit the override to the instant each owned child is created: the child
+// inherits 077, while this process immediately returns to the user's umask.
+// Windows has no POSIX umask; its activation root is protected and audited by
+// the DACL path above.
+function spawnWithPrivateActivationUmask(callback) {
+  if (process.platform === 'win32') return callback()
+  let previous
+  try {
+    previous = process.umask(0o077)
+  } catch {
+    unsupported('activation-private-umask-unavailable')
+  }
+  try {
+    return callback()
+  } finally {
+    try {
+      process.umask(previous)
+    } catch {
+      unsupported('activation-private-umask-restore-failed')
+    }
+  }
+}
+
+// The native Codex sandbox creates a short-lived arg0 helper bundle below
+// CODEX_HOME/tmp while it starts a sandboxed command.  Each helper is a link
+// to the already-admitted native executable.  Link permission bits are not
+// meaningful on POSIX (lstat reports 0777), so they cannot pass the private
+// state audit even when their containing directories are private.  The helper
+// process has exited by the time this runs.  Remove only the exact bundle we
+// can bind to the admitted executable; leave every other entry for the strict
+// activation audit to reject.
+const CODEX_PROBE_HELPER_LINKS = Object.freeze([
+  'apply_patch',
+  'applypatch',
+  'codex-execve-wrapper',
+  ...(process.platform === 'darwin' ? [] : ['codex-linux-sandbox']),
+])
+const CODEX_PROBE_HELPER_LOCK = '.lock'
+const CODEX_PROBE_HELPER_DIRECTORY = /^codex-arg0[A-Za-z0-9]{6,128}$/
+const CODEX_FLOCK_ACQUIRE = 'import fcntl; fcntl.flock(3, fcntl.LOCK_EX | fcntl.LOCK_NB)'
+const CODEX_FLOCK_VERIFY = [
+  'import fcntl, sys',
+  'handle = open(sys.argv[1], "r+")',
+  'try:',
+  '  fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)',
+  'except BlockingIOError:',
+  '  sys.exit(1)',
+  'sys.exit(0)',
+].join('\n')
+const CODEX_FLOCK_ENVIRONMENT = Object.freeze({
+  PATH: '/usr/bin:/bin',
+  PYTHONDONTWRITEBYTECODE: '1',
+  PYTHONNOUSERSITE: '1',
+})
+
+function resolvedFlockPython(darwinRuntimeClosure) {
+  if (process.platform === 'darwin') {
+    if (!darwinRuntimeClosure) unsupported('codex-probe-helper-lock-runtime-required')
+    const closure = require('../agents/codex/workflow/darwin-runtime-closure.js').validateDarwinRuntimeClosure({
+      manifest: darwinRuntimeClosure.path, manifestSha256: darwinRuntimeClosure.sha256,
+    })
+    return closure.entries.find(entry => entry.role === 'python').path
+  }
+  // The lock witness protects an activation boundary, so never let the
+  // caller's PATH choose its implementation.  Python 3 is a documented
+  // installer prerequisite on supported POSIX hosts; without the system
+  // interpreter this safety check fails closed.
+  for (const candidate of ['/usr/bin/python3']) {
+    let probe
+    try {
+      probe = childProcess.spawnSync(candidate, ['-I', '-S', '-c',
+        'import fcntl, os, sys; print(os.path.realpath(sys.executable))',
+      ], { encoding: 'utf8', env: CODEX_FLOCK_ENVIRONMENT, shell: false, timeout: 3_000 })
+    } catch { continue }
+    const executable = String(probe?.stdout || '').trim()
+    if (probe?.error || probe?.status !== 0 || !path.isAbsolute(executable) ||
+        /[\r\n\0]/.test(executable)) continue
+    let stat
+    try {
+      stat = fs.lstatSync(executable, { bigint: true })
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink < 1n) continue
+      fs.accessSync(executable, fs.constants.X_OK)
+    } catch { continue }
+    return executable
+  }
+  unsupported('codex-probe-helper-lock-unavailable')
+}
+
+function sameProbeHelperLock(left, right) {
+  return left && right && left.isFile() && right.isFile() &&
+    !left.isSymbolicLink() && !right.isSymbolicLink() && left.nlink === 1n && right.nlink === 1n &&
+    ['dev', 'ino', 'size', 'mtimeNs', 'ctimeNs', 'mode'].every(field => left[field] === right[field])
+}
+
+function assertExactCodexProbeHelperBundle(bundle, executable, expectedLock = null) {
+  let links
+  try { links = fs.readdirSync(bundle) } catch { unsupported('codex-probe-helper-read-failed') }
+  const expectedEntries = [CODEX_PROBE_HELPER_LOCK, ...CODEX_PROBE_HELPER_LINKS].sort()
+  if (JSON.stringify(links.sort()) !== JSON.stringify(expectedEntries)) {
+    unsupported('codex-probe-helper-unrecognized')
+  }
+  const lock = path.join(bundle, CODEX_PROBE_HELPER_LOCK)
+  let lockStat
+  try { lockStat = fs.lstatSync(lock, { bigint: true }) } catch { unsupported('codex-probe-helper-invalid') }
+  if (!lockStat.isFile() || lockStat.isSymbolicLink() || lockStat.nlink !== 1n ||
+      lockStat.size !== 0n || (lockStat.mode & 0o077n) !== 0n ||
+      (expectedLock && !sameProbeHelperLock(lockStat, expectedLock))) {
+    unsupported('codex-probe-helper-invalid')
+  }
+  for (const link of CODEX_PROBE_HELPER_LINKS) {
+    const candidate = path.join(bundle, link)
+    let stat
+    let target
+    try {
+      stat = fs.lstatSync(candidate)
+      target = fs.readlinkSync(candidate)
+    } catch { unsupported('codex-probe-helper-invalid') }
+    if (!stat.isSymbolicLink() || target !== executable || fs.realpathSync.native(candidate) !== executable) {
+      unsupported('codex-probe-helper-binding-invalid')
+    }
+  }
+  return { lock, lockStat }
+}
+
+function acquireInactiveCodexProbeHelperLock(lock, expectedLock, darwinRuntimeClosure) {
+  const python = resolvedFlockPython(darwinRuntimeClosure)
+  let descriptor
+  try {
+    descriptor = fs.openSync(lock, fs.constants.O_RDWR | (fs.constants.O_NOFOLLOW || 0))
+    const opened = fs.fstatSync(descriptor, { bigint: true })
+    if (!sameProbeHelperLock(opened, expectedLock) ||
+        !sameProbeHelperLock(fs.lstatSync(lock, { bigint: true }), expectedLock)) {
+      unsupported('codex-probe-helper-lock-raced')
+    }
+    const acquired = childProcess.spawnSync(python, ['-I', '-S', '-c', CODEX_FLOCK_ACQUIRE], {
+      env: CODEX_FLOCK_ENVIRONMENT, shell: false,
+      stdio: ['ignore', 'ignore', 'ignore', descriptor], timeout: 3_000,
+    })
+    if (acquired.error || acquired.status === 1) unsupported('codex-probe-helper-lock-busy')
+    if (acquired.status !== 0) unsupported('codex-probe-helper-lock-unavailable')
+    const verified = childProcess.spawnSync(python, ['-I', '-S', '-c', CODEX_FLOCK_VERIFY, lock], {
+      env: CODEX_FLOCK_ENVIRONMENT, shell: false, stdio: 'ignore', timeout: 3_000,
+    })
+    if (verified.error || verified.status !== 1) unsupported('codex-probe-helper-lock-unavailable')
+    if (!sameProbeHelperLock(fs.fstatSync(descriptor, { bigint: true }), expectedLock) ||
+        !sameProbeHelperLock(fs.lstatSync(lock, { bigint: true }), expectedLock)) {
+      unsupported('codex-probe-helper-lock-raced')
+    }
+    return descriptor
+  } catch (error) {
+    if (descriptor !== undefined) fs.closeSync(descriptor)
+    throw error
+  }
+}
+
+function removeInactiveCodexProbeHelpers(activationRoot, executable, darwinRuntimeClosure = null) {
+  if (process.platform === 'win32') return 0
+  if (typeof activationRoot !== 'string' || !path.isAbsolute(activationRoot) ||
+      typeof executable !== 'string' || !path.isAbsolute(executable)) {
+    unsupported('codex-probe-helper-binding-invalid')
+  }
+  const rootBinding = directoryBinding(activationRoot, 'codex-probe-helper-root')
+  const tmp = path.join(activationRoot, 'tmp')
+  if (!fs.existsSync(tmp)) return 0
+  const tmpBinding = directoryBinding(tmp, 'codex-probe-helper-tmp')
+  if (!isWithin(rootBinding.realpath, tmpBinding.realpath)) {
+    unsupported('codex-probe-helper-path-escape')
+  }
+  const arg0 = path.join(tmp, 'arg0')
+  if (!fs.existsSync(arg0)) return 0
+  const arg0Binding = directoryBinding(arg0, 'codex-probe-helper-arg0')
+  if (!isWithin(tmpBinding.realpath, arg0Binding.realpath)) {
+    unsupported('codex-probe-helper-path-escape')
+  }
+  let names
+  try { names = fs.readdirSync(arg0) } catch { unsupported('codex-probe-helper-read-failed') }
+  let removed = 0
+  for (const name of names) {
+    if (!CODEX_PROBE_HELPER_DIRECTORY.test(name)) {
+      unsupported('codex-probe-helper-unrecognized')
+    }
+    const bundle = path.join(arg0, name)
+    const bundleBinding = directoryBinding(bundle, 'codex-probe-helper-bundle')
+    if (!isWithin(arg0Binding.realpath, bundleBinding.realpath)) {
+      unsupported('codex-probe-helper-path-escape')
+    }
+    const inspected = assertExactCodexProbeHelperBundle(bundle, executable)
+    const lockDescriptor = acquireInactiveCodexProbeHelperLock(inspected.lock, inspected.lockStat, darwinRuntimeClosure)
+    try {
+      assertExactCodexProbeHelperBundle(bundle, executable, inspected.lockStat)
+      assertDirectoryBinding(activationRoot, rootBinding, 'codex-probe-helper-root')
+      assertDirectoryBinding(tmp, tmpBinding, 'codex-probe-helper-tmp')
+      assertDirectoryBinding(arg0, arg0Binding, 'codex-probe-helper-arg0')
+      assertDirectoryBinding(bundle, bundleBinding, 'codex-probe-helper-bundle')
+      if (!sameProbeHelperLock(fs.fstatSync(lockDescriptor, { bigint: true }), inspected.lockStat) ||
+          !sameProbeHelperLock(fs.lstatSync(inspected.lock, { bigint: true }), inspected.lockStat)) {
+        unsupported('codex-probe-helper-lock-raced')
+      }
+      for (const link of CODEX_PROBE_HELPER_LINKS) fs.unlinkSync(path.join(bundle, link))
+      fs.unlinkSync(inspected.lock)
+      fs.rmdirSync(bundle)
+      removed += 1
+    } finally {
+      fs.closeSync(lockDescriptor)
+    }
+  }
+  assertDirectoryBinding(activationRoot, rootBinding, 'codex-probe-helper-root')
+  assertDirectoryBinding(tmp, tmpBinding, 'codex-probe-helper-tmp')
+  assertDirectoryBinding(arg0, arg0Binding, 'codex-probe-helper-arg0')
+  return removed
+}
+
 function auditActivationRoot(activationRoot, recurse = false) {
   try {
     return safeRunRoot.auditPrivatePermissions(activationRoot, {
       recurse,
-      allowedOwnerReadableFiles: [path.join(activationRoot, 'installation_id')],
+      // Native Codex writes its own installation identifier below its mutable
+      // home. It is non-authoritative state; retain the narrow owner-readable
+      // allowance already used for the activation identifier itself.
+      allowedOwnerReadableFiles: [
+        path.join(activationRoot, 'installation_id'),
+        path.join(nativeCodexHomePath(activationRoot), 'installation_id'),
+      ],
     })
   } catch (error) {
     unsupported('activation-private-permissions-invalid', {
@@ -1812,6 +2065,24 @@ function createPrivateBoundary(activationRoot) {
   return { appData, ghConfigDir, gitConfig, localAppData, xdgConfigHome }
 }
 
+function nativeCodexHomePath(activationRoot) {
+  return path.join(activationRoot, CODEX_NATIVE_HOME_DIRECTORY)
+}
+
+function initializeNativeCodexHome(activationRoot) {
+  const home = ensurePrivateDirectory(
+    activationRoot, nativeCodexHomePath(activationRoot), true,
+  )
+  const authority = path.join(activationRoot, 'config.toml')
+  const config = path.join(home, 'config.toml')
+  assertRegularUnlinked(authority, 'activation-config')
+  // This runs only while preparing a fresh or revoked activation, before any
+  // native child exists. It never rewrites a config while worker/checker
+  // sessions can share that mutable home.
+  writePrivateFile(config, readRegularBound(authority, 'activation-config'))
+  return home
+}
+
 function rewriteSupervisorEntrypoints(skillRoot) {
   const shell = path.join(skillRoot, 'workflow', 'supervisor.sh')
   const powershell = path.join(skillRoot, 'workflow', 'supervisor.ps1')
@@ -1886,21 +2157,27 @@ function localOnlyChildEnvironment(target, baseEnvironment, boundary) {
   }
   try {
     return createSafeChildGitEnvironment(target, baseEnvironment, options)
-  } catch {
-    unsupported('local-only-child-boundary-unavailable')
+  } catch (error) {
+    unsupported('local-only-child-boundary-unavailable', {
+      cause: error && (error.code || error.name) || 'UNKNOWN',
+      message: error && error.message || 'Child Git isolation could not be established',
+    })
   }
 }
 
 function activationChildEnvironment(baseEnvironment, activationRoot, target, boundary, pointers = {}) {
+  const nativeHome = ensurePrivateDirectory(
+    activationRoot, nativeCodexHomePath(activationRoot), true,
+  )
   const candidate = {
     ...baseEnvironment,
     APPDATA: boundary.appData,
-    CODEX_HOME: activationRoot,
+    CODEX_HOME: nativeHome,
     GH_CONFIG_DIR: boundary.ghConfigDir,
     GH_PROMPT_DISABLED: '1',
-    HOME: activationRoot,
+    HOME: nativeHome,
     LOCALAPPDATA: boundary.localAppData,
-    USERPROFILE: activationRoot,
+    USERPROFILE: nativeHome,
     XDG_CONFIG_HOME: boundary.xdgConfigHome,
     ...pointers,
   }
@@ -1980,6 +2257,7 @@ function probeCodexCommandNetwork(options, spawn) {
   const baselineToken = crypto.randomBytes(16).toString('hex')
   const sandboxToken = crypto.randomBytes(16).toString('hex')
   const readyPath = path.join(root, `.network-probe-ready-${nonce}`)
+  const publishedPath = path.join(root, `.network-probe-published-${nonce}`)
   const evidencePath = path.join(root, `.network-probe-connected-${nonce}`)
   const stopPath = path.join(root, `.network-probe-stop-${nonce}`)
   const closedPath = path.join(root, `.network-probe-closed-${nonce}`)
@@ -1987,7 +2265,7 @@ function probeCodexCommandNetwork(options, spawn) {
   const sandboxResultPath = path.join(options.target, `.autoprompt-network-sandbox-${nonce}`)
   const listenerScript = [
     'const fs=require("node:fs"),net=require("node:net")',
-    'const [ready,evidence,stop,closed,address]=process.argv.slice(1)',
+    'const [ready,published,evidence,stop,closed,address]=process.argv.slice(1)',
     'const server=net.createServer(socket=>{',
     '  let token="";socket.setEncoding("utf8")',
     '  socket.on("data",chunk=>{if(token.length<128)token+=chunk})',
@@ -2003,6 +2281,7 @@ function probeCodexCommandNetwork(options, spawn) {
     '})}',
     'server.listen(0,address,()=>{',
     '  fs.writeFileSync(ready,JSON.stringify({address,port:server.address().port}),{flag:"wx",mode:0o600})',
+    '  fs.writeFileSync(published,"",{flag:"wx",mode:0o600})',
     '})',
     'const timer=setInterval(()=>{if(fs.existsSync(stop)){clearInterval(timer);finish()}},20)',
     'setTimeout(finish,12000)',
@@ -2012,7 +2291,7 @@ function probeCodexCommandNetwork(options, spawn) {
       .map(key => [key, process.env[key]]),
   )
   const listener = childProcess.spawn(process.execPath, [
-    '-e', listenerScript, readyPath, evidencePath, stopPath, closedPath, address,
+    '-e', listenerScript, readyPath, publishedPath, evidencePath, stopPath, closedPath, address,
   ], {
     cwd: options.target,
     env: listenerEnvironment,
@@ -2022,7 +2301,10 @@ function probeCodexCommandNetwork(options, spawn) {
   })
   let cleanShutdown = false
   try {
-    if (!waitForProbeFile(readyPath, 5_000)) unsupported('codex-network-probe-listener-failed')
+    if (!waitForProbeFile(publishedPath, 5_000)) unsupported('codex-network-probe-listener-failed')
+    if (readRegularBound(publishedPath, 'codex-network-probe-published').length !== 0) {
+      unsupported('codex-network-probe-listener-invalid')
+    }
     let endpoint
     try {
       endpoint = JSON.parse(readRegularBound(readyPath, 'codex-network-probe-ready').toString('utf8'))
@@ -2106,7 +2388,7 @@ function probeCodexCommandNetwork(options, spawn) {
       try { listener.kill() } catch {}
     }
     for (const file of [
-      readyPath, evidencePath, stopPath, closedPath, baselineResultPath, sandboxResultPath,
+      readyPath, publishedPath, evidencePath, stopPath, closedPath, baselineResultPath, sandboxResultPath,
     ]) {
       try { unlinkProbeFile(file) } catch {}
     }
@@ -2202,6 +2484,10 @@ function proveLocalOnlySafety(target, environment, proof, spawnSync = childProce
   let inspection
   try {
     inspection = inspect(repository, expectedBranch, environment, { enforcementProof: proof })
+    if (!inspection.channels?.repositoryGitBarrier?.enforced) {
+      repairLocalOnlySafety(repository, expectedBranch, inspection)
+      inspection = inspect(repository, expectedBranch, environment, { enforcementProof: proof })
+    }
   } catch {
     unsupported('local-only-safety-inspection-failed')
   }
@@ -2483,6 +2769,7 @@ function providerRuntimeIdentity(record) {
     requestSha256: record.request.sha256,
     targetIdentity: record.target,
     configSha256: boundary.configSha256,
+    providerApiBaseUrl: boundary.providerApiBaseUrl,
     payloadManifestSha256: boundary.payloadManifestSha256,
     profileSha256: boundary.enforcementProof.profileSha256,
     privatePermissions: boundary.privatePermissions,
@@ -2497,6 +2784,9 @@ function providerRuntimeIdentity(record) {
       : null,
     safetyInspectionSha256: sha256(Buffer.from(JSON.stringify(record.safety), 'utf8')),
     supervisorAdapterSha256: boundary.supervisorAdapterSha256,
+    ...(record.darwinRuntimeClosure ? {
+      darwinRuntimeClosureSha256: sha256(Buffer.from(JSON.stringify(record.darwinRuntimeClosure), 'utf8')),
+    } : {}),
   }), 'utf8'))
 }
 
@@ -2595,9 +2885,9 @@ function validateBoundProviderTrust(record, currentRuntimeIdentity) {
   })
 }
 
-function createProviderAttestation(record, now, activationNonce = null) {
+function createProviderAttestation(record, now, activationNonce = null, options = {}) {
   let currentRuntimeIdentity
-  try { currentRuntimeIdentity = deriveCurrentCodexRuntimeIdentity() } catch {
+  try { currentRuntimeIdentity = deriveCurrentCodexRuntimeIdentity({ env: options.env }) } catch {
     unsupported('canonical-provider-runtime-identity-unavailable')
   }
   const providerTrust = validateBoundProviderTrust(record, currentRuntimeIdentity)
@@ -2649,7 +2939,7 @@ function verifyProviderAttestation(record, options = {}) {
   const expiresAt = Date.parse(attestation?.expiresAt)
   const providerTrust = record.providerTrust
   let currentRuntimeIdentity
-  try { currentRuntimeIdentity = deriveCurrentCodexRuntimeIdentity() } catch {
+  try { currentRuntimeIdentity = deriveCurrentCodexRuntimeIdentity({ env: options.env }) } catch {
     unsupported('canonical-provider-runtime-identity-unavailable')
   }
   const providerTrustValidation = validateBoundProviderTrust(record, currentRuntimeIdentity)
@@ -2798,7 +3088,7 @@ function validateSupervisorRuntimeReceipt(activationRoot, record) {
   return normalized
 }
 
-function resolveActivationRecord(root, activationId) {
+function resolveActivationRecord(root, activationId, options = {}) {
   if (!ACTIVATION_ID_PATTERN.test(activationId)) fail('activation id is invalid')
   const activationRoot = path.join(root, ACTIVATION_DIRECTORY, activationId)
   ensurePrivateDirectory(root, activationRoot)
@@ -2964,7 +3254,7 @@ function resolveActivationRecord(root, activationId) {
     fail('activation GitHub config is not empty')
   }
   auditActivationRoot(activationRoot, true)
-  verifyProviderAttestation(record)
+  verifyProviderAttestation(record, { env: options.env })
   validateSupervisorRuntimeReceipt(activationRoot, record)
   return { activationRoot, record, recordPath }
 }
@@ -3067,7 +3357,7 @@ function acquireActivationOperationLock(root, operation, guard) {
   unsupported('activation-operation-lock-unstable')
 }
 
-function registerSupervisorRuntime(recordPath, binding, context) {
+function registerSupervisorRuntime(recordPath, binding, context, options = {}) {
   if (typeof recordPath !== 'string' || !path.isAbsolute(recordPath) ||
       path.basename(recordPath) !== ACTIVATION_RECORD) {
     unsupported('supervisor-runtime-record-path-invalid')
@@ -3084,7 +3374,7 @@ function registerSupervisorRuntime(recordPath, binding, context) {
     activationRoot, 'register-supervisor-runtime', guard,
   )
   try {
-    const resolved = resolveActivationRecord(root, activationId)
+    const resolved = resolveActivationRecord(root, activationId, { env: options.env })
     const record = resolved.record
     const capability = record.capability
     if (!context || context.caller !== 'autoprompt-dispatcher' ||
@@ -3178,7 +3468,7 @@ function registerSupervisorRuntime(recordPath, binding, context) {
   }
 }
 
-function createAndRegisterSupervisorRuntime(prepared, context, now = new Date()) {
+function createAndRegisterSupervisorRuntime(prepared, context, now = new Date(), options = {}) {
   const { activationId, activationRoot, recordPath, target } = prepared
   let { record } = prepared
   let binding = record.supervisorRuntime
@@ -3224,7 +3514,7 @@ function createAndRegisterSupervisorRuntime(prepared, context, now = new Date())
       createdAt: now.toISOString(),
     }
   }
-  record = registerSupervisorRuntime(recordPath, binding, context)
+  record = registerSupervisorRuntime(recordPath, binding, context, { env: options.env })
   return { binding: record.supervisorRuntime, record }
 }
 
@@ -3243,18 +3533,56 @@ function revokeActivation(recordPath, record, reason, now = new Date()) {
   record.capability.status = 'revoked'
   record.capability.revokedAt = record.revokedAt
   record.capability.tokenSha256 = null
-  const auth = path.join(record.activationRoot, 'auth.json')
-  let authCleanupError = null
-  if (fs.existsSync(auth)) {
+  let helperCleanupError = null
+  const nativeHome = nativeCodexHomePath(record.activationRoot)
+  let nativeHomeSafe = false
+  if (fs.existsSync(nativeHome)) {
     try {
-      assertRegularUnlinked(auth, 'activation-auth')
-      fs.unlinkSync(auth)
+      // Never clean mutable native state through a substituted subdirectory.
+      // Validate every segment before inspecting a child below CODEX_HOME.
+      ensurePrivateDirectory(record.activationRoot, nativeHome)
+      nativeHomeSafe = true
     } catch (error) {
-      authCleanupError = error
+      helperCleanupError = error
+    }
+  }
+  for (const stateRoot of [record.activationRoot, ...(nativeHomeSafe ? [nativeHome] : [])]) {
+    if (!fs.existsSync(stateRoot)) continue
+    try {
+      removeInactiveCodexProbeHelpers(
+        stateRoot, record.activationBoundary?.codexExecutable?.executable, record.darwinRuntimeClosure,
+      )
+    } catch (error) {
+      helperCleanupError = error
+    }
+  }
+  let authCleanupError = null
+  for (const auth of [
+    path.join(record.activationRoot, 'auth.json'),
+    ...(nativeHomeSafe ? [path.join(nativeHome, 'auth.json')] : []),
+  ]) {
+    if (fs.existsSync(auth)) {
+      try {
+        assertRegularUnlinked(auth, 'activation-auth')
+        fs.unlinkSync(auth)
+      } catch (error) {
+        authCleanupError = error
+      }
     }
   }
   writeJsonPrivate(recordPath, record)
   if (authCleanupError) throw authCleanupError
+  if (helperCleanupError) throw helperCleanupError
+}
+
+function providerApiBaseUrl(environment) {
+  const value = environment.OPENAI_BASE_URL
+  if (value === undefined || value === '') return null
+  let url
+  try { url = new URL(value) } catch {}
+  if (typeof value !== 'string' || !url || !['http:', 'https:'].includes(url.protocol) ||
+      url.username || url.password || url.search || url.hash) unsupported('provider-api-base-url-invalid')
+  return value
 }
 
 function prepareActivation(options = {}) {
@@ -3268,6 +3596,7 @@ function prepareActivation(options = {}) {
     canonicalTrust.codexRuntime, canonicalTrust.runtimeIdentity.runtimeIdentityHash,
   )
   const env = options.env || process.env
+  const apiBaseUrl = providerApiBaseUrl(env)
   const root = resolveRoot(env)
   const target = targetIdentity(options.target || process.cwd())
   const now = options.now instanceof Date ? options.now : new Date()
@@ -3292,11 +3621,12 @@ function prepareActivation(options = {}) {
   let freshActivation = false
   let resumeRollback = null
   if (options.resume) {
-    const resolved = resolveActivationRecord(root, options.resume)
+    const resolved = resolveActivationRecord(root, options.resume, { env })
     activationId = options.resume
     activationRoot = resolved.activationRoot
     recordPath = resolved.recordPath
     record = resolved.record
+    if ((record.activationBoundary?.providerApiBaseUrl ?? null) !== apiBaseUrl) unsupported('provider-api-base-url-changed-on-resume')
     if (canonicalTrust.ready === true && record.providerTrust?.sha256 !== providerTrust.sha256) {
       unsupported('canonical-provider-trust-binding-drift')
     }
@@ -3349,9 +3679,9 @@ function prepareActivation(options = {}) {
     const boundaryEnvironment = withCodexManagedEnvironment(
       initialBoundaryEnvironment, codexRuntime,
     )
-    launcherHelp = probeCodexLauncher({
+    launcherHelp = spawnWithPrivateActivationUmask(() => probeCodexLauncher({
       ...options, codexRuntime, env: boundaryEnvironment, target: target.realpath,
-    })
+    }))
     if (options.resume) {
       const manifestPath = path.join(activationRoot, ACTIVATION_PAYLOAD_MANIFEST)
       const priorProfile = fs.readFileSync(profilePath)
@@ -3407,6 +3737,12 @@ function prepareActivation(options = {}) {
       writePrivateFile(path.join(activationRoot, 'config.toml'), Buffer.from(renderActivationConfig(
         path.join(activationSkillRoot, 'SKILL.md'), projectSkillFiles(target.realpath),
       ), 'utf8'))
+      const darwinRuntimeClosure = process.platform === 'darwin' &&
+        fs.existsSync(path.join(root, '.autoprompt-private', 'darwin-runtime', 'darwin-runtime-closure.json'))
+        ? require('./darwin-runtime-setup.cjs').bindActivation({
+            provider: 'codex', root, activationRoot,
+          })
+        : null
       record = {
         schemaVersion: ACTIVATION_SCHEMA_VERSION,
         activationId,
@@ -3436,8 +3772,13 @@ function prepareActivation(options = {}) {
         providerAttestation: null,
         supervisorRuntime: null,
         supervisorRuntimeReceipt: null,
+        darwinRuntimeClosure,
       }
     }
+    // Seed the mutable native home only after the immutable authority config
+    // exists. Native Codex may append project-trust state there, never to the
+    // hash-bound activation config.
+    initializeNativeCodexHome(activationRoot)
     const supervisorAdapter = path.join(activationSkillRoot, 'workflow', 'phase-budget.js')
     assertRegularUnlinked(supervisorAdapter, 'supervisor-adapter')
     const proof = enforcementProof(
@@ -3448,6 +3789,7 @@ function prepareActivation(options = {}) {
     const configPath = path.join(activationRoot, 'config.toml')
     assertRegularUnlinked(configPath, 'activation-config')
     record.activationBoundary = {
+      providerApiBaseUrl: apiBaseUrl,
       codexExecutable,
       configPath,
       configSha256: sha256(fs.readFileSync(configPath)),
@@ -3492,9 +3834,12 @@ function prepareActivation(options = {}) {
     const probeEnvironment = codexRuntime
       ? withCodexManagedEnvironment(rawProbeEnvironment, codexRuntime)
       : rawProbeEnvironment
-    const profileProbe = probeCodexProfile({
+    const profileProbe = spawnWithPrivateActivationUmask(() => probeCodexProfile({
       ...options, codexRuntime, env: probeEnvironment, target: target.realpath,
-    })
+    }))
+    removeInactiveCodexProbeHelpers(
+      nativeCodexHomePath(activationRoot), codexRuntime.executable, record.darwinRuntimeClosure,
+    )
     if (process.platform === 'win32') {
       const identityBytes = readRegularBound(
         sandboxIdentity.path, 'codex-windows-sandbox-identity',
@@ -3563,7 +3908,7 @@ function prepareActivation(options = {}) {
     const activationNonce = options.resume
       ? record.providerAttestation.attestation.activationNonce
       : null
-    record.providerAttestation = createProviderAttestation(record, now, activationNonce)
+    record.providerAttestation = createProviderAttestation(record, now, activationNonce, { env })
     const resumeActivationId = options.resume ? activationId : null
     const structuralInvocation = resumeActivationId === null
       ? '$autoprompt'
@@ -3597,7 +3942,8 @@ function prepareActivation(options = {}) {
         )
         if (resumeRollback.priorSandboxIdentity) {
           writePrivateFile(
-            path.join(activationRoot, 'cap_sid'), resumeRollback.priorSandboxIdentity,
+            windowsSandboxIdentityPath(activationRoot),
+            resumeRollback.priorSandboxIdentity,
           )
         }
       } catch (rollbackError) {
@@ -3620,10 +3966,30 @@ function prepareActivation(options = {}) {
 function copyEphemeralAuth(root, activationRoot) {
   const source = path.join(root, 'auth.json')
   if (!fs.existsSync(source)) return false
-  assertRegularUnlinked(source, 'codex-auth')
-  fs.copyFileSync(source, path.join(activationRoot, 'auth.json'), fs.constants.COPYFILE_EXCL)
-  try { fs.chmodSync(path.join(activationRoot, 'auth.json'), 0o600) } catch {}
+  const destination = path.join(nativeCodexHomePath(activationRoot), 'auth.json')
+  // Auth is copied exactly once per activation launch. Refuse a pre-existing
+  // destination rather than replacing a file that a different actor created.
+  writePrivateFileExclusive(destination, readRegularBound(source, 'codex-auth'))
   return true
+}
+
+function awaitActivationChild(child, signalSource = process) {
+  return new Promise((resolve, reject) => {
+    const interrupt = () => forward('SIGINT'), terminate = () => forward('SIGTERM')
+    const cleanup = () => {
+      signalSource.removeListener('SIGINT', interrupt)
+      signalSource.removeListener('SIGTERM', terminate)
+    }
+    const forward = signal => {
+      if (child.exitCode === null && child.signalCode === null) {
+        try { child.kill(signal) } catch (error) { if (error.code !== 'ESRCH') { cleanup(); reject(error) } }
+      }
+    }
+    signalSource.on('SIGINT', interrupt)
+    signalSource.on('SIGTERM', terminate)
+    child.once('error', error => { cleanup(); reject(error) })
+    child.once('close', (status, signal) => { cleanup(); resolve({ status, signal }) })
+  })
 }
 
 function launchActivation(options = {}) {
@@ -3632,7 +3998,8 @@ function launchActivation(options = {}) {
     activationId, activationRoot, probeEnvironment, recordPath, root, target, token,
   } = prepared
   let { record } = prepared
-  const spawn = options.spawnSync || childProcess.spawnSync
+  const spawn = options.spawnSync || childProcess.spawn
+  let pendingLaunch = false
   const childEnv = { ...probeEnvironment }
   childEnv.AUTOPROMPT_CAPABILITY_GENERATION = String(record.capability.generation)
   const prompt = record.supervisorEntry.prompt
@@ -3659,35 +4026,43 @@ function launchActivation(options = {}) {
     runId: activationId,
     targetRealpath: target.realpath,
   }
+  const finish = result => {
+    const launched = { activationId, activationRoot, args, prompt, record, recordPath, root, target }
+    if (result && Number.isInteger(result.status)) return { ...launched, status: result.status }
+    if (result && !result.error && result.signal && os.constants.signals[result.signal]) {
+      return { ...launched, status: 128 + os.constants.signals[result.signal] }
+    }
+    return { ...launched, status: 1 }
+  }
+  const revoke = () => revokeActivation(
+    recordPath, record, 'launcher-exited', options.now instanceof Date ? options.now : new Date(),
+  )
   try {
     copyEphemeralAuth(root, activationRoot)
     const launchNow = options.now instanceof Date ? options.now : new Date()
     record = consumeCapability(recordPath, token, capabilityContext, launchNow)
-    const runtime = createAndRegisterSupervisorRuntime({ ...prepared, record }, capabilityContext, launchNow)
+    const runtime = createAndRegisterSupervisorRuntime({ ...prepared, record }, capabilityContext, launchNow, { env: options.env })
     record = runtime.record
-    verifyProviderAttestation(record, { requireFresh: true, now: launchNow })
+    verifyProviderAttestation(record, { requireFresh: true, now: launchNow, env: options.env })
     childEnv.AUTOPROMPT_ACTIVATION_ATTESTATION_SHA256 =
       record.providerAttestation.attestationSha256
     childEnv.AUTOPROMPT_SUPERVISOR_RUN_PATH = runtime.binding.runPath
     childEnv.AUTOPROMPT_SUPERVISOR_RUN_METADATA_SHA256 = runtime.binding.metadataSha256
-    result = spawn(process.execPath, args, {
+    result = spawnWithPrivateActivationUmask(() => spawn(process.execPath, args, {
       cwd: target.realpath,
       env: childEnv,
       shell: false,
       stdio: options.stdio || 'inherit',
       encoding: options.encoding,
-    })
+    }))
+    if (!options.spawnSync) {
+      pendingLaunch = true
+      return awaitActivationChild(result, options.signalSource).then(finish).finally(revoke)
+    }
   } finally {
-    revokeActivation(recordPath, record, 'launcher-exited', options.now instanceof Date ? options.now : new Date())
+    if (!pendingLaunch) revoke()
   }
-  const launched = {
-    activationId, activationRoot, args, prompt, record, recordPath, root, target,
-  }
-  if (result && Number.isInteger(result.status)) return { ...launched, status: result.status }
-  if (result && !result.error && result.signal && os.constants.signals[result.signal]) {
-    return { ...launched, status: 128 + os.constants.signals[result.signal] }
-  }
-  return { ...launched, status: 1 }
+  return finish(result)
 }
 
 function historicalLegacyAgentHashes() {
@@ -3790,7 +4165,7 @@ function inventoryIsolation(options = {}) {
   for (const entry of activations) {
     if (!entry.isDirectory() || !ACTIVATION_ID_PATTERN.test(entry.name)) continue
     try {
-      const { record } = resolveActivationRecord(root, entry.name)
+      const { record } = resolveActivationRecord(root, entry.name, { env })
       if (record.status === 'active') {
         active.push(entry.name)
         if (new Date(record.capability.expiresAt).getTime() <= Date.now()) {
@@ -3906,7 +4281,7 @@ function revokeAllActivations(options = {}) {
   for (const entry of entries) {
     if (!entry.isDirectory() || !ACTIVATION_ID_PATTERN.test(entry.name)) continue
     try {
-      const resolved = resolveActivationRecord(root, entry.name)
+      const resolved = resolveActivationRecord(root, entry.name, { env })
       if (resolved.record.status === 'active') {
         revokeActivation(resolved.recordPath, resolved.record, options.reason || 'provider-uninstalled')
         revoked += 1
@@ -4125,6 +4500,7 @@ module.exports = {
   canonicalCodexVerifiedCapabilities,
   activationCapabilityTtlSeconds,
   activationEnvelope,
+  awaitActivationChild,
   configureCodex,
   controlledNetworkProbeAddress,
   copyActivationPayload,
@@ -4137,16 +4513,20 @@ module.exports = {
   isCanonicalCodexVerifiedCapabilities,
   historicalLegacyAgentHashes,
   inspectActivationPrerequisites,
+  installWindowsSandboxIdentity,
   launchActivation,
   loadReleaseCodexTrustedPublicKeys,
   managedCodexPayload,
+  nativeCodexHomePath,
   physicalProviderRole,
   prepareActivation,
+  providerApiBaseUrl,
   projectPhysicalAgentRoleConfig,
   probeCodexCommandNetwork,
   providerRuntimeIdentity,
   proveLocalOnlySafety,
   quarantineKnownLegacy,
+  removeInactiveCodexProbeHelpers,
   requireCanonicalCodexCapabilityTrust,
   renderSecurityProfile,
   registerSupervisorRuntime,
@@ -4158,5 +4538,7 @@ module.exports = {
   stableJsonV1,
   verifyProviderAttestation,
   validateRuntimeRoleProjection,
+  verifyWindowsSandboxIdentity,
   verifyRoleProjection,
+  windowsSandboxIdentityPath,
 }

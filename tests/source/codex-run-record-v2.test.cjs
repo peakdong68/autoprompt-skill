@@ -23,6 +23,26 @@ function fixture(t, name) {
   return directory
 }
 
+test('private path bindings retain distinct adjacent 64-bit file identities', t => {
+  const directory = fs.realpathSync(fixture(t, 'exact-file-id'))
+  const exactFs = Object.create(fs)
+  let fileId = 9007199254740992n
+  exactFs.lstatSync = (filename, options) => {
+    const stat = fs.lstatSync(filename, options)
+    if (filename !== directory) return stat
+    return Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, {
+      ino: options?.bigint ? fileId : Number(fileId),
+    })
+  }
+  const first = safeRoot.inspectPathNoFollow(directory, { fsImpl: exactFs }).identity
+  fileId += 1n
+  const second = safeRoot.inspectPathNoFollow(directory, { fsImpl: exactFs }).identity
+  assert.equal(first.ino, '9007199254740992')
+  assert.equal(second.ino, '9007199254740993')
+  assert.notDeepEqual(first, second)
+  assert.equal(typeof first.mode, 'number')
+})
+
 function exitedProcessId() {
   const exited = spawnSync(process.execPath, ['-e', ''], {
     encoding: 'utf8', windowsHide: true,
@@ -277,6 +297,88 @@ test('transcript integrity reports partial crashes and missing raw objects inste
   const partial = routeTranscript.verifyRouteTranscript(other)
   assert.equal(partial.valid, false)
   assert.match(partial.reason, /incomplete trailing event/i)
+})
+
+test('incremental route append rejects same-size rewrites, truncation, and inode replacement', t => {
+  const directory = fixture(t, 'route-append-identity')
+  const cases = [
+    {
+      name: 'same-size-rewrite',
+      mutate(filename) {
+        const bytes = fs.readFileSync(filename)
+        const offset = bytes.indexOf(Buffer.from('first'))
+        assert.notEqual(offset, -1)
+        const fd = fs.openSync(filename, 'r+')
+        try { fs.writeSync(fd, Buffer.from('tsrif'), 0, 5, offset) } finally { fs.closeSync(fd) }
+      },
+    },
+    {
+      name: 'truncate',
+      mutate(filename) { fs.truncateSync(filename, fs.statSync(filename).size - 1) },
+    },
+    {
+      name: 'inode-replacement',
+      mutate(filename) {
+        const replacement = `${filename}.replacement`
+        fs.writeFileSync(replacement, fs.readFileSync(filename))
+        fs.renameSync(replacement, filename)
+      },
+    },
+  ]
+  for (const item of cases) {
+    const routeDir = path.join(directory, item.name)
+    routeTranscript.createRouteTranscript(routeDir)
+    routeTranscript.appendRouteEvent(routeDir, { id: 'first', message: 'first route event' })
+    item.mutate(path.join(routeDir, 'transcript.jsonl'))
+    assert.throws(
+      () => routeTranscript.appendRouteEvent(routeDir, { id: 'second', message: 'must fail' }),
+      error => error.code === 'RUN_RECORD_UNSAFE' && /outside the exclusive append owner/i.test(error.message),
+    )
+  }
+})
+
+test('fresh route append fully verifies persisted corruption before admitting another event', t => {
+  const directory = fixture(t, 'route-fresh-corruption')
+  const routeDir = path.join(directory, 'route')
+  routeTranscript.createRouteTranscript(routeDir)
+  routeTranscript.appendRouteEvent(routeDir, { id: 'first', message: 'complete route event' })
+  const digestPath = path.join(routeDir, 'transcript.sha256')
+  const digest = fs.readFileSync(digestPath, 'utf8')
+  fs.writeFileSync(digestPath, `${digest[0] === '0' ? '1' : '0'}${digest.slice(1)}`)
+  const modulePath = path.join(workflow, 'route-transcript.js')
+  const child = spawnSync(process.execPath, ['-e', `
+    const route = require(process.argv[1])
+    try {
+      route.appendRouteEvent(process.argv[2], { id: 'second', message: 'must fail' })
+      process.exit(0)
+    } catch (error) {
+      process.stderr.write(String(error.code) + ':' + String(error.message))
+      process.exit(3)
+    }
+  `, modulePath, routeDir], { encoding: 'utf8', timeout: 10000 })
+  assert.equal(child.status, 3, child.stderr)
+  assert.match(child.stderr, /RUN_RECORD_FAILURE:Cannot append to invalid route transcript/i)
+})
+
+test('incremental route append rejects same-size corruption of a prior raw object', t => {
+  const directory = fixture(t, 'route-object-rewrite')
+  const routeDir = path.join(directory, 'route')
+  routeTranscript.createRouteTranscript(routeDir)
+  routeTranscript.appendRouteEvent(
+    routeDir,
+    { id: 'first-object', output: 'original object bytes' },
+    { rawObjectThresholdBytes: 1 },
+  )
+  const loaded = routeTranscript.loadRouteTranscript(routeDir)
+  const objectPath = path.join(routeDir, loaded.records[0].raw_event.path)
+  const bytes = fs.readFileSync(objectPath)
+  bytes[0] ^= 1
+  const fd = fs.openSync(objectPath, 'r+')
+  try { fs.writeSync(fd, bytes, 0, bytes.length, 0) } finally { fs.closeSync(fd) }
+  assert.throws(
+    () => routeTranscript.appendRouteEvent(routeDir, { id: 'second', message: 'must fail' }),
+    error => error.code === 'RUN_RECORD_FAILURE' && /raw event object failed integrity/i.test(error.message),
+  )
 })
 
 test('run record exposes only canonical registered paths and the uppercase ROADMAP authority', t => {
@@ -1695,6 +1797,25 @@ test('secret scanning is false-positive-safe for descriptive structured metadata
   const loaded = requestEnvelope.loadRequestEnvelope(requestDir)
   assert.equal(loaded.privacy.sensitive, false)
   assert.deepEqual(loaded.privacy.findings, [])
+})
+
+test('Windows private ACL ownership follows the process token despite environment account names', {
+  skip: process.platform !== 'win32',
+}, t => {
+  const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-token-owner-')))
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+  const prior = { USERDOMAIN: process.env.USERDOMAIN, USERNAME: process.env.USERNAME }
+  try {
+    process.env.USERDOMAIN = 'AUTOPROMPT_NONEXISTENT_DOMAIN'
+    process.env.USERNAME = 'AUTOPROMPT_NONEXISTENT_USER'
+    safeRoot.ensureWindowsPrivateAcl(directory)
+    assert.doesNotThrow(() => safeRoot.auditPrivatePermissions(directory, { recurse: false }))
+  } finally {
+    for (const [key, value] of Object.entries(prior)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
 })
 
 test('permission audit rejects widened POSIX modes and mocked or real widened Windows ACLs', t => {

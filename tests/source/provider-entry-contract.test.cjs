@@ -11,7 +11,7 @@ const codexCasting = require('../../agents/codex/workflow/codex-agent-casting.js
 
 const ROOT = path.resolve(__dirname, '..', '..')
 const PROVIDERS = [
-  'claude', 'codex', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek', 'reasonix',
+  'claude', 'codex', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek', 'hermes', 'grok', 'reasonix',
 ]
 const TEXT_CONTRACT_PROVIDERS = PROVIDERS.filter(provider => !['codex', 'reasonix'].includes(provider))
 const SKILLS = new Map(PROVIDERS.map(provider => [
@@ -50,7 +50,7 @@ for (const provider of TEXT_CONTRACT_PROVIDERS) {
     const selection = { mode: 'explicit', selector: 'fixture/model', models: ['fixture/model'] }
     assert.deepEqual(configure.resolveAssignment(selection, { logicalRole: 'worker' }, provider),
       configure.resolveAssignment(selection, { logicalRole: 'route-analyst' }, provider))
-    if (['claude', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek'].includes(provider)) {
+    if (['claude', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek', 'hermes', 'grok'].includes(provider)) {
       assert.equal(configure.resolveAssignment({ ...selection, effort: 'high' },
         { logicalRole: 'worker' }, provider).effort, 'high')
     } else {
@@ -87,6 +87,9 @@ test('Codex chooser and casting behavior enforce real selector, model, and effor
   assert.deepEqual(codexConfigure.resolveSelector('off', ''), { selector: 'off', models: [], registry: '' })
   assert.deepEqual(codexConfigure.resolveSelector('gpt-5.6-sol,gpt-5.6-terra', ''), {
     selector: 'gpt-5.6-sol,gpt-5.6-terra', models: ['gpt-5.6-sol', 'gpt-5.6-terra'], registry: '',
+  })
+  assert.deepEqual(codexConfigure.resolveSelector('z-ai/glm-5.3-flash', ''), {
+    selector: 'z-ai/glm-5.3-flash', models: ['z-ai/glm-5.3-flash'], registry: '',
   })
   assert.throws(() => codexConfigure.resolveSelector('auto', ''), /absolute readable --model-map/i)
 

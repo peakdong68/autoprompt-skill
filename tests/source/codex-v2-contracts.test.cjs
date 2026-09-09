@@ -761,7 +761,7 @@ function aliasTelemetrySequenceErrors(records, recordSchema = roles.aliasTelemet
 }
 
 function assertProviderSemantics(inputProviders) {
-  const expected = ['claude', 'codex', 'deepseek', 'kilo', 'omp', 'opencode', 'prime', 'reasonix', 'vscode']
+  const expected = ['claude', 'codex', 'deepseek', 'grok', 'hermes', 'kilo', 'omp', 'opencode', 'prime', 'reasonix', 'vscode']
   assert.deepEqual(inputProviders.providers.map(({ id }) => id).sort(), expected)
   assert.equal(inputProviders.providers[0].id, 'codex')
   const capabilities = Object.keys(inputProviders.capabilityDefinitions).sort()
@@ -1342,7 +1342,7 @@ test('required-check registry supplies one acyclic graph per route, named owners
   assert.throws(() => assertGateSemantics(falseTerminationBound), /finite bound/)
 })
 
-test('provider projection is Codex-first, explicit for all nine providers, and fails closed while support is unverified', () => {
+test('provider projection is Codex-first, explicit for all eleven providers, and fails closed while support is unverified', () => {
   assertSchemaValid(providers, contractSchema(providers), 'pre-canary provider projection')
   assertProviderSemantics(providers)
   const nonCodexPending = clone(providers)
@@ -2141,7 +2141,7 @@ test('runtime accounting is hash chained, monotonic, exact by category, and snap
   assert.notDeepEqual(accountingSnapshotErrors(exceeded, accountingSnapshotSchema, second), [], 'ceiling excess fails')
 })
 
-test('plain-language lint fails forbidden prose and every user-visible code has one standalone golden description', () => {
+test('plain-language lint fails forbidden prose and every user-visible code uses an allowed standalone golden description', () => {
   assert.deepEqual(plain.instructionFields,
     ['whatToRead', 'whatToDo', 'whatNotToChange', 'howToCheck', 'whatToReturn'])
   assert.equal(plain.lintPolicy.mode, 'fail')
@@ -2178,13 +2178,24 @@ test('plain-language lint fails forbidden prose and every user-visible code has 
   assert.notDeepEqual(schemaErrors(badCode, contractSchema(plain)), [])
   const outcomeSchema = readJson(product.runtimeSchemas.outcome)
   const descriptionBranches = outcomeSchema.allOf.find(({ oneOf }) => oneOf).oneOf
-  const goldenDescriptions = new Map(descriptionBranches.map((branch) => [
-    branch.properties.code.const,
-    branch.properties.description.const,
-  ]))
+  const goldenDescriptions = new Map(descriptionBranches.map((branch) => {
+    const description = branch.properties.description
+    const allowed = description.const === undefined ? description.enum : [description.const]
+    assert.ok(Array.isArray(allowed) && allowed.length > 0,
+      `${branch.properties.code.const} has an explicit golden description`)
+    return [branch.properties.code.const, allowed]
+  }))
+  assert.deepEqual(goldenDescriptions.get('DONE'), [
+    'Every requested result passed its current required checks.',
+    'The usable requested results are preserved, but the required verification evidence is incomplete.',
+  ], 'DONE retains the explicit full and verification-limited golden descriptions')
+  for (const [code, descriptions] of goldenDescriptions) {
+    if (code !== 'DONE') assert.equal(descriptions.length, 1, `${code} retains one golden description`)
+  }
   const assertGoldenDescriptions = (contract) => {
     for (const { code, description } of contract.userVisibleCodes) {
-      assert.equal(description, goldenDescriptions.get(code), `${code} uses its golden standalone description`)
+      assert.ok(goldenDescriptions.get(code)?.includes(description),
+        `${code} uses its golden standalone description`)
     }
   }
   assertGoldenDescriptions(plain)

@@ -429,7 +429,7 @@ test('AP-TEST-028 outcome-quality gate requires non-inferior acceptance/reward a
   assert.notDeepEqual(qualitySemanticErrors(extra), [])
 })
 
-test('AP-TEST-029 nine-provider parity table fails closed without real signed canary evidence', () => {
+test('AP-TEST-029 eleven-provider parity table fails closed without real signed canary evidence', () => {
   assert.equal(providerParity.evidenceClass, 'schema-conformance-not-real-provider-canary')
   assert.equal(providerParity.realProviderCanaryRequiredForSupportedClaim, true)
   const ids = providers.providers.map(({ id }) => id).sort()

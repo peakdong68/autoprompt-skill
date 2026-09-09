@@ -1925,7 +1925,7 @@ test('Codex checker prompt removes duplicated doctrine while retaining exact obl
     'Exercise positive, negative, boundary, temporal-order, equivalence-separation, and adversarial composition cases wherever applicable; do not derive the expected result from the implementation being checked.',
       'Derive distinguishable input classes and before/at/between/after boundary witnesses from the request before inspecting the implementation; do not reuse the product\'s equivalence or ordering algorithm as the source of expected results.',
     'Bind PASS to one unique zero exit from unchanged controller-declared pre-mutation test inputs; newly created or modified harnesses never self-certify PASS. Bind a concrete product FAIL to one authenticated nonzero check. Setup, tool, dependency, or consumer unavailability is CHECK_INCONCLUSIVE or RUNTIME_FAILURE.',
-    'Return every named test outcome plus the underlying evidence IDs and independent reference method; keep large evidence in scratch and return bounded diagnostics only.',
+    "Return every named test outcome plus the underlying evidence IDs and independent reference method. evidenceIds identify only this checker's own test inputs, measured outputs, or authenticated observation artifacts; never include the frozen deliverable hash already held by the controller's immutable-version binding or identifiers, paths, or hashes of individual exact-version files. Exact-version files are the subject being checked; identify independently constructed test data or measured observations instead. A scratch-PASS confirmation must remain disjoint from primaryScratchCoverage without renaming an existing observation. Keep large evidence in scratch and return bounded diagnostics only.",
   ])
   assert.equal(
     visibleContext.fetchedEvidence.verificationObligations[0].obligationId,
@@ -3355,6 +3355,8 @@ test('checker scratch authority creates private temp roots, enables non-Git Code
   assert.match(observed.stdin, new RegExp(JSON.stringify(frozen).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   assert.match(observed.stdin, /explicit read-only or immutable mode/u)
   assert.match(observed.stdin, /verify the copy against the frozen source hash and size/u)
+  assert.match(observed.stdin, /positive integer passCount and failureCount:0/u)
+  assert.match(observed.stdin, /increment failureCount, preserve the counted summary, and exit nonzero/u)
 })
 
 test('Codex adapter ignores an early progress agent message until the final structured turn result', async t => {
@@ -3466,6 +3468,8 @@ test('Codex adapter projects canonical target paths into the private worker clon
   assert.match(observed.stdin, new RegExp(`"writableWorkspaceRoot":${JSON.stringify(privateWorkspace)}`))
   assert.match(observed.stdin, new RegExp(`"workspacePath":${JSON.stringify(path.join(privateWorkspace, 'canary.txt'))}`))
   assert.match(observed.stdin, /"reportPath":"canary\.txt"/)
+  assert.match(observed.stdin, /permission-mode change counts as a file change/)
+  assert.match(observed.stdin, /core\.filemode=false/)
   assert.ok(observed.stdin.indexOf('AUTOPROMPT_PRIVATE_WORKSPACE_PROJECTION_V1') >
     observed.stdin.indexOf('Canonical assignment:'))
 })

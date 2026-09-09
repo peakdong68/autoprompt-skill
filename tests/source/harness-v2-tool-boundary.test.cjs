@@ -135,8 +135,8 @@ test('private policy and receipt hashes reject changes rather than trusting tool
   assert.throws(() => tools.loadBoundary(bound.policyPath, bound.policySha256), { code: 'TOOL_POLICY_INVALID' })
 })
 
-test('actual MCP subprocess initializes, lists fixed tools, records a read, and denies a write', { timeout: 20000 }, async t => {
-  const f = fixture(t), bound = tools.prepareBoundary({ provider: 'claude', root: f.controller, policy: f.policy })
+for (const toolFree of [false, true]) test(`actual MCP subprocess binds tool availability and execution (toolFree=${toolFree})`, { timeout: 20000 }, async t => {
+  const f = fixture(t), bound = tools.prepareBoundary({ provider: 'claude', root: f.controller, policy: { ...f.policy, toolFree } })
   const child = cp.spawn(process.execPath, [serverFile, '--policy', bound.policyPath, '--sha256', bound.policySha256], { stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32', shell: false })
   let output = '', stderr = '', next = 1
   const pending = new Map()
@@ -160,16 +160,37 @@ test('actual MCP subprocess initializes, lists fixed tools, records a read, and 
     assert.equal(initialized.result.protocolVersion, '2025-11-25')
     child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`)
     const listed = await rpc('tools/list')
-    assert.deepEqual(listed.result.tools.map(tool => tool.name), ['read', 'list', 'search', 'write', 'edit', 'bash'])
+    assert.deepEqual(listed.result.tools.map(tool => tool.name), toolFree ? [] : ['read', 'list', 'search', 'write', 'edit', 'bash'])
     const read = await rpc('tools/call', { name: 'read', arguments: { path: 'input.txt' } })
-    assert.equal(read.result.isError, false)
-    assert.equal(read.result.structuredContent.output, 'first\nsecond\nthird\n')
+    assert.equal(read.result.isError, toolFree)
+    if (toolFree) assert.equal(read.result.structuredContent.code, 'TOOL_DENIED')
+    else assert.equal(read.result.structuredContent.output, 'first\nsecond\nthird\n')
     const denied = await rpc('tools/call', { name: 'write', arguments: { path: 'input.txt', content: 'forbidden' } })
     assert.equal(denied.result.isError, true)
-    assert.equal(denied.result.structuredContent.code, 'TOOL_PATH_DENIED')
-    assert.deepEqual(tools.readReceipts(bound).map(item => item.status), ['completed', 'failed'])
+    assert.equal(denied.result.structuredContent.code, toolFree ? 'TOOL_DENIED' : 'TOOL_PATH_DENIED')
+    assert.deepEqual(tools.readReceipts(bound).map(item => item.status), toolFree ? ['failed', 'failed'] : ['completed', 'failed'])
     const unknown = await rpc('tools/execute-any-command', {})
     assert.equal(unknown.error.code, -32601)
   } finally { child.stdin.end(); const terminal = await completion; assert.equal(terminal.code, 0, stderr) }
   assert.equal(fs.existsSync(path.join(bound.root, 'server.lock')), false)
+})
+
+
+test('zero-tool controller authority denies reads, writes and commands before effects', async t => {
+  const f = fixture(t)
+  const policy = { ...f.policy, toolFree: true }
+  const destination = path.join(f.scratch, 'forbidden.txt')
+  for (const [tool, args] of [
+    ['read', { path: path.join(f.target, 'input.txt') }],
+    ['write', { path: destination, content: 'forbidden' }],
+    ['bash', { command: `printf forbidden > ${quote(destination)}` }],
+  ]) await assert.rejects(tools.executeTool(policy, tool, args), { code: 'TOOL_DENIED' })
+  assert.equal(fs.existsSync(destination), false)
+  assert.throws(() => tools.validatePolicy({ ...f.policy, toolFree: 'true' }), { code: 'TOOL_POLICY_INVALID' })
+  const controlRoot = path.join(f.root, 'zero-tool-control')
+  fs.mkdirSync(controlRoot, { mode: 0o700 })
+  const persisted = tools.prepareBoundary({ provider: f.policy.provider, root: controlRoot, policy })
+  const reopened = tools.loadBoundary(persisted.policyPath, persisted.policySha256)
+  assert.equal(reopened.policy.toolFree, true)
+  await assert.rejects(tools.executeTool(reopened.policy, 'read', { path: 'input.txt' }), { code: 'TOOL_DENIED' })
 })

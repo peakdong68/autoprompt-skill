@@ -12,8 +12,8 @@ const test = require('node:test')
 const ROOT = path.resolve(__dirname, '..', '..')
 const LIBRARY = path.join(ROOT, 'scripts', 'install', 'lib', 'install-lib.ps1')
 const BASH_LIBRARY = path.join(ROOT, 'scripts', 'install', 'lib', 'install-lib.sh')
-const BASH = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash'
-const HAS_BASH = childProcess.spawnSync(BASH, ['--version'], { stdio: 'ignore' }).status === 0
+const BASH = require('../helpers/resolve-bash.cjs').resolveBash()
+const HAS_BASH = Boolean(BASH)
 
 function bashPath(value) {
   return value.replaceAll('\\', '/').replace(/^([A-Za-z]):/, (_, drive) => `/${drive.toLowerCase()}`)

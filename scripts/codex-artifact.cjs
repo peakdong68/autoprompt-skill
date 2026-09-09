@@ -25,6 +25,7 @@ const EXPLICIT_PACKAGE_FILES = Object.freeze([
   ['scripts/runtime-payload.cjs', 'scripts/runtime-payload.cjs'],
   ['scripts/codex-runtime-identity.cjs', 'scripts/codex-runtime-identity.cjs'],
   ['scripts/codex-configure.cjs', 'scripts/codex-configure.cjs'],
+  ['scripts/darwin-runtime-setup.cjs', 'scripts/darwin-runtime-setup.cjs'],
   ['scripts/benchmark-evidence/core.cjs', 'scripts/benchmark-evidence/core.cjs'],
   ['agents/manifests/codex-runtime.json', 'agents/manifests/codex-runtime.json'],
 ])

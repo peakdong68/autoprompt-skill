@@ -1026,6 +1026,100 @@ test('local conformance trust fails closed on forged scope and bound-state drift
   }
 })
 
+test('bound Codex runtime environment survives a poisoned ambient PATH across activation reopening', t => {
+  const context = makeCleanInstall()
+  t.after(() => fs.rmSync(context.sandbox, { recursive: true, force: true }))
+  const goodEnv = realCodexEnvironment(context.env)
+  const originalPath = process.env.PATH
+  // Keep Git available for the unrelated local-only boundary, while removing
+  // the managed native Codex directory from the process-wide ambient lookup.
+  // Every Codex identity operation below must instead use goodEnv.
+  process.env.PATH = '/usr/bin:/bin'
+  try {
+    assert.throws(() => activation.deriveCurrentCodexRuntimeIdentity(), error =>
+      error.code === 'PROVIDER_UNSUPPORTED' && /codex-cli-missing/.test(error.message),
+    )
+    const prepared = activation.prepareActivation({
+      env: goodEnv,
+      missionArgs: ['bound environment reopening proof'],
+      now: new Date('2026-08-21T12:00:00.000Z'),
+      spawnSync: probeOnlySpawn,
+      target: context.target,
+      ttlSeconds: 60,
+    })
+    assert.equal(activation.verifyProviderAttestation(prepared.record, {
+      env: goodEnv,
+      requireFresh: true,
+      now: new Date('2026-08-21T12:00:01.000Z'),
+    }), prepared.record.providerAttestation)
+    assert.deepEqual(activation.inventoryIsolation({ env: goodEnv }).activeActivations,
+      [prepared.activationId],
+      'reopening the durable activation record must resolve its native identity from the bound environment')
+    assert.equal(activation.revokeAllActivations({
+      env: goodEnv,
+      reason: 'bound-environment-reopen-proof-complete',
+    }).revoked, 1,
+    'revocation must reverify the durable activation record using the same bound environment')
+  } finally {
+    if (originalPath === undefined) delete process.env.PATH
+    else process.env.PATH = originalPath
+  }
+})
+
+test('bound Codex runtime environment reaches launch registration and resume under a poisoned ambient PATH', t => {
+  const context = makeCleanInstall()
+  t.after(() => fs.rmSync(context.sandbox, { recursive: true, force: true }))
+  const goodEnv = realCodexEnvironment(context.env)
+  const originalPath = process.env.PATH
+  process.env.PATH = '/usr/bin:/bin'
+  const spawnSync = (command, args, options) => {
+    if (command === process.execPath && args.includes('--supervisor')) {
+      assert.equal(options.env.PATH, goodEnv.PATH,
+        'the launched supervisor must inherit the explicitly bound native runtime environment')
+      return { status: 0, stderr: '', stdout: '' }
+    }
+    return probeOnlySpawn(command, args, options)
+  }
+  try {
+    const launched = activation.launchActivation({
+      env: goodEnv,
+      missionArgs: ['bound environment launch registration proof'],
+      now: new Date('2026-08-21T12:00:00.000Z'),
+      spawnSync,
+      target: context.target,
+      ttlSeconds: 60,
+    })
+    assert.equal(launched.status, 0)
+    const launchedRecord = JSON.parse(fs.readFileSync(launched.recordPath, 'utf8'))
+    assert.equal(launchedRecord.capability.status, 'revoked')
+    assert.ok(launchedRecord.supervisorRuntime,
+      'launch must pass the bound environment through registration-time durable record verification')
+
+    const resumed = activation.prepareActivation({
+      env: goodEnv,
+      missionArgs: ['bound environment launch registration proof'],
+      now: new Date('2026-08-21T12:01:01.000Z'),
+      resume: launched.activationId,
+      spawnSync,
+      target: context.target,
+      ttlSeconds: 60,
+    })
+    assert.equal(resumed.record.capability.generation, 2)
+    assert.equal(activation.verifyProviderAttestation(resumed.record, {
+      env: goodEnv,
+      requireFresh: true,
+      now: new Date('2026-08-21T12:01:02.000Z'),
+    }), resumed.record.providerAttestation)
+    assert.equal(activation.revokeAllActivations({
+      env: goodEnv,
+      reason: 'bound-environment-launch-resume-proof-complete',
+    }).revoked, 1)
+  } finally {
+    if (originalPath === undefined) delete process.env.PATH
+    else process.env.PATH = originalPath
+  }
+})
+
 test('real Codex dynamic preflight accepts the isolated qualified activation without a model call', {
   skip: process.env.AUTOPROMPT_REAL_CODEX_PREFLIGHT !== '1',
 }, t => {
@@ -1060,6 +1154,120 @@ test('real Codex dynamic preflight accepts the isolated qualified activation wit
     providerProbe: prepared.record.providerProbe,
     safetyMechanicallyEnforced: prepared.record.safety.mechanicallyEnforced,
   }))
+})
+
+test('real Codex preflight keeps native probe state private under permissive caller umasks', {
+  skip: process.platform === 'win32' || process.env.AUTOPROMPT_REAL_CODEX_PREFLIGHT !== '1',
+  concurrency: false,
+}, t => {
+  for (const callerUmask of [0o000, 0o002]) {
+    const context = makeCleanInstall()
+    t.after(() => fs.rmSync(context.sandbox, { recursive: true, force: true }))
+    const previous = process.umask(callerUmask)
+    try {
+      const prepared = activation.prepareActivation({
+        env: context.env,
+        missionArgs: [`real private preflight umask ${callerUmask.toString(8)}`],
+        target: context.target,
+      })
+      assert.equal(process.umask(), callerUmask, 'native preflight must restore the caller umask')
+      assert.doesNotThrow(() => safeRunRoot.auditPrivatePermissions(
+        prepared.activationRoot,
+        { recurse: true, allowedOwnerReadableFiles: [path.join(prepared.activationRoot, 'installation_id')] },
+      ))
+      const nativeState = fs.readdirSync(prepared.activationRoot)
+        .filter(name => /^goals_\d+\.sqlite(?:-.+)?$/.test(name))
+      assert.ok(nativeState.length > 0, 'actual Codex probe must create its native goals state')
+      for (const name of nativeState) {
+        assert.equal(fs.statSync(path.join(prepared.activationRoot, name)).mode & 0o077, 0,
+          `native state ${name} must not inherit caller umask ${callerUmask.toString(8)}`)
+      }
+      const revoked = activation.revokeAllActivations({
+        env: context.env,
+        reason: `real-private-umask-${callerUmask.toString(8)}`,
+      })
+      assert.equal(revoked.revoked, 1)
+    } finally {
+      process.umask(previous)
+    }
+  }
+})
+
+// Darwin's exact helper layout and setup-bound flock are exercised in
+// darwin-codex-probe-helper.test.cjs; these fixtures include the Linux helper.
+test('Codex removes only an exact inactive native sandbox helper bundle', {
+  skip: process.platform !== 'linux',
+}, t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-codex-arg0-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const executable = path.join(root, 'codex')
+  const bundle = path.join(root, 'activation', 'tmp', 'arg0', 'codex-arg0Abc123')
+  fs.writeFileSync(executable, '', { mode: 0o600 })
+  fs.mkdirSync(bundle, { recursive: true, mode: 0o700 })
+  fs.writeFileSync(path.join(bundle, '.lock'), '', { mode: 0o600 })
+  for (const name of ['apply_patch', 'applypatch', 'codex-execve-wrapper', 'codex-linux-sandbox']) {
+    fs.symlinkSync(executable, path.join(bundle, name))
+  }
+  const activationRoot = path.join(root, 'activation')
+  assert.equal(activation.removeInactiveCodexProbeHelpers(activationRoot, executable), 1)
+  assert.equal(fs.existsSync(bundle), false)
+  assert.doesNotThrow(() => safeRunRoot.auditPrivatePermissions(activationRoot, { recurse: true }))
+
+  fs.mkdirSync(bundle, { recursive: true, mode: 0o700 })
+  fs.writeFileSync(path.join(bundle, '.lock'), '', { mode: 0o600 })
+  for (const name of ['apply_patch', 'applypatch', 'codex-execve-wrapper', 'codex-linux-sandbox']) {
+    fs.symlinkSync(executable, path.join(bundle, name))
+  }
+  const foreign = path.join(root, 'foreign-codex')
+  fs.writeFileSync(foreign, '', { mode: 0o600 })
+  fs.unlinkSync(path.join(bundle, 'apply_patch'))
+  fs.symlinkSync(foreign, path.join(bundle, 'apply_patch'))
+  assert.throws(
+    () => activation.removeInactiveCodexProbeHelpers(activationRoot, executable),
+    /PROVIDER_UNSUPPORTED provider=codex reason=codex-probe-helper-binding-invalid/,
+  )
+  assert.equal(fs.lstatSync(path.join(bundle, 'apply_patch')).isSymbolicLink(), true,
+    'a foreign link must remain for the strict audit rather than being deleted')
+  assert.throws(() => safeRunRoot.auditPrivatePermissions(activationRoot, { recurse: true }),
+    /Private path is linked/)
+})
+
+test('Codex refuses to remove a native helper bundle while its flock is held', {
+  skip: process.platform !== 'linux' || childProcess.spawnSync('python3', ['-I', '-S', '-c',
+    'import fcntl'], { stdio: 'ignore' }).status !== 0,
+}, async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-codex-arg0-held-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const executable = path.join(root, 'codex')
+  const bundle = path.join(root, 'activation', 'tmp', 'arg0', 'codex-arg0Held123')
+  const lock = path.join(bundle, '.lock')
+  fs.writeFileSync(executable, '', { mode: 0o600 })
+  fs.mkdirSync(bundle, { recursive: true, mode: 0o700 })
+  fs.writeFileSync(lock, '', { mode: 0o600 })
+  for (const name of ['apply_patch', 'applypatch', 'codex-execve-wrapper', 'codex-linux-sandbox']) {
+    fs.symlinkSync(executable, path.join(bundle, name))
+  }
+  const holder = childProcess.spawn('python3', ['-I', '-S', '-c', [
+    'import fcntl, sys, time',
+    'handle = open(sys.argv[1], "r+")',
+    'fcntl.flock(handle, fcntl.LOCK_EX)',
+    'print("ready", flush=True)',
+    'time.sleep(30)',
+  ].join('\n'), lock], { stdio: ['ignore', 'pipe', 'ignore'] })
+  t.after(() => { try { holder.kill('SIGTERM') } catch {} })
+  await new Promise((resolve, reject) => {
+    holder.once('error', reject)
+    holder.stdout.once('data', resolve)
+  })
+  assert.throws(
+    () => activation.removeInactiveCodexProbeHelpers(path.join(root, 'activation'), executable),
+    /PROVIDER_UNSUPPORTED provider=codex reason=codex-probe-helper-lock-busy/,
+  )
+  assert.equal(fs.existsSync(bundle), true, 'the held bundle must remain intact')
+  holder.kill('SIGTERM')
+  await new Promise(resolve => holder.once('close', resolve))
+  assert.equal(activation.removeInactiveCodexProbeHelpers(path.join(root, 'activation'), executable), 1)
+  assert.equal(fs.existsSync(bundle), false)
 })
 
 test('receipt-bound migration quarantines only hash-known global roles and preserves foreign collisions', t => {

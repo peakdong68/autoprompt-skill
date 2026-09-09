@@ -5,6 +5,7 @@ const test = require('node:test')
 const { usageReceipt } = require('../../scripts/harness-v2-bridge/vscode/owned-session.cjs')
 const { sanitize } = require('../../scripts/harness-v2-vscode-config.cjs')
 const native = require('../../scripts/harness-v2-native.cjs')
+const boundary = require('../../scripts/harness-v2-tool-boundary.cjs')
 const { HarnessEventStream } = require('../../scripts/harness-v2-transport.cjs')
 
 test('owned VS Code usage retains exact billed categories and rejects inconsistent receipts', () => {
@@ -25,9 +26,50 @@ test('owned VS Code connection cannot silently load executable providers or unsa
   const connection = sanitize({ model: 'test', ignoredExecutable: '/tmp/untrusted', maxTokens: 64 })
   assert.equal(connection.baseUrl, 'https://openrouter.ai/api/v1')
   assert.equal(connection.ignoredExecutable, undefined)
-  for (const value of [{ baseUrl: 'http://example.com/v1' }, { baseUrl: 'https://user:secret@example.com/v1' }, { apiKeyEnv: 'PATH' }, { maxSteps: 129 }, { maxTokens: -1 }, { timeoutMs: Infinity }, { reasoningEffort: 'invented' }]) {
+  assert.equal(connection.supportsStructuredOutput, false)
+  assert.equal(sanitize({ model: 'test', supportsStructuredOutput: true }).supportsStructuredOutput, true)
+  // A controller may grant a longer session only within the closed six-minute
+  // bound. This keeps the public harness from silently falling back to the
+  // native two-minute default during a real checker turn.
+  assert.equal(sanitize({ model: 'test', timeoutMs: 600000 }).timeoutMs, 600000)
+  for (const value of [{ baseUrl: 'http://example.com/v1' }, { baseUrl: 'https://user:secret@example.com/v1' }, { apiKeyEnv: 'PATH' }, { maxSteps: 129 }, { maxTokens: -1 }, { timeoutMs: Infinity }, { reasoningEffort: 'invented' }, { supportsStructuredOutput: 'yes' }]) {
     assert.throws(() => sanitize(value), { code: 'PROFILE_INVALID' })
   }
+})
+
+test('owned VS Code launch uses a controller-bounded session timeout without overriding an explicit cap', t => {
+  const fs = require('node:fs'), os = require('node:os'), path = require('node:path'), crypto = require('node:crypto')
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ap-vscode-timeout-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const target = path.join(root, 'target'), scratch = path.join(root, 'scratch'), control = path.join(root, 'control')
+  for (const directory of [target, scratch, control]) fs.mkdirSync(directory, { mode: 0o700 })
+  const toolBoundary = boundary.prepareBoundary({ provider: 'vscode', root: control, policy: {
+    activationId: 'test', sessionId: 'session', reservationId: 'reservation', readOnly: false,
+    targetPath: target, scratchPath: scratch, readableRoots: [target, scratch], writableRoots: [target, scratch],
+    nestedDispatch: false, commandBoundary: true, externalWrites: false,
+  } })
+  const launch = (connection, outputSchema) => {
+    const home = path.join(root, crypto.randomUUID()); fs.mkdirSync(home, { mode: 0o700 })
+    return native.createLaunch({ provider: 'vscode', home, sessionRoot: path.join(root, 'session'), cwd: target, targetPath: target,
+      prompt: 'controller prompt', input: '{}', readOnly: false, toolBoundary, connection, environment: {}, ...(outputSchema ? { outputSchema } : {}) })
+  }
+  const sessionTimeout = connection => JSON.parse(fs.readFileSync(launch(connection).env.AUTOPROMPT_VSCODE_OWNED_REQUEST, 'utf8')).connection.timeoutMs
+  assert.equal(sessionTimeout({ model: 'fixture' }), 600000)
+  assert.equal(sessionTimeout({ model: 'fixture', timeoutMs: 180000 }), 180000)
+  const structured = launch({ model: 'fixture', supportsStructuredOutput: true, timeoutMs: 180000, environment: {} }, { type: 'object', additionalProperties: false })
+  const request = JSON.parse(fs.readFileSync(structured.env.AUTOPROMPT_VSCODE_OWNED_REQUEST, 'utf8'))
+  assert.deepEqual(request.outputSchema, { type: 'object', additionalProperties: false })
+})
+
+test('production VS Code connection defaults to the bounded checker session budget', t => {
+  const fs = require('node:fs'), os = require('node:os'), path = require('node:path')
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ap-vscode-production-timeout-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const configure = value => fs.writeFileSync(path.join(root, 'models.json'), JSON.stringify(value), { mode: 0o600 })
+  configure({ model: 'fixture' })
+  assert.equal(native.connectionConfig('vscode', root, {}).timeoutMs, 600000)
+  configure({ model: 'fixture', timeoutMs: 180000 })
+  assert.equal(native.connectionConfig('vscode', root, {}).timeoutMs, 180000)
 })
 
 test('owned VS Code stream never accepts built-in chat identities, foreign tools or duplicate billing', () => {

@@ -3,6 +3,7 @@
 const path = require('node:path')
 const { readBound, sha256, ReasonixError } = require('./native.js')
 const { verifyCapabilityAttestation } = require('../../codex/workflow/router.js')
+const localCanary = require('../../../scripts/harness-v2-canary.cjs')
 
 const REQUIRED = Object.freeze(['isolation', 'topologyEnforcement', 'privateSkillRoot', 'eventStreaming', 'toolOutputCapture', 'stableChildIdentity', 'sameContextContinuation', 'cancellation', 'isolatedChecking', 'processOwnership', 'modelRouting'])
 const HASH = /^[a-f0-9]{64}$/
@@ -11,13 +12,55 @@ function importedTrustDirectory(root) { return path.join(path.resolve(root), '.a
 // Release conformance is independent of this activation. A local hash is an
 // integrity binding, never evidence that a provider capability was verified.
 function runtimeIdentityBody(installed, executable) {
-  const files = Object.fromEntries(Object.entries(installed.files).filter(([file]) =>
-    !/reasonix-(live-conformance-evidence|trusted-public-keys)\.json$/.test(file)))
-  return { provider: 'reasonix', executableSha256: executable.sha256,
+  const dependencies = executable?.runtimeIdentity
+  if (installed?.provider !== 'reasonix' || executable?.provider !== 'reasonix' ||
+      !path.isAbsolute(executable.path || '') || !HASH.test(executable.sha256 || '') ||
+      typeof executable.version !== 'string' || !installed.files || Array.isArray(installed.files) ||
+      !dependencies || !HASH.test(dependencies.sha256 || '') ||
+      !Number.isSafeInteger(dependencies.fileCount) || dependencies.fileCount < 1 ||
+      !Number.isSafeInteger(dependencies.packageCount) || dependencies.packageCount < 0) {
+    throw new ReasonixError('PROVIDER_IDENTITY_MISMATCH', 'Reasonix admission requires the complete installed and native runtime identity')
+  }
+  const excluded = new Set(['agents/contracts/reasonix-live-conformance-evidence.json', 'agents/contracts/reasonix-trusted-public-keys.json'])
+  const files = Object.fromEntries(Object.entries(installed.files).filter(([file]) => !excluded.has(file))
+    .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0))
+  for (const [file, hash] of Object.entries(files)) {
+    if (path.isAbsolute(file) || file.includes('\\') || file.includes(':') ||
+        file.split('/').some(part => !part || part === '.' || part === '..') || !HASH.test(hash)) {
+      throw new ReasonixError('PAYLOAD_INVALID', 'Reasonix runtime inventory contains an invalid path or digest')
+    }
+  }
+  return { provider: 'reasonix', executablePath: executable.path, executableSha256: executable.sha256,
+    nativeRuntimeIdentity: { sha256: dependencies.sha256, fileCount: dependencies.fileCount, packageCount: dependencies.packageCount },
     version: executable.version, platform: process.platform, architecture: process.arch, files }
 }
 
 function runtimeIdentity(installed, executable) { return sha256(JSON.stringify(runtimeIdentityBody(installed, executable))) }
+
+const REVIEWED_LOCAL_EVIDENCE = 'scripts/harness-v2-trust/evidence.json'
+function reviewedLocalPending(installed, executable, options = {}) {
+  let evidence
+  try { evidence = JSON.parse(readBound(path.join(installed.bundle, REVIEWED_LOCAL_EVIDENCE))) } catch { return null }
+  if (evidence?.reviewedLocalRecords === undefined) return null
+  if (!Array.isArray(evidence.reviewedLocalRecords)) throw new ReasonixError('PROVIDER_UNSUPPORTED', 'Reasonix reviewed-local release records are invalid')
+  try {
+    const review = localCanary.selectReview(evidence.reviewedLocalRecords, 'reasonix', installed, executable)
+    return review ? localCanary.verifyReview(review, 'reasonix', installed, executable, options.now) : null
+  }
+  catch (error) { throw new ReasonixError('PROVIDER_UNSUPPORTED', `Reasonix reviewed-local release record is rejected: ${error.message}`) }
+}
+// This legacy placeholder proves neither capability nor trust. It only gates
+// the reviewed-local pending path when no private import was supplied.
+function awaitingIndependentConformance(installed) {
+  let evidence, ring
+  try {
+    evidence = JSON.parse(readBound(path.join(installed.bundle, 'agents/contracts/reasonix-live-conformance-evidence.json')))
+    ring = JSON.parse(readBound(path.join(installed.bundle, 'agents/contracts/reasonix-trusted-public-keys.json')))
+  } catch { return false }
+  return Boolean(evidence?.schemaVersion === 'reasonix-live-conformance-evidence.v1' && evidence.providerId === 'reasonix' &&
+    evidence.status === 'awaiting-independent-conformance' && evidence.attestation === null && evidence.activationNonce === null &&
+    ring?.schemaVersion === 1 && ring.providerId === 'reasonix' && Array.isArray(ring.keys) && ring.keys.length === 0)
+}
 
 function verifyAdmission(installed, executable, options = {}) {
   const imported = options.trustDirectory
@@ -52,4 +95,4 @@ function verifyAdmission(installed, executable, options = {}) {
       evidenceSha256: sha256(evidenceBytes), keyRingSha256: sha256(keyBytes), ...(imported ? { conformanceRequestSha256: options.conformanceRequestSha256 } : {}) } }
 }
 
-module.exports = { REQUIRED, runtimeIdentityBody, runtimeIdentity, importedTrustDirectory, verifyAdmission }
+module.exports = { REQUIRED, REVIEWED_LOCAL_EVIDENCE, runtimeIdentityBody, runtimeIdentity, importedTrustDirectory, reviewedLocalPending, awaitingIndependentConformance, verifyAdmission }

@@ -8,6 +8,7 @@ const crypto = require('node:crypto')
 const boundary = require('../../harness-v2-tool-boundary.cjs')
 const NAMES = Object.freeze(boundary.TOOLS.map(tool => `autoprompt_owned_${tool.name}`))
 const fail = (code, message) => { throw new boundary.BoundaryError(code, message) }
+const object = value => value !== null && typeof value === 'object' && !Array.isArray(value)
 
 function privateState(state, paths = []) {
   for (const file of [state.root, ...paths.filter(Boolean)]) {
@@ -68,7 +69,7 @@ function openController(provider, environment = process.env) {
       let actualResult
       try {
         const current = check()
-        actualResult = await boundary.executeTool(current.policy, tool, args, { signal: controller.signal })
+        actualResult = await boundary.executeTool(current.policy, tool, args, { signal: controller.signal, controlRoot: current.root })
       } catch (error) {
         // Do not echo host paths/stack traces from filesystem errors into context.
         const code = error instanceof boundary.BoundaryError ? error.code : 'TOOL_FAILED'
@@ -109,6 +110,63 @@ function parameters(Type, schema) {
   return Type.Object(properties, { additionalProperties: false })
 }
 
+function openAIResponseFormat(state, environment = process.env) {
+  const schemaPath = environment.AUTOPROMPT_PI_OUTPUT_SCHEMA
+  const expectedHash = environment.AUTOPROMPT_PI_OUTPUT_SCHEMA_SHA256
+  if (schemaPath === undefined && expectedHash === undefined) return null
+  if (typeof schemaPath !== 'string' || !path.isAbsolute(schemaPath) ||
+      typeof expectedHash !== 'string' || !/^[a-f0-9]{64}$/u.test(expectedHash)) {
+    fail('PROFILE_INVALID', 'Pi output schema binding is invalid')
+  }
+  const real = boundary.physical(schemaPath)
+  privateState(state, [real])
+  const bytes = fs.readFileSync(real)
+  if (bytes.length > 256 * 1024 || crypto.createHash('sha256').update(bytes).digest('hex') !== expectedHash) {
+    fail('PROFILE_INVALID', 'Pi output schema binding changed')
+  }
+  let schema
+  try { schema = JSON.parse(bytes.toString('utf8')) } catch { fail('PROFILE_INVALID', 'Pi output schema is invalid JSON') }
+  if (!object(schema)) fail('PROFILE_INVALID', 'Pi output schema must be an object')
+  return Object.freeze({ type: 'json_schema', json_schema: { name: 'autoprompt_result', strict: true, schema } })
+}
+
+function openAIOutputCap(environment = process.env) {
+  const field = environment.AUTOPROMPT_PI_OUTPUT_CAP_FIELD
+  const rawValue = environment.AUTOPROMPT_PI_OUTPUT_CAP_VALUE
+  if (field === undefined && rawValue === undefined) return null
+  if (field !== undefined && !['max_tokens', 'max_completion_tokens'].includes(field) || typeof rawValue !== 'string' ||
+      !/^[1-9][0-9]{0,15}$/u.test(rawValue)) fail('PROFILE_INVALID', 'Pi output cap binding is invalid')
+  const value = Number(rawValue)
+  if (!Number.isSafeInteger(value) || value <= 0) fail('PROFILE_INVALID', 'Pi output cap binding is invalid')
+  return Object.freeze({ field: field || null, value })
+}
+
+function bindOpenAIResponseFormat(payload, responseFormat, outputCap = null) {
+  if (!object(responseFormat) && !outputCap) return payload
+  // Prime and OMP are reviewed only for their OpenAI Chat Completions request
+  // dialect.  The relay independently refuses any other wire shape when this
+  // controller binding is required; native extension exceptions are logged by
+  // both CLIs and cannot be treated as a request denial.
+  if (!object(payload) || !Array.isArray(payload.messages) || Object.hasOwn(payload, 'input')) {
+    fail('PROVIDER_UNSUPPORTED', 'Pi structured output supports only OpenAI Chat Completions payloads')
+  }
+  const existingCaps = ['max_tokens', 'max_completion_tokens'].filter(field => Object.hasOwn(payload, field))
+  let cap = null
+  if (outputCap) {
+    if (existingCaps.length > 1) fail('PROVIDER_UNSUPPORTED', 'Pi native request has ambiguous output caps')
+    if (existingCaps.length === 1) {
+      const field = existingCaps[0], value = payload[field]
+      if (!Number.isSafeInteger(value) || value <= 0) fail('PROVIDER_UNSUPPORTED', 'Pi native output cap is invalid')
+      cap = { field, value: Math.min(value, outputCap.value) }
+    } else {
+      if (!outputCap.field) fail('PROVIDER_UNSUPPORTED', 'Pi native request omitted its output cap and the selected model has no bound wire field')
+      cap = outputCap
+    }
+  }
+  return { ...payload, ...(object(responseFormat) ? { response_format: structuredClone(responseFormat) } : {}),
+    ...(cap ? { [cap.field]: cap.value } : {}) }
+}
+
 function install(pi, provider, Type, environment = process.env) {
   let controller, ready = false, context, activation, stopped = false
   const close = async () => {
@@ -124,9 +182,11 @@ function install(pi, provider, Type, environment = process.env) {
     try { ctx?.abort()?.catch?.(() => {}) } catch {}
     try { ctx?.shutdown() } catch {}
   }
+  const allowedTools = () => controller?.state.policy.toolFree === true ? [] : NAMES
   const exactTools = () => {
     const active = pi.getActiveTools()
-    return active.length === NAMES.length && active.every(name => NAMES.includes(name))
+    const allowed = allowedTools()
+    return active.length === allowed.length && active.every(name => allowed.includes(name))
   }
   const activate = (_event, ctx) => {
     context = ctx
@@ -146,7 +206,7 @@ function install(pi, provider, Type, environment = process.env) {
         if (!controller) controller = openController(provider, environment)
         if (controller.closing) fail('TOOL_CLOSED', 'Controller is closed')
         privateState(controller.check(), [ctx.cwd, ctx.sessionManager?.getSessionFile?.(), environment.HOME])
-        await pi.setActiveTools([...NAMES])
+        await pi.setActiveTools([...allowedTools()])
         if (stopped || controller.closing) fail('TOOL_CLOSED', 'Controller closed during native activation')
         if (!exactTools()) fail('TOOL_DENIED', 'Native tool activation did not honor the fixed surface')
         ready = true
@@ -158,7 +218,7 @@ function install(pi, provider, Type, environment = process.env) {
   }
   pi.on('tool_call', async event => {
     try { if (activation) await activation } catch { /* A failed activation stays closed. */ }
-    if (!ready || controller?.closing || !NAMES.includes(event.toolName)) {
+    if (!ready || controller?.closing || !allowedTools().includes(event.toolName)) {
       return { block: true, reason: 'TOOL_DENIED: Only the assigned controller tools are available' }
     }
   })
@@ -180,6 +240,10 @@ function install(pi, provider, Type, environment = process.env) {
     // the error flag while preserving the committed JSON, including denials.
     return { content: [{ type: 'text', text: JSON.stringify(actualResult) }],
       details: event.details, isError: actualResult.status !== 'completed' }
+  })
+  pi.on('before_provider_request', event => {
+    if (!controller) fail('TOOL_DENIED', 'Pi controller is not active')
+    return bindOpenAIResponseFormat(event?.payload, openAIResponseFormat(controller.state, environment), openAIOutputCap(environment))
   })
   for (const tool of boundary.TOOLS) pi.registerTool({
     name: `autoprompt_owned_${tool.name}`, label: `Controller ${tool.name}`,
@@ -220,4 +284,4 @@ function install(pi, provider, Type, environment = process.env) {
   })
   return { close, get controller() { return controller } }
 }
-module.exports = { NAMES, privateState, openController, parameters, install }
+module.exports = { NAMES, privateState, openController, parameters, openAIResponseFormat, openAIOutputCap, bindOpenAIResponseFormat, install }

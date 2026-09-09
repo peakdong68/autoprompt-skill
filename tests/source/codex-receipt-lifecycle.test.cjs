@@ -13,14 +13,12 @@ const ROOT = path.resolve(__dirname, '..', '..')
 const LIBRARY_PS1 = path.join(ROOT, 'scripts', 'install', 'lib', 'install-lib.ps1')
 const LIBRARY_SH = path.join(ROOT, 'scripts', 'install', 'lib', 'install-lib.sh')
 const POWERSHELL = process.platform === 'win32' ? 'powershell.exe' : 'pwsh'
-const BASH = process.platform === 'win32'
-  ? 'C:\\Program Files\\Git\\bin\\bash.exe'
-  : 'bash'
+const BASH = require('../helpers/resolve-bash.cjs').resolveBash()
 const HAS_POWERSHELL = childProcess.spawnSync(
   POWERSHELL,
   ['-NoProfile', '-NonInteractive', '-Command', '$PSVersionTable.PSVersion.ToString()'],
 ).status === 0
-const HAS_BASH = childProcess.spawnSync(BASH, ['--version']).status === 0
+const HAS_BASH = Boolean(BASH)
 
 function sha256(bytes) {
   return crypto.createHash('sha256').update(bytes).digest('hex')
@@ -70,6 +68,47 @@ function createReceiptFixture(prefix, drift = true, fingerprinted = true) {
   }, null, 2)}\n`)
   if (drift) fs.appendFileSync(managed, 'user-owned drift\n')
   return { sandbox, root, managed, manifest, receipt }
+}
+
+function createCodexBundleReceiptFixture(prefix, manifestIndex, shared = false) {
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
+  const root = path.join(sandbox, 'codex-root')
+  const manifest = path.join(root, '.autoprompt-install-hashes.json')
+  const receipt = path.join(root, '.autoprompt-install-receipt.json')
+  const bundle = path.join(root, '.autoprompt-private', 'bundles',
+    'codex-v2.0.0-0123456789abcdef')
+  const runtimeManifest = path.join(bundle, 'skills', 'autoprompt', '.autoprompt-runtime-manifest.json')
+  const pristine = path.join(bundle, 'scripts', 'local-only-safety.cjs')
+  const drifted = path.join(bundle, 'scripts', 'drifted-safety.cjs')
+  const other = path.join(root, 'other-provider', 'receipt-owned.txt')
+  const owned = new Map([
+    [runtimeManifest, Buffer.from('{"runtime":"fixture"}\n')],
+    [pristine, Buffer.from('pristine bundle payload\n')],
+    [drifted, Buffer.from('original driftable bundle payload\n')],
+  ])
+  for (const [file, bytes] of owned) {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, bytes)
+  }
+  fs.appendFileSync(drifted, 'user-owned drift\n')
+  fs.writeFileSync(manifest, serializeHashManifest([...owned].map(([file, bytes]) => [file, sha256(bytes)])))
+  const files = [...owned.keys()]
+  files.splice(manifestIndex, 0, manifest)
+  if (shared) {
+    fs.mkdirSync(path.dirname(other), { recursive: true })
+    fs.writeFileSync(other, 'other provider owns this receipt entry\n')
+    files.push(other)
+  }
+  fs.writeFileSync(receipt, `${JSON.stringify({
+    nonce: 'codex-bundle-order-test',
+    backup: null,
+    files,
+    createdDirectories: [],
+    ompManaged: false,
+    ompDetachedRoot: null,
+    configEdits: [],
+  }, null, 2)}\n`)
+  return { sandbox, root, manifest, receipt, runtimeManifest, pristine, drifted, other }
 }
 
 function createUpdateFixture(prefix, transform = value => value) {
@@ -130,6 +169,41 @@ test('PowerShell Codex uninstall preserves drift and relinquishes receipt owners
     '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command,
   ], { encoding: 'utf8', timeout: 30000 })
   assertRelinquished(fixture, completed, 1)
+})
+
+test('PowerShell Codex uninstall keeps manifest fingerprints across receipt order and retains only drift', {
+  skip: !HAS_POWERSHELL,
+}, t => {
+  for (const [name, manifestIndex, shared] of [
+    ['manifest-first', 0, false],
+    ['manifest-middle', 2, false],
+    ['shared-provider', 0, true],
+  ]) {
+    const fixture = createCodexBundleReceiptFixture(`autoprompt-codex-bundle-${name}-`, manifestIndex, shared)
+    t.after(() => fs.rmSync(fixture.sandbox, { recursive: true, force: true }))
+    const command = [
+      `. ${psLiteral(LIBRARY_PS1)}`,
+      `$code = Uninstall-Client -ConfigRoot ${psLiteral(fixture.root)} -Name 'codex'`,
+      'exit $code',
+    ].join('; ')
+    const completed = childProcess.spawnSync(POWERSHELL, [
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command,
+    ], { encoding: 'utf8', timeout: 30000 })
+    assert.equal(completed.status, 0, `${name}\n${completed.stdout}\n${completed.stderr}`)
+    assert.equal(fs.existsSync(fixture.runtimeManifest), false, `${name}: runtime manifest should be removed`)
+    assert.equal(fs.existsSync(fixture.pristine), false, `${name}: pristine bundle byte should be removed`)
+    assert.equal(fs.existsSync(fixture.drifted), true, `${name}: drifted bundle byte should be retained`)
+    assert.match(fs.readFileSync(fixture.drifted, 'utf8'), /user-owned drift/)
+    assert.match(completed.stdout, new RegExp(`uninstall-retained=${fixture.drifted.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')} reason=hash-drift ownership=relinquished`))
+    assert.doesNotMatch(completed.stdout, /reason=unfingerprinted/)
+    assert.equal(fs.existsSync(fixture.manifest), shared, `${name}: global manifest scoped retention differs`)
+    assert.equal(fs.existsSync(fixture.receipt), shared, `${name}: receipt scoped retention differs`)
+    assert.equal(fs.existsSync(fixture.other), shared, `${name}: other provider file scoped retention differs`)
+    if (shared) {
+      assert.deepEqual(JSON.parse(fs.readFileSync(fixture.receipt, 'utf8')).files,
+        [fixture.other, fixture.manifest])
+    }
+  }
 })
 
 test('PowerShell Codex receipt readers split canonical LF documents and retain strict grammar rejection', {
@@ -326,4 +400,73 @@ test('Codex receipt writers embed prior-manifest and per-file hashes accepted by
     assert.equal(completed.status, 0, `${port}\n${completed.stdout}\n${completed.stderr}`)
     assert.equal(fs.existsSync(fixture.receipt), false)
   }
+})
+
+test('PowerShell receipt writer reads one strict manifest for many files and retains malformed-manifest refusal', {
+  skip: !HAS_POWERSHELL,
+}, t => {
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-receipt-index-'))
+  t.after(() => fs.rmSync(sandbox, { recursive: true, force: true }))
+  const root = path.join(sandbox, 'root')
+  const files = Array.from({ length: 80 }, (_, index) => path.join(root, 'skills', `file-${index}.txt`))
+  const badManifest = `{\n    "dup": "${'a'.repeat(64)}",\n    "dup": "${'b'.repeat(64)}"\n}\n`
+  for (const [index, file] of files.entries()) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `payload ${index}\n`) }
+  const manifest = path.join(root, '.autoprompt-install-hashes.json')
+  fs.writeFileSync(manifest, serializeHashManifest(files.map(file => [file, sha256(fs.readFileSync(file))])))
+  const psFiles = files.map((file, index) => index % 2 ? psLiteral(path.relative(root, file)) : psLiteral(file)).join(',')
+  const expectedHashes = files.map((file, index) => `${index % 2 ? path.relative(root, file) : file}=${sha256(fs.readFileSync(file))}`)
+  const command = [
+    '$ErrorActionPreference = "Stop"',
+    `. ${psLiteral(LIBRARY_PS1)}`,
+    '$script:manifestReads = 0; $script:originalManifestReader = (Get-Command Read-IdemManifestEntries -CommandType Function).ScriptBlock',
+    'function Read-IdemManifestEntries { param([string]$ConfigRoot) $script:manifestReads++; & $script:originalManifestReader @PSBoundParameters }',
+    `$files = @(${psFiles})`,
+    `$code = Write-Receipt -ConfigRoot ${psLiteral(root)} -Nonce indexed -Files $files; if ($code -ne 0) { exit $code }`,
+    'if ($script:manifestReads -ne 1) { throw "manifest reads=$script:manifestReads" }',
+    `$receipt = Get-Content -LiteralPath ${psLiteral(path.join(root, '.autoprompt-install-receipt.json'))} -Raw | ConvertFrom-Json`,
+    `$expected = @(${expectedHashes.map(psLiteral).join(',')})`,
+    'if (@($receipt.fileSha256).Count -ne $expected.Count) { throw "receipt hash count differs" }; for ($i = 0; $i -lt $expected.Count; $i++) { if ([string]$receipt.fileSha256[$i] -cne [string]$expected[$i]) { throw "receipt hash differs at index $i" } }',
+    `$before = [IO.File]::ReadAllBytes(${psLiteral(path.join(root, '.autoprompt-install-receipt.json'))})`,
+    `$bad = ${psLiteral(badManifest)}`,
+    `[IO.File]::WriteAllText(${psLiteral(manifest)}, $bad, (New-Object Text.UTF8Encoding($false)))`,
+    'try { Write-Receipt -ConfigRoot ' + psLiteral(root) + ' -Nonce malformed -Files $files | Out-Null; throw "accepted malformed manifest" } catch { if ($_.Exception.Message -eq "accepted malformed manifest") { throw } }',
+    `$after = [IO.File]::ReadAllBytes(${psLiteral(path.join(root, '.autoprompt-install-receipt.json'))}); if ([Convert]::ToBase64String($before) -cne [Convert]::ToBase64String($after)) { throw 'receipt changed after malformed manifest' }`,
+  ].join('; ')
+  const result = childProcess.spawnSync(POWERSHELL, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], { encoding: 'utf8', timeout: 30000 })
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+})
+
+test('PowerShell receipt arrays normalize each candidate once while retaining duplicate rules', {
+  skip: !HAS_POWERSHELL,
+}, t => {
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-receipt-array-index-'))
+  t.after(() => fs.rmSync(sandbox, { recursive: true, force: true }))
+  const values = Array.from({ length: 80 }, (_, index) => path.join(sandbox, 'files', `entry-${index}.txt`))
+  const psArray = (member, entries) => [
+    `  "${member}": [`,
+    ...entries.map((entry, index) => `    ${JSON.stringify(entry)}${index + 1 < entries.length ? ',' : ''}`),
+    '  ],',
+  ].map(psLiteral).join(',')
+  const canonical = path.join(sandbox, 'files', 'identity.txt')
+  const alternate = `${path.dirname(canonical)}${path.sep}nested${path.sep}..${path.sep}${path.basename(canonical)}`
+  const command = [
+    "$ErrorActionPreference = 'Stop'",
+    `. ${psLiteral(LIBRARY_PS1)}`,
+    `$values = @(${psArray('files', values)})`,
+    '$script:normalizations = 0; $script:realNormalizer = (Get-Command Get-IdemNormalizedPath -CommandType Function).ScriptBlock',
+    'function Get-IdemNormalizedPath { param([string]$Path) $script:normalizations++; & $script:realNormalizer @PSBoundParameters }',
+    "$parsed = Read-ReceiptStringArray -Lines $values -Index 0 -Member 'files' -Suffix ','",
+    `if ($parsed.Values.Count -ne ${values.length} -or $script:normalizations -ne ${values.length}) { throw "linear normalization failed count=$($script:normalizations)" }`,
+    `$identity = @(${psArray('files', [canonical, alternate])})`,
+    "$identityFailure = ''; try { Read-ReceiptStringArray -Lines $identity -Index 0 -Member 'files' -Suffix ',' | Out-Null } catch { $identityFailure = $_.Exception.Message }; if ($identityFailure -cne 'duplicate receipt path identity') { throw \"identity duplicate result=$identityFailure\" }",
+    `$exact = @(${psArray('files', ['', ''])})`,
+    "$exactFailure = ''; try { Read-ReceiptStringArray -Lines $exact -Index 0 -Member 'files' -Suffix ',' | Out-Null } catch { $exactFailure = $_.Exception.Message }; if ($exactFailure -cne 'duplicate receipt path spelling') { throw \"exact duplicate result=$exactFailure\" }",
+    `$hashBindings = @(${psArray('fileSha256', [`${canonical}=${'a'.repeat(64)}`, `${canonical}=${'b'.repeat(64)}`])})`,
+    "$hashParsed = Read-ReceiptStringArray -Lines $hashBindings -Index 0 -Member 'fileSha256' -Suffix ','",
+    "if ($hashParsed.Values.Count -ne 2) { throw 'fileSha256 values were reinterpreted' }",
+  ].join('; ')
+  const result = childProcess.spawnSync(POWERSHELL, [
+    '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command,
+  ], { encoding: 'utf8', timeout: 30000 })
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
 })

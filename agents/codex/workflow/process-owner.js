@@ -628,6 +628,34 @@ class ProcessOwner {
     return this.terminalRecords.get(ownershipId)
   }
 
+  // A caller may learn that a payload child has completed before the owned
+  // launcher which reports that payload has actually exited.  Do not turn that
+  // payload notification into root-exit evidence: the root must first be
+  // absent from the adapter's owned membership snapshot.  Descendants may
+  // still be present at that point; observeRootExit will drain those under the
+  // existing identity checks.
+  async awaitRootExit(ownershipId, timeoutMs = 1000) {
+    const record = this._group(ownershipId)
+    if (record.status !== 'RUNNING') return this.terminalRecords.get(ownershipId) || null
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0) {
+      fail('PROCESS_OWNER_CONFIG_INVALID', 'root-exit wait timeout is invalid')
+    }
+    const started = this.monotonicMs()
+    const maximumPolls = Math.ceil(timeoutMs / Math.max(1, this.pollMs)) + 1
+    for (let polls = 0; polls < maximumPolls; polls += 1) {
+      const members = await this._adapterCall('listOwned', record.groupIdentity)
+      if (!members.includes(record.rootPid)) return canonicalize(members)
+      if (Math.max(0, this.monotonicMs() - started) >= timeoutMs) break
+      await this.wait(this.pollMs)
+    }
+    fail('PROCESS_DRAIN_TIMEOUT', 'owned root did not exit after its completion was reported', {
+      ownershipId: record.ownershipId,
+      groupIdentity: record.groupIdentity,
+      rootPid: record.rootPid,
+      timeoutMs,
+    })
+  }
+
   async cancelAll(options = {}) {
     let recoveryError = null
     try {
@@ -673,18 +701,13 @@ class ProcessOwner {
     for (const [name, value] of [['graceMs', graceMs], ['killMs', killMs]]) {
       if (!Number.isSafeInteger(value) || value < 0) fail('PROCESS_OWNER_CONFIG_INVALID', `${name} is invalid`)
     }
-    let remaining = await this._adapterCall('listOwned', record.groupIdentity)
+    let remaining = await this._listAllOwned(record)
     if (remaining.length) {
-      // A group may have exited and durably published zero membership before
-      // cancellation observes it. Only live members require a live process
-      // identity; every signal remains identity-gated to reject PID reuse.
-      await this._verifyOwnership(record)
-      await this._adapterCall('signalOwned', record.groupIdentity, 'TERM')
+      await this._signalAllIfLiveOwned(record, 'TERM')
       remaining = await this._waitForZero(record, graceMs)
     }
     if (remaining.length) {
-      await this._verifyOwnership(record)
-      await this._adapterCall('signalOwned', record.groupIdentity, 'KILL')
+      await this._signalAllIfLiveOwned(record, 'KILL')
       remaining = await this._waitForZero(record, killMs)
     }
     if (remaining.length) {
@@ -694,8 +717,7 @@ class ProcessOwner {
     }
     remaining = await this._confirmDrained(record, killMs)
     if (remaining.length) {
-      await this._verifyOwnership(record)
-      await this._adapterCall('signalOwned', record.groupIdentity, 'KILL')
+      await this._signalAllIfLiveOwned(record, 'KILL')
       remaining = await this._waitForZero(record, killMs)
       if (!remaining.length) remaining = await this._confirmDrained(record, killMs)
     }
@@ -882,12 +904,11 @@ class ProcessOwner {
     const live = []
     for (const record of this.groups.values()) {
       if (typeof record.groupIdentity !== 'string' || !record.groupIdentity) continue
-      let members = await this._adapterCall('listOwned', record.groupIdentity)
+      let members = await this._listAllOwned(record)
       if (members.length && record.status !== 'RUNNING') {
         members = await this._confirmDrained(record, Math.max(1, this.pollMs))
         if (members.length) {
-          await this._verifyOwnership(record)
-          await this._adapterCall('signalOwned', record.groupIdentity, 'KILL')
+          await this._signalAllIfLiveOwned(record, 'KILL')
           members = await this._waitForZero(record, Math.max(1, this.pollMs))
           if (!members.length) members = await this._confirmDrained(record, Math.max(1, this.pollMs))
         }
@@ -963,15 +984,61 @@ class ProcessOwner {
     if (verified !== true) fail('PROCESS_IDENTITY_CHANGED', 'owned process group identity cannot be verified')
   }
 
+  async _signalIfLiveOwned(record, signal) {
+    try {
+      await this._verifyOwnership(record)
+      await this._adapterCall('signalOwned', record.groupIdentity, signal)
+    } catch (error) {
+      // Exit can race the membership snapshot or the signal itself. A fresh
+      // empty group needs no signal; a still-live unverified group must fail.
+      if (['PROCESS_IDENTITY_CHANGED', 'ESRCH'].includes(error?.code) &&
+          (await this._adapterCall('listOwned', record.groupIdentity)).length === 0) return
+      throw error
+    }
+  }
+
+  async _listReservationOwned(record) {
+    if (typeof this.adapter.listReservationOwned !== 'function') return []
+    const members = await this._adapterCall('listReservationOwned', record.reservationId)
+    if (!Array.isArray(members) || members.some(pid => !Number.isSafeInteger(pid) || pid < 1)) {
+      fail('PROCESS_IDENTITY_INVALID', 'reservation liveness probe returned invalid process identities')
+    }
+    return members
+  }
+
+  _mergeMembers(...groups) {
+    return [...new Set(groups.flat())].sort((left, right) => left - right)
+  }
+
+  async _listAllOwned(record) {
+    return this._mergeMembers(
+      await this._adapterCall('listOwned', record.groupIdentity),
+      await this._listReservationOwned(record),
+    )
+  }
+
+  async _signalAllIfLiveOwned(record, signal) {
+    const primary = await this._adapterCall('listOwned', record.groupIdentity)
+    if (primary.length) await this._signalIfLiveOwned(record, signal)
+    const reservation = await this._listReservationOwned(record)
+    if (!reservation.length) return
+    if (typeof this.adapter.signalReservationOwned !== 'function') {
+      fail('PROVIDER_UNSUPPORTED', 'process adapter cannot signal reservation-owned descendants')
+    }
+    await this._adapterCall('signalReservationOwned', record.reservationId, signal, {
+      excludeGroupIdentity: record.groupIdentity,
+    })
+  }
+
   async _waitForZero(record, timeoutMs) {
     const start = this.monotonicMs()
-    let remaining = await this._adapterCall('listOwned', record.groupIdentity)
+    let remaining = await this._listAllOwned(record)
     const maximumPolls = Math.ceil(timeoutMs / Math.max(1, this.pollMs)) + 1
     let polls = 0
     while (remaining.length && Math.max(0, this.monotonicMs() - start) < timeoutMs && polls < maximumPolls) {
       await this.wait(this.pollMs)
       polls += 1
-      remaining = await this._adapterCall('listOwned', record.groupIdentity)
+      remaining = await this._listAllOwned(record)
     }
     return remaining
   }
@@ -980,13 +1047,13 @@ class ProcessOwner {
     const start = this.monotonicMs()
     let confirmations = 0
     do {
-      const remaining = await this._adapterCall('listOwned', record.groupIdentity)
+      const remaining = await this._listAllOwned(record)
       if (remaining.length) return remaining
       confirmations += 1
       if (confirmations >= this.zeroConfirmations) return []
       await this.wait(this.pollMs)
     } while (Math.max(0, this.monotonicMs() - start) <= timeoutMs + this.pollMs * this.zeroConfirmations)
-    return this._adapterCall('listOwned', record.groupIdentity)
+    return this._listAllOwned(record)
   }
 
   _statusFromExit(exit) {
@@ -1226,11 +1293,53 @@ function createPosixProcessAdapter(options = {}) {
   const spawn = options.spawn || childProcess.spawn
   const execFileSync = options.execFileSync || childProcess.execFileSync
   const fsImpl = options.fsImpl || fs
+  const kill = options.kill || process.kill
   const wallNowMs = options.wallNowMs || Date.now
   function pgid(identity) {
     const match = /^posix-pgid:(\d+)$/.exec(identity)
     if (!match) fail('PROCESS_IDENTITY_INVALID', `invalid POSIX group identity: ${identity}`)
     return Number(match[1])
+  }
+  function scanReservation(reservationId) {
+    if (typeof reservationId !== 'string' || !reservationId || reservationId.includes('\0')) {
+      fail('PROCESS_IDENTITY_INVALID', 'POSIX reservation identity is invalid')
+    }
+    const marker = `${POSIX_RESERVATION_ENV}=${reservationId}`
+    const matches = []
+    for (const name of fsImpl.readdirSync('/proc').filter((entry) => /^\d+$/.test(entry))) {
+      try {
+        const environment = fsImpl.readFileSync(`/proc/${name}/environ`)
+        if (!hasExactNulDelimitedEntry(environment, marker)) continue
+        const stat = fsImpl.readFileSync(`/proc/${name}/stat`, 'utf8')
+        const fields = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)
+        const pid = Number(name)
+        const processGroup = Number(fields[2])
+        const startTimeTicks = fields[19]
+        if (Number.isSafeInteger(pid) && pid > 0 && Number.isSafeInteger(processGroup) && processGroup > 0 &&
+            /^\d+$/.test(startTimeTicks || '') && !/^Z/u.test(fields[0] || '')) {
+          matches.push({ pid, processGroup, startTimeTicks })
+        }
+      } catch {}
+    }
+    return matches.sort((left, right) => left.pid - right.pid)
+  }
+  function foreignReservationMembers(reservationId, processGroup) {
+    const prefix = Buffer.from(`${POSIX_RESERVATION_ENV}=`, 'utf8')
+    const foreign = []
+    for (const name of fsImpl.readdirSync('/proc').filter((entry) => /^\d+$/.test(entry))) {
+      try {
+        const stat = fsImpl.readFileSync(`/proc/${name}/stat`, 'utf8')
+        const fields = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)
+        if (Number(fields[2]) !== processGroup || /^Z/u.test(fields[0] || '')) continue
+        const environment = fsImpl.readFileSync(`/proc/${name}/environ`)
+        const reservations = environment.toString('utf8').split('\0')
+          .filter(entry => Buffer.byteLength(entry, 'utf8') >= prefix.length &&
+            entry.startsWith(`${POSIX_RESERVATION_ENV}=`))
+          .map(entry => entry.slice(POSIX_RESERVATION_ENV.length + 1))
+        if (reservations.some(value => value !== reservationId)) foreign.push(Number(name))
+      } catch {}
+    }
+    return foreign.filter(pid => Number.isSafeInteger(pid) && pid > 0).sort((left, right) => left - right)
   }
   const adapter = {
     kind: 'posix-process-group',
@@ -1246,7 +1355,9 @@ function createPosixProcessAdapter(options = {}) {
       return { [POSIX_RESERVATION_ENV]: reservationId }
     },
     async admit() {
-      if (platform !== 'linux' && typeof options.recoverReservation !== 'function') {
+      if (platform !== 'linux' && (typeof options.recoverReservation !== 'function' ||
+          typeof options.listReservationOwned !== 'function' ||
+          typeof options.signalReservationOwned !== 'function')) {
         return { supported: false, reason: 'POSIX reservation recovery requires Linux /proc or a provider implementation' }
       }
       try {
@@ -1275,21 +1386,52 @@ function createPosixProcessAdapter(options = {}) {
     },
     async recoverReservation(reservationId) {
       if (typeof options.recoverReservation === 'function') return options.recoverReservation(reservationId)
-      const marker = `${POSIX_RESERVATION_ENV}=${reservationId}`
-      const matches = []
-      for (const name of fsImpl.readdirSync('/proc').filter((entry) => /^\d+$/.test(entry))) {
-        try {
-          const environment = fsImpl.readFileSync(`/proc/${name}/environ`)
-          if (!hasExactNulDelimitedEntry(environment, marker)) continue
-          const stat = fsImpl.readFileSync(`/proc/${name}/stat`, 'utf8')
-          const fields = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)
-          const processGroup = Number(fields[2])
-          if (Number.isSafeInteger(processGroup) && processGroup > 0) matches.push(processGroup)
-        } catch {}
-      }
+      const matches = scanReservation(reservationId).map(entry => entry.processGroup)
       if (!matches.length) return null
       const processGroup = Math.min(...matches)
       return { rootPid: processGroup, groupIdentity: `posix-pgid:${processGroup}` }
+    },
+    async listReservationOwned(reservationId) {
+      if (typeof options.listReservationOwned === 'function') return options.listReservationOwned(reservationId)
+      if (platform !== 'linux') fail('PROVIDER_UNSUPPORTED', 'POSIX reservation membership requires Linux /proc or a provider implementation')
+      return scanReservation(reservationId).map(entry => entry.pid)
+    },
+    async signalReservationOwned(reservationId, signal, signalOptions = {}) {
+      if (typeof options.signalReservationOwned === 'function') {
+        return options.signalReservationOwned(reservationId, signal, signalOptions)
+      }
+      if (platform !== 'linux') fail('PROVIDER_UNSUPPORTED', 'POSIX reservation signalling requires Linux /proc or a provider implementation')
+      const excludedGroup = signalOptions.excludeGroupIdentity
+        ? pgid(signalOptions.excludeGroupIdentity) : null
+      const snapshot = scanReservation(reservationId)
+      const groups = [...new Set(snapshot.map(entry => entry.processGroup))]
+        .filter(group => group !== excludedGroup)
+        .sort((left, right) => left - right)
+      for (const group of groups) {
+        const expected = snapshot.filter(entry => entry.processGroup === group)
+        const current = scanReservation(reservationId).filter(entry => entry.processGroup === group)
+        const exactAuthority = current.some(entry => expected.some(prior =>
+          prior.pid === entry.pid && prior.startTimeTicks === entry.startTimeTicks))
+        if (!exactAuthority) {
+          if (current.length) fail('PROCESS_IDENTITY_CHANGED', 'POSIX reservation group lost its exact signal authority')
+          continue
+        }
+        const foreign = foreignReservationMembers(reservationId, group)
+        if (foreign.length) {
+          fail('PROCESS_IDENTITY_CHANGED', 'POSIX process group contains a foreign reservation identity', {
+            processGroup: group,
+            foreign,
+          })
+        }
+        try {
+          kill(-group, signal === 'KILL' ? 'SIGKILL' : 'SIGTERM')
+        } catch (error) {
+          if (error?.code === 'ESRCH' && scanReservation(reservationId)
+            .every(entry => entry.processGroup !== group)) continue
+          throw error
+        }
+      }
+      return groups.map(group => `posix-pgid:${group}`)
     },
     async probeReservation(record) {
       const ownership = await adapter.recoverReservation(record.reservationId)
@@ -1319,11 +1461,12 @@ function createPosixProcessAdapter(options = {}) {
           processGroup === group && !/^Z/u.test(status))
         .map(({ pid }) => pid)
     },
-    async signalOwned(identity, signal) { process.kill(-pgid(identity), signal === 'KILL' ? 'SIGKILL' : 'SIGTERM') },
+    async signalOwned(identity, signal) { kill(-pgid(identity), signal === 'KILL' ? 'SIGKILL' : 'SIGTERM') },
     async verifyOwnership({ reservationId, rootPid, groupIdentity }) {
       if (typeof reservationId !== 'string' || !reservationId || pgid(groupIdentity) !== rootPid) return false
       const recovered = await adapter.recoverReservation(reservationId)
-      return Boolean(recovered && recovered.rootPid === rootPid && recovered.groupIdentity === groupIdentity)
+      return Boolean(recovered && recovered.rootPid === rootPid && recovered.groupIdentity === groupIdentity &&
+        foreignReservationMembers(reservationId, rootPid).length === 0)
     },
     async listTargetOwned(targetKey, records) {
       const live = []
@@ -1338,8 +1481,9 @@ function createPosixProcessAdapter(options = {}) {
         if (!identity || seen.has(identity)) continue
         seen.add(identity)
         live.push(...await adapter.listOwned(identity))
+        live.push(...await adapter.listReservationOwned(record.reservationId))
       }
-      return live
+      return [...new Set(live)].sort((left, right) => left - right)
     },
   }
   return adapter
@@ -2068,6 +2212,23 @@ function createWindowsJobAdapter(options = {}) {
   return adapter
 }
 
+// Keep platform selection in one small, injectable seam.  Callers must still
+// provide the Windows Job control root and its protected ownership root; this
+// factory never invents an ownership boundary from a working directory.
+function createPlatformProcessAdapter(options = {}) {
+  if (!options || typeof options !== 'object' || Array.isArray(options)) fail('PROCESS_OWNER_CONFIG_INVALID', 'platform process adapter options are invalid')
+  const platform = options.platform || process.platform
+  if (typeof platform !== 'string' || !platform) fail('PROCESS_OWNER_CONFIG_INVALID', 'platform process adapter platform is invalid')
+  if (platform === 'win32') {
+    const create = options.createWindowsJobAdapter || createWindowsJobAdapter
+    if (typeof create !== 'function') fail('PROCESS_OWNER_CONFIG_INVALID', 'Windows process adapter factory is invalid')
+    return create(options.windows || {})
+  }
+  const create = options.createPosixProcessAdapter || createPosixProcessAdapter
+  if (typeof create !== 'function') fail('PROCESS_OWNER_CONFIG_INVALID', 'POSIX process adapter factory is invalid')
+  return create({ ...(options.posix || {}), platform })
+}
+
 async function runOwnedProcessConformanceProbe(options = {}) {
   const adapter = options.adapter
   const processOwner = options.processOwner
@@ -2147,6 +2308,7 @@ module.exports = {
   PROCESS_REGISTRY_SCHEMA_VERSION,
   createPosixProcessAdapter,
   createWindowsJobAdapter,
+  createPlatformProcessAdapter,
   getProcessAdapterContract: () => ({
     methods: [...REQUIRED_PROCESS_ADAPTER_METHODS],
     capabilities: [...REQUIRED_PROCESS_CAPABILITIES],

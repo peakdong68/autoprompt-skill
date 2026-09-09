@@ -95,7 +95,7 @@ function writeFakeHarness(bin, provider) {
   fs.chmodSync(target, 0o755)
 }
 
-test('packed 1.0.4 CLI completes the private v2 lifecycle for OMP and DeepSeek Harness', {
+test('packed current CLI completes the private v2 lifecycle for OMP and DeepSeek Harness', {
   timeout: 900000,
 }, () => {
   const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-packed-harnesses-'))
@@ -147,7 +147,6 @@ test('packed 1.0.4 CLI completes the private v2 lifecycle for OMP and DeepSeek H
       path.join(packageRoot, 'package.json'),
       'utf8',
     ))
-    assert.equal(packedPackage.version, '1.0.4')
     assert.equal(packedPackage.version, PACKAGE_VERSION)
     const cli = path.join(packageRoot, 'bin', 'autoprompt.cjs')
 

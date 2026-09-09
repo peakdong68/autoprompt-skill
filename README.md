@@ -6,8 +6,8 @@
 
 <p align="center">
   <a href="#benchmarks"><img src="https://img.shields.io/badge/Terminal--Bench%202.1-%2B14.61%20points-965477?style=flat-square&labelColor=302335" alt="Terminal-Bench 2.1: plus 14.61 points"/></a>
-  <a href="https://github.com/Spielewoy/autoprompt-skill/releases/latest"><img src="https://img.shields.io/github/v/release/Spielewoy/autoprompt-skill?style=flat-square&label=version&color=965477&labelColor=302335" alt="Version 1.0.4"/></a>
-  <a href="#install"><img src="https://img.shields.io/badge/ports-9%20provider%20ports-965477?style=flat-square&labelColor=302335" alt="Nine provider ports"/></a>
+  <a href="https://github.com/Spielewoy/autoprompt-skill/releases/latest"><img src="https://img.shields.io/github/v/release/Spielewoy/autoprompt-skill?style=flat-square&label=version&color=965477&labelColor=302335" alt="Version 2.0.0-beta.1"/></a>
+  <a href="#install"><img src="https://img.shields.io/badge/ports-11%20provider%20ports-965477?style=flat-square&labelColor=302335" alt="Eleven provider ports"/></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-965477?style=flat-square&labelColor=302335" alt="License MIT"/></a>
 </p>
 
@@ -25,19 +25,25 @@
 
 ## Cross-harness v2 status
 
-This is the Codex-v2 development branch. Native role projections and private installers now exist for all nine provider keys, but **the new ports are not yet certified for production execution**. Installation checks and protocol fixtures do not prove a complete native task run. Read the [verification guide and remaining requirements](docs/guides/harness-v2-verification.md) before activating a port.
+This is the Codex-v2 development branch. Native role projections and private installers now exist for all eleven provider keys, but **the new ports are not yet certified for production execution**. Installation checks and protocol fixtures do not prove a complete native task run. Read the [verification guide and remaining requirements](docs/guides/harness-v2-verification.md) before activating a port.
 
 The support versions and benchmark results below originate from the previous release unless explicitly marked v2; they are not v2 conformance evidence. To test this checkout rather than the published npm release, use the local commands in the verification guide. No publication is needed.
 
 ## Install
 
-Use the CLI below, or download an installer from [GitHub Releases](https://github.com/Spielewoy/autoprompt-skill/releases/tag/v1.0.4).
+Build this v2 checkout to test its exact CLI and installer. The public npm release and [GitHub Releases](https://github.com/Spielewoy/autoprompt-skill/releases/latest) remain separate publication channels.
 
-### 1. Install the CLI
+### 1. Build and install this checkout
 
 ```bash
-npm install -g autoprompt-skill
+npm ci
+npm pack
+npm install -g ./autoprompt-skill-2.0.0-beta.1.tgz
 ```
+
+`npm pack` runs the package checks and includes the current generated runtime. The installed CLI preserves a newer local build when the public registry contains an older version.
+
+For the published release instead, use `npm install -g autoprompt-skill`.
 
 ### 2. Launch the installer
 
@@ -66,7 +72,7 @@ autoprompt
 ### Requirements
 
 - [Node.js 20+](https://nodejs.org/en/download)
-- [Python 3.11+](https://www.python.org/downloads/) exposed as `python`, with [PyYAML](https://pypi.org/project/PyYAML/)
+- [Python 3.11+](https://www.python.org/downloads/) as `python3` or `python`, with [PyYAML](https://pypi.org/project/PyYAML/). POSIX installers also accept an explicit `AUTOPROMPT_PYTHON` executable.
 - [Bash 4.3+](https://www.gnu.org/software/bash/) on macOS or Linux
 - [Git](https://git-scm.com/downloads) only for the GitHub checkout method
 
@@ -82,6 +88,8 @@ autoprompt
 | V1 audit; v2 verification pending | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) | 0.7.2; audited 0.7.2; native package adapter | `prime` |
 | V1 audit; v2 verification pending | [Oh My Pi](https://omp.sh/) | 17.4.0+; adapter contract, install lifecycle, and native role payload verified for 17.4.0 | `omp` |
 | V1 audit; v2 verification pending | [DeepSeek Harness](https://deepseek.com/harness/en/) | 0.1.0-rc.7+; adapter contract, install lifecycle, and native role payload verified for 0.1.0-rc.7 | `deepseek` |
+| V2 integration; verification pending | [Hermes Agent](https://github.com/NousResearch/hermes-agent) | 0.21.1; owned plugin and native session adapter | `hermes` |
+| V2 integration; verification pending | [Grok Build](https://docs.x.ai/build/overview) | 1.0.13; controller model proxy and isolated native process | `grok` |
 | V2 port | [Reasonix](https://reasonix.io/docs/) | 1.30.0; private runtime and native wire tested; production conformance pending | `reasonix` |
 
 See [support and audit notes](docs/faq/which-coding-agents-are-supported.md).
@@ -125,7 +133,7 @@ DeepSeek's 82.7% used its own test setup, so it is a reference point, not a comp
 <details>
 <summary><strong>Expected trade-off:</strong> about 3x the time and 2x the tokens.</summary>
 
-Timing and token logs were not retained, so these are planning estimates based on user experience reports, not measured benchmark results. The measured result was 29 to 16 failures (45% fewer) in this run, which translates to about 2x fewer mistakes. Note: for very small tasks, this may differ heavily.
+Timing and token logs were not retained, so these are planning estimates based on user experience reports, not measured benchmark results. The measured result was 29 to 16 failures (45% fewer) in this run, which translates to about 2x fewer mistakes. Note: for very small tasks, this may differ significantly.
 
 </details>
 
@@ -172,14 +180,9 @@ Production activation currently returns `PROVIDER_UNSUPPORTED` because an indepe
 
 ## Run controls
 
-This table is the v1 control reference, not a statement of v2 runtime readiness. The v2 adapter rejects unverified options and capabilities; see the [v2 verification guide](docs/guides/harness-v2-verification.md).
+Configure model selection with `autoprompt configure PROVIDER --agents MODEL --root /absolute/provider-config`. Use `--agents off` to inherit a configured provider model. A measured model registry is required for automatic or multiple-model selection. The controller owns route selection, concurrency, budgets, and child assignments; loading a native role cannot grant dispatch rights.
 
-Use `mode=` to set concurrency. Use `agents=` to route models where the host supports it. [Custom model setup](docs/faq/how-to-add-custom-models.md)
-
-| Control | Claude Code | Codex | OpenCode | Kilo | VS Code | Prime Agent | Oh My Pi | DeepSeek Harness | Reasonix |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| `mode=` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Custom `agents=` routing | ✓ | ✓ | ✕ Not available - inherits active model | ✕ Not available - inherits active model | ✕ Not available - inherits active model | ✕ Not available - inherits selected parent model | ✕ Not available - inherits selected parent model | ✕ Not available - inherits selected parent model | ✓ V2 configuration; activation gated |
+Native effort values differ between providers. Unsupported values are rejected. See the [v2 verification guide](docs/guides/harness-v2-verification.md) for exact mappings, configuration, and current admission requirements.
 
 ## How it works
 
@@ -252,4 +255,4 @@ Because it changes cost, time, and workflow. Start it explicitly with `/autoprom
 
 [MIT](LICENSE). Copyright 2026 [Spielewoy](https://github.com/Spielewoy).
 
-Community: [Contributing](docs/CONTRIBUTING.md), [Code of Conduct](docs/CODE_OF_CONDUCT.md), [Security](docs/SECURITY.md), and [Support](docs/SUPPORT.md).
+Community: [Contributors](docs/CONTRIBUTORS.md), [Contributing](docs/CONTRIBUTING.md), [Code of Conduct](docs/CODE_OF_CONDUCT.md), [Security](docs/SECURITY.md), and [Support](docs/SUPPORT.md).

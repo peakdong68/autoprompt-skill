@@ -17,11 +17,305 @@ const PROVIDERS = Object.freeze({
   prime: { command: 'prime-agent', help: ['--help'], flags: ['--mode', '--resume', '--session-dir'] },
   omp: { command: 'omp', help: ['--help'], flags: ['--mode', '--session'] },
   deepseek: { command: 'dsh', help: ['--help'], flags: ['--profile'] },
+  hermes: { command: 'hermes', help: ['chat', '--help'], flags: ['--query-file', '--oneshot', '--resume', '--reasoning'] },
+  grok: { command: 'grok', help: ['--help'], flags: ['-p', '--output-format', '--resume', '--model', '--tools'] },
   reasonix: { command: 'reasonix', help: ['run', '--help'], flags: ['--output-format', '--resume', '--dir', '--max-steps', '--permission-mode'] },
 })
 const CAPABILITIES = ['isolation', 'topologyEnforcement', 'privateSkillRoot', 'eventStreaming', 'toolOutputCapture', 'stableChildIdentity', 'sameContextContinuation', 'cancellation', 'isolatedChecking', 'processOwnership', 'modelRouting']
 // Register actual-binary suites explicitly. A protocol parser fixture, a skipped
 // native test, or an unrelated test's passing totals cannot satisfy this check.
+const CLOSED_NATIVE_SUITES = {
+  "vscode": {
+  "file": "tests/source/harness-v2-vscode-capability-native.test.cjs",
+  "cases": [
+    "vscode native capability isolation",
+    "vscode native capability topologyEnforcement",
+    "vscode native capability privateSkillRoot",
+    "vscode native capability eventStreaming",
+    "vscode native capability toolOutputCapture",
+    "vscode native capability stableChildIdentity",
+    "vscode native capability sameContextContinuation",
+    "vscode native capability cancellation",
+    "vscode native capability isolatedChecking",
+    "vscode native capability processOwnership",
+    "vscode native capability modelRouting"
+  ],
+  "capabilityCases": {
+    "isolation": "vscode native capability isolation",
+    "topologyEnforcement": "vscode native capability topologyEnforcement",
+    "privateSkillRoot": "vscode native capability privateSkillRoot",
+    "eventStreaming": "vscode native capability eventStreaming",
+    "toolOutputCapture": "vscode native capability toolOutputCapture",
+    "stableChildIdentity": "vscode native capability stableChildIdentity",
+    "sameContextContinuation": "vscode native capability sameContextContinuation",
+    "cancellation": "vscode native capability cancellation",
+    "isolatedChecking": "vscode native capability isolatedChecking",
+    "processOwnership": "vscode native capability processOwnership",
+    "modelRouting": "vscode native capability modelRouting"
+  }
+},
+  "claude": {
+    "file": "tests/source/harness-v2-claude-capability-native.test.cjs",
+    "cases": [
+      "claude closed native capability: isolation denies candidate/private/network while allowing scratch",
+      "claude closed native capability: topology rejects injected nested dispatch and permits only its controller edge",
+      "claude closed native capability: private skill root and ambient project configuration stay outside the model",
+      "claude closed native capability: intermediate stream events remain correlated to the native session",
+      "claude closed native capability: exact controller tool receipt binds the real command output",
+      "claude closed native capability: concurrently owned siblings receive separate native identities",
+      "claude closed native capability: same-context continuation succeeds while foreign target reuse is refused",
+      "claude closed native capability: cancellation drains the held child and a sibling remains operational",
+      "claude closed native capability: isolated checker receives read-only candidate and private scratch",
+      "claude closed native capability: process ownership records completion and recovers a fresh session",
+      "claude closed native capability: exact model effort is wired and unsupported assignment is refused"
+    ],
+    "capabilityCases": {
+      "isolation": "claude closed native capability: isolation denies candidate/private/network while allowing scratch",
+      "topologyEnforcement": "claude closed native capability: topology rejects injected nested dispatch and permits only its controller edge",
+      "privateSkillRoot": "claude closed native capability: private skill root and ambient project configuration stay outside the model",
+      "eventStreaming": "claude closed native capability: intermediate stream events remain correlated to the native session",
+      "toolOutputCapture": "claude closed native capability: exact controller tool receipt binds the real command output",
+      "stableChildIdentity": "claude closed native capability: concurrently owned siblings receive separate native identities",
+      "sameContextContinuation": "claude closed native capability: same-context continuation succeeds while foreign target reuse is refused",
+      "cancellation": "claude closed native capability: cancellation drains the held child and a sibling remains operational",
+      "isolatedChecking": "claude closed native capability: isolated checker receives read-only candidate and private scratch",
+      "processOwnership": "claude closed native capability: process ownership records completion and recovers a fresh session",
+      "modelRouting": "claude closed native capability: exact model effort is wired and unsupported assignment is refused"
+    }
+  },
+  "opencode": {
+    "file": "tests/source/harness-v2-opencode-capability-native.test.cjs",
+    "cases": [
+      "opencode closed native capability: isolation",
+      "opencode closed native capability: topologyEnforcement",
+      "opencode closed native capability: privateSkillRoot",
+      "opencode closed native capability: eventStreaming",
+      "opencode closed native capability: toolOutputCapture",
+      "opencode closed native capability: stableChildIdentity",
+      "opencode closed native capability: sameContextContinuation",
+      "opencode closed native capability: cancellation",
+      "opencode closed native capability: isolatedChecking",
+      "opencode closed native capability: processOwnership",
+      "opencode closed native capability: modelRouting"
+    ],
+    "capabilityCases": {
+      "isolation": "opencode closed native capability: isolation",
+      "topologyEnforcement": "opencode closed native capability: topologyEnforcement",
+      "privateSkillRoot": "opencode closed native capability: privateSkillRoot",
+      "eventStreaming": "opencode closed native capability: eventStreaming",
+      "toolOutputCapture": "opencode closed native capability: toolOutputCapture",
+      "stableChildIdentity": "opencode closed native capability: stableChildIdentity",
+      "sameContextContinuation": "opencode closed native capability: sameContextContinuation",
+      "cancellation": "opencode closed native capability: cancellation",
+      "isolatedChecking": "opencode closed native capability: isolatedChecking",
+      "processOwnership": "opencode closed native capability: processOwnership",
+      "modelRouting": "opencode closed native capability: modelRouting"
+    }
+  },
+  "kilo": {
+    "file": "tests/source/harness-v2-opencode-capability-native.test.cjs",
+    "cases": [
+      "kilo closed native capability: isolation",
+      "kilo closed native capability: topologyEnforcement",
+      "kilo closed native capability: privateSkillRoot",
+      "kilo closed native capability: eventStreaming",
+      "kilo closed native capability: toolOutputCapture",
+      "kilo closed native capability: stableChildIdentity",
+      "kilo closed native capability: sameContextContinuation",
+      "kilo closed native capability: cancellation",
+      "kilo closed native capability: isolatedChecking",
+      "kilo closed native capability: processOwnership",
+      "kilo closed native capability: modelRouting"
+    ],
+    "capabilityCases": {
+      "isolation": "kilo closed native capability: isolation",
+      "topologyEnforcement": "kilo closed native capability: topologyEnforcement",
+      "privateSkillRoot": "kilo closed native capability: privateSkillRoot",
+      "eventStreaming": "kilo closed native capability: eventStreaming",
+      "toolOutputCapture": "kilo closed native capability: toolOutputCapture",
+      "stableChildIdentity": "kilo closed native capability: stableChildIdentity",
+      "sameContextContinuation": "kilo closed native capability: sameContextContinuation",
+      "cancellation": "kilo closed native capability: cancellation",
+      "isolatedChecking": "kilo closed native capability: isolatedChecking",
+      "processOwnership": "kilo closed native capability: processOwnership",
+      "modelRouting": "kilo closed native capability: modelRouting"
+    }
+  },
+  "prime": {
+    "file": "tests/source/harness-v2-pi-capability-native.test.cjs",
+    "cases": [
+      "prime closed native capability: all six owned tools enforce write/private/network isolation and scratch witness",
+      "prime closed native capability: hostile nested dispatch is denied and only the fixed controller topology is advertised",
+      "prime closed native capability: private and ambient configuration are absent from actual model requests",
+      "prime closed native capability: native event stream stays correlated to one context",
+      "prime closed native capability: exact output bytes are committed in the controller receipt",
+      "prime closed native capability: overlapping siblings retain unique contexts and drain",
+      "prime closed native capability: resume reuses only its bound target context",
+      "prime closed native capability: held child cancels while a fast sibling remains alive and drained",
+      "prime closed native capability: checker sees frozen candidate but writes only authenticated scratch",
+      "prime closed native capability: crash recovery drains the durable owned child",
+      "prime closed native capability: model and effort reach native wire while unsupported assignment is refused"
+    ],
+    "capabilityCases": {
+      "isolation": "prime closed native capability: all six owned tools enforce write/private/network isolation and scratch witness",
+      "topologyEnforcement": "prime closed native capability: hostile nested dispatch is denied and only the fixed controller topology is advertised",
+      "privateSkillRoot": "prime closed native capability: private and ambient configuration are absent from actual model requests",
+      "eventStreaming": "prime closed native capability: native event stream stays correlated to one context",
+      "toolOutputCapture": "prime closed native capability: exact output bytes are committed in the controller receipt",
+      "stableChildIdentity": "prime closed native capability: overlapping siblings retain unique contexts and drain",
+      "sameContextContinuation": "prime closed native capability: resume reuses only its bound target context",
+      "cancellation": "prime closed native capability: held child cancels while a fast sibling remains alive and drained",
+      "isolatedChecking": "prime closed native capability: checker sees frozen candidate but writes only authenticated scratch",
+      "processOwnership": "prime closed native capability: crash recovery drains the durable owned child",
+      "modelRouting": "prime closed native capability: model and effort reach native wire while unsupported assignment is refused"
+    }
+  },
+  "omp": {
+    "file": "tests/source/harness-v2-pi-capability-native.test.cjs",
+    "cases": [
+      "omp closed native capability: all six owned tools enforce write/private/network isolation and scratch witness",
+      "omp closed native capability: hostile nested dispatch is denied and only the fixed controller topology is advertised",
+      "omp closed native capability: private and ambient configuration are absent from actual model requests",
+      "omp closed native capability: native event stream stays correlated to one context",
+      "omp closed native capability: exact output bytes are committed in the controller receipt",
+      "omp closed native capability: overlapping siblings retain unique contexts and drain",
+      "omp closed native capability: resume reuses only its bound target context",
+      "omp closed native capability: held child cancels while a fast sibling remains alive and drained",
+      "omp closed native capability: checker sees frozen candidate but writes only authenticated scratch",
+      "omp closed native capability: crash recovery drains the durable owned child",
+      "omp closed native capability: model and effort reach native wire while unsupported assignment is refused"
+    ],
+    "capabilityCases": {
+      "isolation": "omp closed native capability: all six owned tools enforce write/private/network isolation and scratch witness",
+      "topologyEnforcement": "omp closed native capability: hostile nested dispatch is denied and only the fixed controller topology is advertised",
+      "privateSkillRoot": "omp closed native capability: private and ambient configuration are absent from actual model requests",
+      "eventStreaming": "omp closed native capability: native event stream stays correlated to one context",
+      "toolOutputCapture": "omp closed native capability: exact output bytes are committed in the controller receipt",
+      "stableChildIdentity": "omp closed native capability: overlapping siblings retain unique contexts and drain",
+      "sameContextContinuation": "omp closed native capability: resume reuses only its bound target context",
+      "cancellation": "omp closed native capability: held child cancels while a fast sibling remains alive and drained",
+      "isolatedChecking": "omp closed native capability: checker sees frozen candidate but writes only authenticated scratch",
+      "processOwnership": "omp closed native capability: crash recovery drains the durable owned child",
+      "modelRouting": "omp closed native capability: model and effort reach native wire while unsupported assignment is refused"
+    }
+  },
+  "reasonix": {
+    "file": "tests/source/harness-v2-reasonix-capability-native.test.cjs",
+    "cases": [
+      "reasonix closed native capability: isolation",
+      "reasonix closed native capability: topology",
+      "reasonix closed native capability: privateConfiguration",
+      "reasonix closed native capability: intermediateEvents",
+      "reasonix closed native capability: exactToolOutput",
+      "reasonix closed native capability: concurrency",
+      "reasonix closed native capability: resume",
+      "reasonix closed native capability: cancellation",
+      "reasonix closed native capability: checker",
+      "reasonix closed native capability: processOwnership",
+      "reasonix closed native capability: modelEffort"
+    ],
+    "capabilityCases": {
+      "isolation": "reasonix closed native capability: isolation",
+      "topologyEnforcement": "reasonix closed native capability: topology",
+      "privateSkillRoot": "reasonix closed native capability: privateConfiguration",
+      "eventStreaming": "reasonix closed native capability: intermediateEvents",
+      "toolOutputCapture": "reasonix closed native capability: exactToolOutput",
+      "stableChildIdentity": "reasonix closed native capability: concurrency",
+      "sameContextContinuation": "reasonix closed native capability: resume",
+      "cancellation": "reasonix closed native capability: cancellation",
+      "isolatedChecking": "reasonix closed native capability: checker",
+      "processOwnership": "reasonix closed native capability: processOwnership",
+      "modelRouting": "reasonix closed native capability: modelEffort"
+    }
+  },
+  "deepseek": {
+    "file": "tests/source/harness-v2-deepseek-capability-native.test.cjs",
+    "cases": [
+      "deepseek closed native capability: isolation",
+      "deepseek closed native capability: topologyEnforcement",
+      "deepseek closed native capability: privateSkillRoot",
+      "deepseek closed native capability: eventStreaming",
+      "deepseek closed native capability: toolOutputCapture",
+      "deepseek closed native capability: stableChildIdentity",
+      "deepseek closed native capability: sameContextContinuation",
+      "deepseek closed native capability: cancellation",
+      "deepseek closed native capability: isolatedChecking",
+      "deepseek closed native capability: processOwnership",
+      "deepseek closed native capability: modelRouting"
+    ],
+    "capabilityCases": {
+      "isolation": "deepseek closed native capability: isolation",
+      "topologyEnforcement": "deepseek closed native capability: topologyEnforcement",
+      "privateSkillRoot": "deepseek closed native capability: privateSkillRoot",
+      "eventStreaming": "deepseek closed native capability: eventStreaming",
+      "toolOutputCapture": "deepseek closed native capability: toolOutputCapture",
+      "stableChildIdentity": "deepseek closed native capability: stableChildIdentity",
+      "sameContextContinuation": "deepseek closed native capability: sameContextContinuation",
+      "cancellation": "deepseek closed native capability: cancellation",
+      "isolatedChecking": "deepseek closed native capability: isolatedChecking",
+      "processOwnership": "deepseek closed native capability: processOwnership",
+      "modelRouting": "deepseek closed native capability: modelRouting"
+    }
+  },
+  "hermes": {
+    "file": "tests/source/harness-v2-hermes-capability-native.test.cjs",
+    "cases": [
+      "hermes closed native capability: isolation denies candidate/private/network while allowing scratch",
+      "hermes closed native capability: topology rejects injected nested tool and admits controller edge",
+      "hermes closed native capability: ambient configuration skills and hooks stay absent",
+      "hermes closed native capability: real intermediate tool journal event is correlated before final response",
+      "hermes closed native capability: exact controller output bytes bind to receipt",
+      "hermes closed native capability: concurrent siblings keep separate identities",
+      "hermes closed native capability: continuation resumes and foreign target is denied",
+      "hermes closed native capability: cancellation drains held child while sibling succeeds",
+      "hermes closed native capability: independent checker freezes candidate and writes scratch",
+      "hermes closed native capability: durable owner recovery drains live crashed controller child",
+      "hermes closed native capability: model effort is wired and unsupported effort is denied"
+    ],
+    "capabilityCases": {
+      "isolation": "hermes closed native capability: isolation denies candidate/private/network while allowing scratch",
+      "topologyEnforcement": "hermes closed native capability: topology rejects injected nested tool and admits controller edge",
+      "privateSkillRoot": "hermes closed native capability: ambient configuration skills and hooks stay absent",
+      "eventStreaming": "hermes closed native capability: real intermediate tool journal event is correlated before final response",
+      "toolOutputCapture": "hermes closed native capability: exact controller output bytes bind to receipt",
+      "stableChildIdentity": "hermes closed native capability: concurrent siblings keep separate identities",
+      "sameContextContinuation": "hermes closed native capability: continuation resumes and foreign target is denied",
+      "cancellation": "hermes closed native capability: cancellation drains held child while sibling succeeds",
+      "isolatedChecking": "hermes closed native capability: independent checker freezes candidate and writes scratch",
+      "processOwnership": "hermes closed native capability: durable owner recovery drains live crashed controller child",
+      "modelRouting": "hermes closed native capability: model effort is wired and unsupported effort is denied"
+    }
+  },
+  "grok": {
+    "file": "tests/source/harness-v2-grok-capability-native.test.cjs",
+    "cases": [
+      "grok closed native capability: all six owned tools enforce write/private/network isolation and scratch witness",
+      "grok closed native capability: hostile native tool topology is denied before an owned controller call",
+      "grok closed native capability: private and ambient configuration are absent from actual model requests",
+      "grok closed native capability: native event stream stays correlated to one context",
+      "grok closed native capability: exact output bytes are committed in the controller receipt",
+      "grok closed native capability: overlapping siblings retain unique contexts and drain",
+      "grok closed native capability: resume reuses only its bound target context",
+      "grok closed native capability: held child cancels while a fast sibling remains alive and drained",
+      "grok closed native capability: checker sees frozen candidate but writes only authenticated scratch",
+      "grok closed native capability: crash recovery drains the durable owned child",
+      "grok closed native capability: model and effort reach native wire while unsupported assignment is refused"
+    ],
+    "capabilityCases": {
+      "isolation": "grok closed native capability: all six owned tools enforce write/private/network isolation and scratch witness",
+      "topologyEnforcement": "grok closed native capability: hostile native tool topology is denied before an owned controller call",
+      "privateSkillRoot": "grok closed native capability: private and ambient configuration are absent from actual model requests",
+      "eventStreaming": "grok closed native capability: native event stream stays correlated to one context",
+      "toolOutputCapture": "grok closed native capability: exact output bytes are committed in the controller receipt",
+      "stableChildIdentity": "grok closed native capability: overlapping siblings retain unique contexts and drain",
+      "sameContextContinuation": "grok closed native capability: resume reuses only its bound target context",
+      "cancellation": "grok closed native capability: held child cancels while a fast sibling remains alive and drained",
+      "isolatedChecking": "grok closed native capability: checker sees frozen candidate but writes only authenticated scratch",
+      "processOwnership": "grok closed native capability: crash recovery drains the durable owned child",
+      "modelRouting": "grok closed native capability: model and effort reach native wire while unsupported assignment is refused"
+    }
+  }
+}
 const NATIVE_SUITES = Object.freeze(Object.fromEntries([
   ...['claude', 'opencode', 'kilo'].map(provider => [provider, {
     file: 'tests/source/harness-v2-adapter-native.test.cjs',
@@ -43,6 +337,10 @@ const NATIVE_SUITES = Object.freeze(Object.fromEntries([
       'real Reasonix production adapter cancels and drains an active request',
     ],
   }],
+  ['grok', {
+    file: 'tests/source/harness-v2-grok-adapter-native.test.cjs',
+    cases: ['Grok real production adapter uses all owned tools, resumes, and drains'],
+  }],
   ['vscode', {
     file: 'tests/source/harness-v2-vscode-owned-native.test.cjs',
     cases: [
@@ -50,7 +348,14 @@ const NATIVE_SUITES = Object.freeze(Object.fromEntries([
       'real VS Code concurrent owned sessions isolate sibling cancellation and drain',
     ],
   }],
-].map(([provider, suite]) => [provider, Object.freeze({ ...suite, cases: Object.freeze(suite.cases) })])))
+  ['hermes', {
+    file: 'tests/source/harness-v2-hermes-adapter-native.test.cjs',
+    cases: ['Hermes real adapter preserves controlled tools, resume, sibling isolation and cancellation drain'],
+  }],
+].map(([provider, original]) => {
+  const suite = CLOSED_NATIVE_SUITES[provider] || original
+  return [provider, Object.freeze({ ...suite, cases: Object.freeze(suite.cases), ...(suite.capabilityCases ? { capabilityCases: Object.freeze(suite.capabilityCases) } : {}) })]
+})))
 const sha256 = bytes => crypto.createHash('sha256').update(bytes).digest('hex')
 const status = (value, reason, extra = {}) => ({ status: value, reason, ...extra })
 const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -238,7 +543,7 @@ function inspectProvider(provider, options, evidenceRoot) {
         const value = (options.env || process.env)[key]
         if (typeof value === 'string') nativeEnv[key] = value
       }
-      const tested = capture(directory, 'native-tests', process.execPath, plan.argv, nativeEnv, options.spawnSync, 300000)
+      const tested = capture(directory, 'native-tests', process.execPath, plan.argv, nativeEnv, options.spawnSync, 720000)
       const counts = testSummary(tested.stdout)
       const cases = selectedCaseSummary(tested.stdout, plan.cases)
       const complete = suiteCompleted(tested, counts, cases)
@@ -253,8 +558,11 @@ function inspectProvider(provider, options, evidenceRoot) {
       try {
         unchanged = sha256(fs.readFileSync(executable.path)) === executable.sha256
         if (unchanged && result.adapterProbe.nativeRuntimeIdentity) {
-          unchanged = JSON.stringify(require(modulePath).runtimeDependencyIdentity(executable.path)) ===
-            JSON.stringify(result.adapterProbe.nativeRuntimeIdentity)
+          const identityApi = require(modulePath)
+          const currentIdentity = provider === 'hermes'
+            ? identityApi.hermesRuntimeDependencyIdentity(executable.path, env)
+            : identityApi.runtimeDependencyIdentity(executable.path, env)
+          unchanged = JSON.stringify(currentIdentity) === JSON.stringify(result.adapterProbe.nativeRuntimeIdentity)
         }
       } catch {}
       if (!unchanged) {

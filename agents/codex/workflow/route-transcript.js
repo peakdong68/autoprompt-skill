@@ -23,6 +23,7 @@ const EVIDENCE_INDEX_FILE = 'evidence-index.json'
 const OBJECTS_DIRECTORY = path.join('objects', 'sha256')
 const DEFAULT_RAW_OBJECT_THRESHOLD_BYTES = 64 * 1024
 const DEFAULT_INDEX_LIMITS = Object.freeze({ maxBytes: 16 * 1024, maxTokens: 4096, maxSummaryBytes: 512 })
+const appendStates = new Map()
 
 function sha256(bytes) {
   return crypto.createHash('sha256').update(bytes).digest('hex')
@@ -39,6 +40,74 @@ function canonicalize(value) {
 
 function stableStringify(value) {
   return JSON.stringify(canonicalize(value))
+}
+
+function statReceipt(filename) {
+  const stats = fs.lstatSync(filename, { bigint: true })
+  if (stats.isSymbolicLink() || !stats.isFile() && !stats.isDirectory() ||
+      stats.isFile() && stats.nlink !== 1n) {
+    throw new RunRecordError('RUN_RECORD_UNSAFE', `Unsafe route transcript path: ${filename}`)
+  }
+  return Object.freeze({
+    device: String(stats.dev), inode: String(stats.ino), size: String(stats.size),
+    modifiedNs: String(stats.mtimeNs), changedNs: String(stats.ctimeNs),
+    links: String(stats.nlink), mode: String(stats.mode),
+  })
+}
+
+function appendStateReceipts(routeDir) {
+  return Object.freeze({
+    transcript: statReceipt(path.join(routeDir, TRANSCRIPT_FILE)),
+    digest: statReceipt(path.join(routeDir, TRANSCRIPT_DIGEST_FILE)),
+    index: statReceipt(path.join(routeDir, EVIDENCE_INDEX_FILE)),
+    render: statReceipt(path.join(routeDir, TRANSCRIPT_RENDER_FILE)),
+    objects: statReceipt(path.join(routeDir, OBJECTS_DIRECTORY)),
+  })
+}
+
+function sameReceipt(left, right) {
+  return stableStringify(left) === stableStringify(right)
+}
+
+function assertAppendStateReceipts(routeDir, state) {
+  let current
+  try { current = appendStateReceipts(routeDir) } catch (error) {
+    appendStates.delete(routeDir)
+    if (error instanceof RunRecordError) throw error
+    throw new RunRecordError('RUN_RECORD_UNSAFE', `Route transcript append state changed: ${error.code || error.message}`)
+  }
+  if (!sameReceipt(current, state.receipts)) {
+    appendStates.delete(routeDir)
+    throw new RunRecordError(
+      'RUN_RECORD_UNSAFE',
+      'Route transcript files changed outside the exclusive append owner',
+      { expected: state.receipts, actual: current },
+    )
+  }
+  for (const rawEvent of state.objectRefs.values()) {
+    let bytes
+    try {
+      bytes = readRequiredFileNoFollow(objectPath(path.join(routeDir, OBJECTS_DIRECTORY), rawEvent.sha256))
+    } catch (error) {
+      appendStates.delete(routeDir)
+      throw new RunRecordError('RUN_RECORD_UNSAFE', `Cannot revalidate cached raw event object: ${error.code || error.message}`)
+    }
+    if (bytes.length !== rawEvent.bytes || sha256(bytes) !== rawEvent.sha256) {
+      appendStates.delete(routeDir)
+      throw new RunRecordError('RUN_RECORD_FAILURE', `Cached raw event object failed integrity: ${rawEvent.sha256}`)
+    }
+  }
+}
+
+function decodeExactInlineRaw(record) {
+  if (typeof record.raw_base64 !== 'string' || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(record.raw_base64)) {
+    throw new RunRecordError('RUN_RECORD_FAILURE', `Inline exact raw event is not canonical base64: ${record.event_id}`)
+  }
+  const raw = Buffer.from(record.raw_base64, 'base64')
+  if (raw.toString('base64') !== record.raw_base64 || raw.length !== record.raw_event.bytes || sha256(raw) !== record.raw_event.sha256) {
+    throw new RunRecordError('RUN_RECORD_FAILURE', `Inline exact raw event failed integrity: ${record.event_id}`)
+  }
+  return raw
 }
 
 function readRequiredFileNoFollow(filename) {
@@ -80,7 +149,6 @@ function atomicWriteFile(filename, bytes) {
 }
 
 function appendAndSync(filename, bytes) {
-  readRequiredFileNoFollow(filename)
   const fd = fs.openSync(filename, fs.constants.O_WRONLY | fs.constants.O_APPEND | (fs.constants.O_NOFOLLOW || 0), FILE_MODE)
   try {
     if (Number(fs.fstatSync(fd).nlink) !== 1) throw new RunRecordError('RUN_RECORD_UNSAFE', `Transcript became hard-linked before append: ${filename}`)
@@ -171,7 +239,7 @@ function normalizeLimits(options = {}) {
   }
 }
 
-function buildEvidenceIndex(records, limits) {
+function evidenceIndexState(records, limits) {
   const entries = []
   let usedBytes = 0
   let usedTokens = 0
@@ -196,12 +264,40 @@ function buildEvidenceIndex(records, limits) {
     usedBytes += bytes
     usedTokens += tokens
   }
+  return { entries, omittedIds, usedBytes, usedTokens }
+}
+
+function appendEvidenceIndexState(state, record, limits) {
+  const candidate = {
+    event_id: record.event_id,
+    sequence: record.sequence,
+    type: record.event_type,
+    record_sha256: record.record_sha256,
+    raw_event: record.raw_event,
+    summary: record.summary,
+    sensitive: record.sensitive,
+  }
+  const bytes = Buffer.byteLength(stableStringify(candidate), 'utf8')
+  const tokens = Math.ceil(Buffer.byteLength(candidate.summary.text, 'utf8') / 4)
+  if (state.usedBytes + bytes > limits.maxBytes || state.usedTokens + tokens > limits.maxTokens) {
+    state.omittedIds.push(record.event_id)
+  } else {
+    state.entries.push(candidate)
+    state.usedBytes += bytes
+    state.usedTokens += tokens
+  }
+  return state
+}
+
+function finalizeEvidenceIndex(state, totalEventCount, limits) {
+  const entries = [...state.entries]
+  const omittedIds = [...state.omittedIds]
   const index = {
     schema: INDEX_SCHEMA,
     authoritative_transcript: TRANSCRIPT_FILE,
     limits: { max_bytes: limits.maxBytes, max_tokens: limits.maxTokens, max_summary_bytes: limits.maxSummaryBytes },
-    usage: { bytes: 0, estimated_tokens: usedTokens },
-    total_event_count: records.length,
+    usage: { bytes: 0, estimated_tokens: state.usedTokens },
+    total_event_count: totalEventCount,
     included_event_count: entries.length,
     entries,
     truncation: {
@@ -241,15 +337,19 @@ function buildEvidenceIndex(records, limits) {
   return index
 }
 
-function renderTranscript(records, index) {
+function buildEvidenceIndex(records, limits) {
+  return finalizeEvidenceIndex(evidenceIndexState(records, limits), records.length, limits)
+}
+
+function renderTranscript(_records, index) {
   const lines = [
     '# Route transcript (readable rendering)',
     '',
     '`transcript.jsonl` and its referenced `objects/sha256` bytes are authoritative. This rendering contains bounded summaries only.',
     '',
   ]
-  for (const record of records) {
-    lines.push(`## ${record.event_id} · ${record.event_type}`, '')
+  for (const record of index.entries) {
+    lines.push(`## ${record.event_id} · ${record.type}`, '')
     lines.push(record.summary.text || '(empty event summary)', '')
     if (record.summary.truncated) {
       lines.push(`Summary omitted ${record.summary.original_bytes - record.summary.included_bytes} byte(s). Fetch event ${record.event_id}; raw SHA-256: \`${record.raw_event.sha256}\`.`, '')
@@ -261,7 +361,7 @@ function renderTranscript(records, index) {
   }
   if (index.truncation.truncated) {
     lines.push('## Evidence-index omissions', '')
-    lines.push(`${index.truncation.omitted_event_count} event(s) are absent from the bounded evidence index. The raw transcript still contains pointers for every event; omission is explicit and is not evidence loss.`, '')
+    lines.push(`${index.truncation.omitted_event_count} event(s) are omitted from the bounded evidence index. The raw transcript still contains pointers for every event; omission is explicit and is not evidence loss.`, '')
   }
   return `${lines.join('\n')}\n`
 }
@@ -291,6 +391,10 @@ function verifyRouteTranscript(routeDir) {
         if (raw.length !== record.raw_event.bytes || sha256(raw) !== record.raw_event.sha256) return { valid: false, reason: `raw event object failed integrity: ${record.event_id}`, events: records.length }
         rawForPrivacy = raw
       } catch (error) { return { valid: false, reason: `cannot verify raw event ${record.event_id}: ${error.code}`, events: records.length } }
+    } else if (record.raw_event.storage === 'inline-exact') {
+      try { rawForPrivacy = decodeExactInlineRaw(record) } catch (error) {
+        return { valid: false, reason: error.message, events: records.length }
+      }
     } else {
       const inline = Buffer.from(stableStringify(record.event), 'utf8')
       if (inline.length !== record.raw_event.bytes || sha256(inline) !== record.raw_event.sha256) return { valid: false, reason: `inline raw event failed integrity: ${record.event_id}`, events: records.length }
@@ -318,6 +422,32 @@ function verifyRouteTranscript(routeDir) {
   return { valid: true, digest, events: records.length, headRecordSha256: previous, index }
 }
 
+function createAppendState(routeDir, verification = null) {
+  const checked = verification || verifyRouteTranscript(routeDir)
+  if (!checked.valid) {
+    throw new RunRecordError(
+      checked.code || 'RUN_RECORD_FAILURE',
+      `Cannot append to invalid route transcript: ${checked.reason}`,
+    )
+  }
+  const transcriptPath = path.join(routeDir, TRANSCRIPT_FILE)
+  const transcriptBytes = readRequiredFileNoFollow(transcriptPath)
+  const records = parseJsonLines(transcriptBytes, transcriptPath)
+  const limits = normalizeLimits(checked.index.limits || {})
+  return {
+    eventCount: records.length,
+    eventIds: new Set(records.map(record => record.event_id)),
+    headRecordSha256: checked.headRecordSha256 || null,
+    transcriptHash: crypto.createHash('sha256').update(transcriptBytes),
+    indexState: evidenceIndexState(records, limits),
+    objectRefs: new Map(records
+      .filter(record => record.raw_event.storage === 'object')
+      .map(record => [record.raw_event.sha256, record.raw_event])),
+    limits,
+    receipts: appendStateReceipts(routeDir),
+  }
+}
+
 function createRouteTranscript(routeDir, options = {}) {
   const absolute = path.resolve(routeDir)
   ensureDirectoryNoFollow(absolute, path.dirname(absolute))
@@ -335,6 +465,16 @@ function createRouteTranscript(routeDir, options = {}) {
   atomicWriteFile(path.join(absolute, TRANSCRIPT_DIGEST_FILE), `${sha256(Buffer.alloc(0))}\n`)
   atomicWriteFile(path.join(absolute, EVIDENCE_INDEX_FILE), `${stableStringify(index)}\n`)
   atomicWriteFile(path.join(absolute, TRANSCRIPT_RENDER_FILE), renderTranscript([], index))
+  appendStates.set(absolute, {
+    eventCount: 0,
+    eventIds: new Set(),
+    headRecordSha256: null,
+    transcriptHash: crypto.createHash('sha256'),
+    indexState: evidenceIndexState([], limits),
+    objectRefs: new Map(),
+    limits,
+    receipts: appendStateReceipts(absolute),
+  })
   return { routeDir: absolute, transcriptPath, evidenceIndex: index }
 }
 
@@ -342,24 +482,27 @@ function appendRouteEvent(routeDir, event, options = {}) {
   const absolute = path.resolve(routeDir)
   const normalizedEvent = canonicalize(event || {})
   return withTranscriptLock(absolute, () => {
-    const verification = verifyRouteTranscript(absolute)
-    if (!verification.valid) throw new RunRecordError(verification.code || 'RUN_RECORD_FAILURE', `Cannot append to invalid route transcript: ${verification.reason}`)
+    let state = appendStates.get(absolute)
+    if (state) assertAppendStateReceipts(absolute, state)
+    else {
+      state = createAppendState(absolute)
+      appendStates.set(absolute, state)
+    }
     const transcriptPath = path.join(absolute, TRANSCRIPT_FILE)
-    const existingBytes = readRequiredFileNoFollow(transcriptPath)
-    const records = parseJsonLines(existingBytes, transcriptPath)
-    const sequence = records.length + 1
-    const limits = normalizeLimits(options.limits || verification.index.limits || options)
+    const sequence = state.eventCount + 1
+    const limits = normalizeLimits(options.limits || state.limits || options)
     const threshold = Number.isSafeInteger(options.rawObjectThresholdBytes) ? options.rawObjectThresholdBytes : DEFAULT_RAW_OBJECT_THRESHOLD_BYTES
     const rawBytes = rawEventBytes(event || {}, options)
     const rawDigest = sha256(rawBytes)
     const hasProviderRawBytes = options.rawBytes !== undefined || (event && (Buffer.isBuffer(event.raw_bytes) || event.raw_bytes instanceof Uint8Array))
-    const raw = rawBytes.length > threshold || options.forceObject === true || hasProviderRawBytes
-      ? { ...putRawObject(path.join(absolute, OBJECTS_DIRECTORY), rawBytes), storage: 'object', mime_type: options.mimeType || 'application/json' }
-      : { algorithm: 'sha256', sha256: rawDigest, bytes: rawBytes.length, storage: 'inline', mime_type: options.mimeType || 'application/json' }
     const summary = utf8Prefix(summaryText(event || {}), limits.maxSummaryBytes)
     const sensitivity = scanLikelySecrets(rawBytes)
     const eventId = event && (event.event_id || event.id) || `route-event-${sequence}`
-    if (records.some(record => record.event_id === eventId)) throw new RunRecordError('RUN_RECORD_FAILURE', `Route event id is already present: ${eventId}`)
+    if (state.eventIds.has(eventId)) throw new RunRecordError('RUN_RECORD_FAILURE', `Route event id is already present: ${eventId}`)
+    appendStates.delete(absolute)
+    const raw = rawBytes.length > threshold || options.forceObject === true
+      ? { ...putRawObject(path.join(absolute, OBJECTS_DIRECTORY), rawBytes), storage: 'object', mime_type: options.mimeType || 'application/json' }
+      : { algorithm: 'sha256', sha256: rawDigest, bytes: rawBytes.length, storage: hasProviderRawBytes ? 'inline-exact' : 'inline', mime_type: options.mimeType || 'application/json' }
     const record = {
       schema: TRANSCRIPT_SCHEMA,
       sequence,
@@ -369,19 +512,36 @@ function appendRouteEvent(routeDir, event, options = {}) {
       summary: { text: summary.text, included_bytes: summary.bytes, original_bytes: summary.originalBytes, truncated: summary.truncated },
       sensitive: sensitivity.sensitive,
       sensitivity_categories: sensitivity.categories,
-      previous_record_sha256: verification.headRecordSha256 || null,
+      previous_record_sha256: state.headRecordSha256,
     }
     if (raw.storage === 'inline') record.event = normalizedEvent
+    if (raw.storage === 'inline-exact') record.raw_base64 = rawBytes.toString('base64')
     if (event && (event.occurred_at || event.occurredAt)) record.occurred_at = event.occurred_at || event.occurredAt
     record.record_sha256 = sha256(Buffer.from(stableStringify(record), 'utf8'))
     const line = Buffer.from(`${stableStringify(record)}\n`, 'utf8')
     appendAndSync(transcriptPath, line)
-    const allRecords = records.concat(record)
-    const newBytes = Buffer.concat([existingBytes, line])
-    const index = buildEvidenceIndex(allRecords, limits)
-    atomicWriteFile(path.join(absolute, TRANSCRIPT_DIGEST_FILE), `${sha256(newBytes)}\n`)
+    const nextTranscriptHash = state.transcriptHash.copy().update(line)
+    const nextIndexState = stableStringify(limits) === stableStringify(state.limits)
+      ? appendEvidenceIndexState(state.indexState, record, limits)
+      : evidenceIndexState([
+          ...parseJsonLines(readRequiredFileNoFollow(transcriptPath), transcriptPath),
+        ], limits)
+    const index = finalizeEvidenceIndex(nextIndexState, sequence, limits)
+    atomicWriteFile(path.join(absolute, TRANSCRIPT_DIGEST_FILE), `${nextTranscriptHash.copy().digest('hex')}\n`)
     atomicWriteFile(path.join(absolute, EVIDENCE_INDEX_FILE), `${stableStringify(index)}\n`)
-    atomicWriteFile(path.join(absolute, TRANSCRIPT_RENDER_FILE), renderTranscript(allRecords, index))
+    atomicWriteFile(path.join(absolute, TRANSCRIPT_RENDER_FILE), renderTranscript([], index))
+    state.eventIds.add(eventId)
+    if (raw.storage === 'object') state.objectRefs.set(raw.sha256, raw)
+    appendStates.set(absolute, {
+      eventCount: sequence,
+      eventIds: state.eventIds,
+      headRecordSha256: record.record_sha256,
+      transcriptHash: nextTranscriptHash,
+      indexState: nextIndexState,
+      objectRefs: state.objectRefs,
+      limits,
+      receipts: appendStateReceipts(absolute),
+    })
     return Object.freeze({ record, evidenceIndex: index })
   }, options)
 }
@@ -392,6 +552,7 @@ function readRawEvent(routeDir, eventId) {
   const record = records.find(item => item.event_id === eventId)
   if (!record) throw new RunRecordError('RUN_RECORD_FAILURE', `Unknown route event id: ${eventId}`)
   if (record.raw_event.storage === 'object') return readRequiredFileNoFollow(objectPath(path.join(routeDir, OBJECTS_DIRECTORY), record.raw_event.sha256))
+  if (record.raw_event.storage === 'inline-exact') return decodeExactInlineRaw(record)
   return Buffer.from(stableStringify(record.event), 'utf8')
 }
 
@@ -411,6 +572,7 @@ function loadRouteTranscript(routeDir, options = {}) {
 
 function recoverRouteTranscript(routeDir, options = {}) {
   const absolute = path.resolve(routeDir)
+  appendStates.delete(absolute)
   const transcriptPath = path.join(absolute, TRANSCRIPT_FILE)
   let bytes = readRequiredFileNoFollow(transcriptPath)
   if (bytes.length && bytes.at(-1) !== 0x0a) {
@@ -446,6 +608,8 @@ function recoverRouteTranscript(routeDir, options = {}) {
         throw new RunRecordError('RUN_RECORD_FAILURE', `Cannot recover route transcript: raw object failed integrity (${record.event_id})`)
       }
       rawForPrivacy = raw
+    } else if (record.raw_event.storage === 'inline-exact') {
+      rawForPrivacy = decodeExactInlineRaw(record)
     } else {
       const inline = Buffer.from(stableStringify(record.event), 'utf8')
       if (inline.length !== record.raw_event.bytes || sha256(inline) !== record.raw_event.sha256) {
@@ -466,7 +630,13 @@ function recoverRouteTranscript(routeDir, options = {}) {
   atomicWriteFile(path.join(absolute, TRANSCRIPT_DIGEST_FILE), `${sha256(bytes)}\n`)
   atomicWriteFile(path.join(absolute, EVIDENCE_INDEX_FILE), `${stableStringify(evidenceIndex)}\n`)
   atomicWriteFile(path.join(absolute, TRANSCRIPT_RENDER_FILE), renderTranscript(records, evidenceIndex))
-  return loadRouteTranscript(absolute)
+  const loaded = loadRouteTranscript(absolute)
+  appendStates.set(absolute, createAppendState(absolute, {
+    valid: true,
+    headRecordSha256: loaded.headRecordSha256,
+    index: loaded.evidenceIndex,
+  }))
+  return loaded
 }
 
 module.exports = {

@@ -44,7 +44,9 @@ function physicalDirectoryIdentity(directory, fsImpl) {
   const item = fsImpl.lstatSync(resolved)
   if (!item.isDirectory() || item.isSymbolicLink()) fail('TARGET_UNSAFE', `target is not a physical directory: ${resolved}`)
   const real = fsImpl.realpathSync.native ? fsImpl.realpathSync.native(resolved) : fsImpl.realpathSync(resolved)
-  const stat = fsImpl.statSync(real)
+  // File IDs on NTFS (and other 64-bit filesystems) can exceed Number's
+  // integer precision. Lease authority must retain the exact physical ID.
+  const stat = fsImpl.statSync(real, { bigint: true })
   const device = String(stat.dev)
   const fileId = String(stat.ino)
   const stablePhysicalId = (device !== 'undefined' && fileId !== 'undefined' &&

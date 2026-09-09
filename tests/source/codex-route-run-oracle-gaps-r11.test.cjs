@@ -88,7 +88,7 @@ test('AP-ROUTE-029 safety cancellation drains before a best-effort checkpoint an
   const makeRuntime = checkpointFailure => {
     const runtime = Object.create(CodexSupervisorRuntime.prototype)
     Object.assign(runtime, {
-      activation: { generation: 1 },
+      activation: { id: 'route-oracle-cancellation', generation: 1 },
       budget: { snapshot: () => ({ bounded: true }) },
       cancelled: false,
       finalizer: {
@@ -107,6 +107,8 @@ test('AP-ROUTE-029 safety cancellation drains before a best-effort checkpoint an
           return { record: { checkpointPayloadHash: 'a'.repeat(64) } }
         },
       },
+      now: Date.now,
+      pendingLaunchSettlements: new Set(),
       processOwner: {
         async cancelAll({ reason }) { order.push(`cancel:${reason}`) },
         async assertDrained() { order.push('drain') },

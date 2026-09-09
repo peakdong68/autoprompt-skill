@@ -19,6 +19,7 @@ const CONTROLLED_NAMES = Object.freeze(['read', 'list', 'search', 'write', 'edit
 // resolve against the exact native MCP name, never the proxy or a wildcard.
 const CONTROLLED_TOOLS = Object.freeze(CONTROLLED_NAMES
   .map(name => `mcp__${CONTROLLED_SERVER}__${name}`))
+const CONTROLLED_NATIVE_TOOLS = Object.freeze(['todo_write'])
 const CONTROLLED_CAPABILITIES = Object.freeze(CONTROLLED_NAMES
   .map(name => `mcp-tool:${CONTROLLED_SERVER}/${name}`))
 const CONTROLLED_DENIED_TOOLS = Object.freeze([...FORBIDDEN_TOOLS,
@@ -32,6 +33,17 @@ const CONTROLLED_DENIED_TOOLS = Object.freeze([...FORBIDDEN_TOOLS,
   'lsp_hover', 'lsp_references', `mcp_connect__${CONTROLLED_SERVER}`,
 ])
 const sha256 = value => crypto.createHash('sha256').update(value).digest('hex')
+function validateNativeTodoWrite(args) {
+  if (!args || typeof args !== 'object' || Array.isArray(args) || Object.keys(args).length !== 1 || !Array.isArray(args.todos) || args.todos.length < 1 || args.todos.length > 128) throw new ReasonixError('TOOL_POLICY_DENIED', 'Reasonix todo_write arguments are invalid')
+  const ids = new Set(); let active = 0
+  for (const todo of args.todos) {
+    if (!todo || typeof todo !== 'object' || Array.isArray(todo) || Object.keys(todo).some(key => !['content','status','activeForm','level','step_id'].includes(key)) || typeof todo.content !== 'string' || !todo.content.trim() || todo.content.length > 2000 || !['pending','in_progress','completed'].includes(todo.status) || (todo.activeForm !== undefined && (typeof todo.activeForm !== 'string' || todo.activeForm.length > 2000)) || (todo.level !== undefined && todo.level !== 0 && todo.level !== 1) || (todo.step_id !== undefined && (typeof todo.step_id !== 'string' || todo.step_id.length > 256))) throw new ReasonixError('TOOL_POLICY_DENIED', 'Reasonix todo_write item is invalid')
+    if (todo.status === 'in_progress') active++
+    if (todo.step_id) { if (ids.has(todo.step_id)) throw new ReasonixError('TOOL_POLICY_DENIED', 'Reasonix todo_write reuses a stable step_id'); ids.add(todo.step_id) }
+  }
+  if (active > 1) throw new ReasonixError('TOOL_POLICY_DENIED', 'Reasonix todo_write has more than one in-progress item')
+  return args
+}
 const inside = (root, candidate) => {
   const relative = path.relative(root, candidate)
   return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`))
@@ -116,6 +128,8 @@ function probeExecutable(options = {}) {
   if (sha256(readBound(executable.path)) !== executable.sha256) throw new ReasonixError('PROVIDER_UNSUPPORTED', 'Reasonix executable changed during its probe')
   return Object.freeze({
     ...executable, version: tuple.join('.'), provider: 'reasonix',
+    runtimeIdentity: require('../../../scripts/harness-v2-native.cjs').runtimeDependencyIdentity(executable.path, options.env || process.env),
+    portableRuntimeIdentity: require('../../../scripts/harness-v2-native.cjs').portableRuntimeDependencyIdentity('reasonix', executable.path, options.env || process.env),
     evidenceHashes: [sha256(String(version.stdout)), sha256(text)],
   })
 }
@@ -133,9 +147,12 @@ function connectionConfig(file) {
     for (const key of [
       'name', 'kind', 'base_url', 'chat_url', 'request_url', 'model', 'models', 'default',
       'api_key_env', 'headers', 'extra_body', 'context_window', 'max_tokens',
-      'responses_mode', 'reasoning_effort',
+      'max_output_tokens', 'responses_mode', 'reasoning_effort',
     ]) if (Object.hasOwn(provider, key)) selected[key] = provider[key]
     if (typeof selected.name !== 'string' || !selected.name) throw new ReasonixError('PROVIDER_UNSUPPORTED', 'A Reasonix provider has no name')
+    if (Object.hasOwn(selected, 'max_output_tokens') && (!Number.isSafeInteger(selected.max_output_tokens) || selected.max_output_tokens <= 0)) {
+      throw new ReasonixError('PROFILE_INVALID', 'Reasonix provider max_output_tokens must be a positive safe integer')
+    }
     return selected
   })
   return { ...(source.default_model ? { default_model: source.default_model } : {}), providers }
@@ -211,6 +228,7 @@ function renderConfig(options) {
   // Load lazily: the boundary itself imports readBound/writePrivate from here.
   const controlled = options.toolBoundary ? require('../../../scripts/harness-v2-controlled-tools.cjs') : null
   const server = controlled?.serverSpec(options.toolBoundary, 'reasonix')
+  const toolFree = options.toolBoundary?.policy.toolFree === true
   return toml.stringify({
     ...connection,
     agent: { system_prompt: systemPrompt, max_subagent_depth: 1, max_subagent_concurrency: 1, max_parallel_writers: 1 },
@@ -218,17 +236,19 @@ function renderConfig(options) {
     ...(server ? {
       // A nonempty native enabled list filters builtin registration. Empty
       // means ALL builtins in Reasonix, so never emit [] for controlled runs.
-      tools: { enabled: [CONTROLLED_PROXY] },
-      plugins: [{ name: CONTROLLED_SERVER, type: 'stdio', ...server,
+      // The pinned native registry treats a nonmatching, nonempty filter as
+      // no builtins. An empty array would enable every builtin instead.
+      tools: { enabled: toolFree ? ['autoprompt_no_tools'] : [CONTROLLED_PROXY, ...CONTROLLED_NATIVE_TOOLS] },
+      plugins: toolFree ? [] : [{ name: CONTROLLED_SERVER, type: 'stdio', ...server,
         args: [__filename, '--controlled-stdio', ...server.args.slice(1)],
       }],
     } : {}),
     permissions: {
       mode: server ? 'deny' : 'allow',
-      ...(server ? { allow: [...CONTROLLED_TOOLS] } : {}),
+      ...(server ? { allow: toolFree ? [] : [...CONTROLLED_TOOLS, ...CONTROLLED_NATIVE_TOOLS] } : {}),
       // Keep use_capability denied: a concrete call is authorized under its
       // resolved MCP name; list/inspect/decline and native targets gain no grant.
-      deny: server ? [...CONTROLLED_DENIED_TOOLS] : [...FORBIDDEN_TOOLS, ...(readOnly && !options.checkerScratch ? ['write_file', 'edit_file', 'apply_patch'] : [])],
+      deny: server ? toolFree ? [...CONTROLLED_DENIED_TOOLS, ...CONTROLLED_TOOLS, ...CONTROLLED_NATIVE_TOOLS] : CONTROLLED_DENIED_TOOLS.filter(name => !CONTROLLED_NATIVE_TOOLS.includes(name)) : [...FORBIDDEN_TOOLS, ...(readOnly && !options.checkerScratch ? ['write_file', 'edit_file', 'apply_patch'] : [])],
       allow_dynamic_bash: false,
     },
     sandbox: { workspace_root: readOnly ? scratchPath : targetPath, allow_write: [...(readOnly ? [] : [scratchPath]), ...(options.writableRoots || [])], bash: 'enforce', network: false },
@@ -238,11 +258,20 @@ function renderConfig(options) {
 }
 
 function parseTerminal(text) {
-  try {
-    const result = JSON.parse(text)
+  const decode = value => {
+    const result = JSON.parse(value)
     if (!result || typeof result !== 'object' || Array.isArray(result)) throw new Error('not an object')
     return result
-  } catch { throw new ReasonixError('CHILD_RESULT_INVALID', 'Reasonix must return one JSON object matching the assigned result schema') }
+  }
+  try { return decode(text) } catch {}
+  // The native terminal may present its one result in a labelled JSON block.
+  // Ignore presentation only; competing JSON/fences stay ambiguous and fail.
+  // The adapter still validates the full schema and authenticated receipts.
+  const block = typeof text === 'string' && /^(.*?)```json\s*\n([\s\S]*?)\n```(.*?)$/isu.exec(text)
+  if (block && !/[{}\[\]]|```/u.test(`${block[1]}${block[3]}`)) {
+    try { return decode(block[2].trim()) } catch {}
+  }
+  throw new ReasonixError('CHILD_RESULT_INVALID', 'Reasonix must return one JSON object matching the assigned result schema')
 }
 
 function nativeUsage(usage) {
@@ -256,7 +285,7 @@ function nativeUsage(usage) {
   return { noncachedInput: input - cached, cachedInput: cached, output, reasoning }
 }
 
-module.exports = { CONTROLLED_CAPABILITIES, CONTROLLED_DENIED_TOOLS, CONTROLLED_PROXY, CONTROLLED_SERVER, CONTROLLED_TOOLS, FORBIDDEN_TOOLS, MINIMUM_VERSION, ReasonixError, connectionConfig, inside, locateExecutable, nativeUsage, parseTerminal, privateDirectory, probeExecutable, readBound, renderConfig, renderCredentials, sha256, writePrivate }
+module.exports = { CONTROLLED_CAPABILITIES, CONTROLLED_DENIED_TOOLS, CONTROLLED_NATIVE_TOOLS, CONTROLLED_PROXY, CONTROLLED_SERVER, CONTROLLED_TOOLS, FORBIDDEN_TOOLS, MINIMUM_VERSION, ReasonixError, connectionConfig, inside, locateExecutable, nativeUsage, parseTerminal, privateDirectory, probeExecutable, readBound, renderConfig, renderCredentials, sha256, validateNativeTodoWrite, writePrivate }
 
 if (require.main === module) {
   try { runControlledStdioRelay(process.argv.slice(2)) } catch (error) {

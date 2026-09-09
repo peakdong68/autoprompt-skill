@@ -47,16 +47,7 @@ function powershellAvailable() {
   return POWERSHELL_EXECUTABLE !== null
 }
 
-function findBash() {
-  const candidates = process.platform === 'win32'
-    ? [
-        path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Git', 'bin', 'bash.exe'),
-        path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Git', 'bin', 'bash.exe'),
-        'bash',
-      ]
-    : ['bash']
-  return candidates.find(commandAvailable) || null
-}
+const { resolveBash: findBash } = require('../helpers/resolve-bash.cjs')
 
 function quotePowerShell(value) {
   return `'${value.replaceAll("'", "''")}'`

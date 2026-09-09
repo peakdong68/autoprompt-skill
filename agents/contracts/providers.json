@@ -469,6 +469,89 @@
       "safeDegradedBehavior": "Route every child through an enforcing adapter or refuse dispatch.",
       "verificationRequired": "real provider behavioral conformance",
       "verificationAttestation": null
+    },
+    {
+      "id": "hermes",
+      "priority": 10,
+      "implementationStatus": "declared-unverified",
+      "currentIsolationClass": "prompt-guarded",
+      "defaultAdmission": "refuse-until-p8-verification",
+      "capabilities": {
+        "isolation": "unknown",
+        "topologyEnforcement": "degraded",
+        "privateSkillRoot": "unknown",
+        "eventStreaming": "unknown",
+        "toolOutputCapture": "unknown",
+        "stableChildIdentity": "unknown",
+        "sameContextContinuation": "unknown",
+        "cancellation": "unknown",
+        "isolatedChecking": "unknown",
+        "processOwnership": "unknown",
+        "modelRouting": "unknown"
+      },
+      "safeDegradedBehavior": "Route every child through an enforcing adapter or refuse dispatch.",
+      "verificationRequired": "real provider behavioral conformance",
+      "verificationAttestation": null
+    },
+    {
+      "id": "grok",
+      "priority": 11,
+      "implementationStatus": "declared-unverified",
+      "currentIsolationClass": "prompt-guarded",
+      "defaultAdmission": "refuse-until-p8-verification",
+      "capabilities": {
+        "isolation": "unknown",
+        "topologyEnforcement": "degraded",
+        "privateSkillRoot": "unknown",
+        "eventStreaming": "unknown",
+        "toolOutputCapture": "unknown",
+        "stableChildIdentity": "unknown",
+        "sameContextContinuation": "unknown",
+        "cancellation": "unknown",
+        "isolatedChecking": "unknown",
+        "processOwnership": "unknown",
+        "modelRouting": "unknown"
+      },
+      "safeDegradedBehavior": "Route every child through an enforcing adapter or refuse dispatch.",
+      "verificationRequired": "real provider behavioral conformance",
+      "verificationAttestation": null
     }
-  ]
+  ],
+  "reviewedLocalVerificationPolicy": {
+    "policy": "reviewed-local-release-v1",
+    "authority": "maintainer-authenticated-release-review",
+    "independentSignature": false,
+    "requiredReviewBindings": [
+      "provider",
+      "platform",
+      "architecture",
+      "native-executable-and-portable-dependencies",
+      "installed-runtime-minus-exact-trust-files",
+      "canary-implementation",
+      "eleven-distinct-capability-cases",
+      "reviewed-live-evidence",
+      "issuer",
+      "issued-at",
+      "expires-at"
+    ],
+    "requiredCanaryBindings": [
+      "activation-id",
+      "generation",
+      "random-challenge",
+      "request",
+      "target",
+      "connection",
+      "full-local-native-identity",
+      "installed-payload",
+      "enforcement-proof",
+      "review-digest",
+      "exact-observation-artifacts"
+    ],
+    "executionDeadline": "minimum-of-activation-expiry-review-expiry-and-bounded-batch-limit",
+    "requiredCapabilities": "all-eleven-actual-native-behavioral-cases",
+    "resume": "fresh-canary-and-exact-immutable-local-bindings",
+    "priorInvalidTrust": "refuse-without-fallback",
+    "supportedPlatform": "linux-with-verified-command-sandbox-and-durable-process-ownership",
+    "statusBeforeSuccessfulCanary": "unknown"
+  }
 }

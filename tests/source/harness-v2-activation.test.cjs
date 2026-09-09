@@ -11,7 +11,7 @@ const admission = require('../../scripts/harness-v2-admission.cjs')
 const native = require('../../scripts/harness-v2-native.cjs')
 const { sealReceiptBoundRegistry } = require('../../agents/codex/workflow/effort-policy.js')
 const { attestationSignedPayload } = require('../../agents/codex/workflow/router.js')
-const PROVIDERS = ['claude', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek']
+const PROVIDERS = ['claude', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek', 'hermes', 'grok']
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-admission-unit-'))
@@ -63,8 +63,10 @@ for (const provider of PROVIDERS) {
     const pinned = { mode: 'explicit', selector: 'provider/model', models: ['provider/model'] }
     assert.deepEqual(configure.resolveAssignment(pinned, { logicalRole: 'worker' }, provider),
       configure.resolveAssignment(pinned, { logicalRole: 'independent-checker' }, provider))
-    if (['claude', 'opencode', 'kilo', 'deepseek', 'vscode', 'prime', 'omp'].includes(provider)) {
-      const efforts = provider === 'claude' ? ['low', 'medium', 'high', 'xhigh', 'max']
+    if (['claude', 'opencode', 'kilo', 'deepseek', 'vscode', 'prime', 'omp', 'hermes', 'grok'].includes(provider)) {
+      const efforts = provider === 'hermes' ? ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']
+        : provider === 'grok' ? ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+        : provider === 'claude' ? ['low', 'medium', 'high', 'xhigh', 'max']
         : ['opencode', 'kilo'].includes(provider) ? ['low', 'medium', 'high', 'xhigh', 'max']
         : provider === 'deepseek' ? ['off', 'low', 'high', 'max']
           : provider === 'vscode' ? ['none', 'minimal', 'low', 'medium', 'high', 'xhigh']
@@ -75,7 +77,9 @@ for (const provider of PROVIDERS) {
         assert.deepEqual(configure.resolveAssignment(selection, { logicalRole: 'worker' }, provider),
           configure.resolveAssignment(selection, { logicalRole: 'independent-checker' }, provider))
       }
-      const unsupported = provider === 'claude' ? ['off', 'minimal']
+      const unsupported = provider === 'hermes' ? ['off']
+        : provider === 'grok' ? ['off', 'ultra']
+        : provider === 'claude' ? ['off', 'minimal']
         : ['opencode', 'kilo'].includes(provider) ? ['off', 'minimal']
         : provider === 'deepseek' ? ['medium', 'xhigh']
           : provider === 'vscode' ? ['off', 'max'] : []
@@ -255,9 +259,9 @@ test('Reasonix imported admission reopens its request bytes and canonical reques
 
 test('Reasonix verifies an external reviewer certificate bound to its local request', t => {
   const root = fixture(t), reasonix = require('../../agents/reasonix/workflow/admission.js')
-  const installed = { bundle: path.join(root, 'bundle'), files: { 'runtime.js': native.sha256('reasonix fixture') } }
+  const installed = { provider: 'reasonix', bundle: path.join(root, 'bundle'), files: { 'runtime.js': native.sha256('reasonix fixture') } }
   fs.mkdirSync(installed.bundle)
-  const executable = { sha256: 'a'.repeat(64), version: '1.30.0' }
+  const executable = { provider: 'reasonix', path: path.join(root, 'reasonix'), sha256: 'a'.repeat(64), version: '1.30.0', runtimeIdentity: { sha256: 'b'.repeat(64), fileCount: 1, packageCount: 0 } }
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519')
   const requestSha256 = 'd'.repeat(64)
   const key = { keyId: 'reasonix-unit-reviewer', independent: true, providers: ['reasonix'], issuer: 'reasonix-unit-reviewer',

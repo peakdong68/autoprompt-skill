@@ -14,8 +14,22 @@ const zlib = require('node:zlib')
 const ROOT = path.resolve(__dirname, '..', '..')
 const CONFORMANCE_FILES = [
   "tests/source/harness-v2-adapter-native.test.cjs",
+  "tests/source/harness-v2-claude-capability-native.test.cjs",
+  "tests/source/harness-v2-deepseek-capability-native.test.cjs",
+  "tests/source/harness-v2-hermes-capability-native.test.cjs",
+  "tests/source/harness-v2-grok-capability-native.test.cjs",
+  "tests/source/harness-v2-vscode-capability-native.test.cjs",
+  "tests/source/harness-v2-opencode-capability-native.test.cjs",
+  "tests/source/harness-v2-pi-capability-native.test.cjs",
+  "tests/source/harness-v2-reasonix-capability-native.test.cjs",
   "tests/source/harness-v2-pi-adapter-native.test.cjs",
   "tests/source/harness-v2-vscode-owned-native.test.cjs",
+  "tests/source/harness-v2-hermes-adapter-native.test.cjs",
+  "tests/source/harness-v2-windows-shim.test.cjs",
+  "tests/source/harness-v2-grok.test.cjs",
+  "tests/source/harness-v2-grok-proxy.test.cjs",
+  "tests/source/harness-v2-grok-sandbox.test.cjs",
+  "tests/source/harness-v2-grok-adapter-native.test.cjs",
   "tests/source/reasonix-controlled-native.test.cjs",
   "tests/helpers/harness-native-service.cjs",
   "tests/helpers/harness-pi-native-service.cjs"
@@ -35,7 +49,7 @@ const PRIVACY_SCHEMA_VOCABULARY_ALLOWLIST = new Set([
 ])
 const PROVIDERS = [
   'claude', 'codex', 'opencode', 'kilo', 'vscode', 'prime',
-  'omp', 'deepseek', 'reasonix',
+  'omp', 'deepseek', 'hermes', 'grok', 'reasonix',
 ]
 
 function filesBelow(directory) {
@@ -136,6 +150,16 @@ function packageFilesOnDisk() {
     ...filesBelow(path.join(ROOT, 'bin')),
     ...CONFORMANCE_FILES.map(file => path.join(ROOT, file)),
     path.join(ROOT, 'scripts', 'codex-configure.cjs'),
+    path.join(ROOT, 'scripts', 'darwin-runtime-setup.cjs'),
+    path.join(ROOT, 'scripts', 'provider-closure.cjs'),
+    path.join(ROOT, 'scripts', 'hermes-runtime-closure.cjs'),
+    path.join(ROOT, 'scripts', 'lima-runtime.cjs'),
+    path.join(ROOT, 'scripts', 'lima-runtime-guest.cjs'),
+    path.join(ROOT, 'scripts', 'lima-runtime-guest-lifecycle.cjs'),
+    path.join(ROOT, 'scripts', 'lima-runtime-guest-worker.cjs'),
+    path.join(ROOT, 'scripts', 'lima-runtime-vscode-display.cjs'),
+    path.join(ROOT, 'scripts', 'wsl-runtime.cjs'),
+    path.join(ROOT, 'scripts', 'wsl-runtime.ps1'),
     path.join(ROOT, 'scripts', 'codex-runtime-identity.cjs'),
     path.join(ROOT, 'scripts', 'local-only-safety.cjs'),
     path.join(ROOT, 'scripts', 'reasonix-package.cjs'),
@@ -154,6 +178,10 @@ function packageFilesOnDisk() {
     ...filesBelow(path.join(ROOT, 'assets')),
     path.join(ROOT, 'docs', 'benchmarks', 'codex-canary-2026-08-22.md'),
     path.join(ROOT, 'docs', 'guides', 'codex-v2-local-records.md'),
+    path.join(ROOT, 'docs', 'faq', 'how-to-add-custom-models.md'),
+    path.join(ROOT, 'docs', 'guides', '9router-multi-provider-setup.md'),
+    path.join(ROOT, 'docs', 'guides', '9router-routing.png'),
+    path.join(ROOT, 'docs', 'lima-runtime.md'),
     ...readmeReferenceClosure()
       .filter(reference => !reference.directory)
       .map(reference => path.join(ROOT, ...reference.target.split('/'))),
@@ -161,8 +189,6 @@ function packageFilesOnDisk() {
   return [...new Set(explicit.map(file => path.relative(ROOT, file).split(path.sep).join('/')))]
     // npm never packs .gitignore control files, even below an allowed directory.
     .filter(file => path.posix.basename(file) !== '.gitignore')
-    // npm's packlist also drops conventional changelog files from bundled dependency trees.
-    .filter(file => file !== 'node_modules/@iarna/toml/CHANGELOG.md')
     .sort()
 }
 
@@ -245,7 +271,7 @@ function assertNoPrivateJsonValues(value, entryPath, ancestors = []) {
 function assertPrivacySafeText(entryPath, text) {
   const genericPrivatePatterns = [
     { label: 'Windows user-home path', pattern: /\b[A-Za-z]:[\\/](?:Users|Documents and Settings)[\\/](?!<|%|\$|\{)(?!(?:x|user|username|example|test|tester)(?:[\\/\s"'`]|$))[^\\/\s"'`]+/iu },
-    { label: 'POSIX user-home path', pattern: /\/(?:Users|home)\/(?!<|\$|\{)(?!(?:x|user|username|example|test|tester)(?:[\/\s"'`]|$))[^/\s"'`]+/u },
+    { label: 'POSIX user-home path', pattern: /\/(?:Users|home)\/(?!<|\$|\{)(?!(?:x|user|username|example|test|tester|autoprompt)(?:[\/\s"'`]|$))[^/\s"'`]+/u },
     { label: 'runtime UUID', pattern: /\b(?!00000000-0000-0000-0000-000000000000)[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/iu },
     { label: 'private key material', pattern: /-----BEGIN (?:OPENSSH |RSA |EC )?PRIVATE KEY-----/u },
     { label: 'credential-bearing URL', pattern: /https?:\/\/[^\s/@:"']+:[^\s/@"']+@/iu },
@@ -303,7 +329,7 @@ test('package metadata is public-ready under the exact available name and declar
     'autoprompt-skill': 'bin/autoprompt.cjs',
   })
   assert.deepEqual(packageJson.dependencies, { '@iarna/toml': '2.2.5', yaml: '2.9.0' })
-  assert.equal(packageJson.devDependencies, undefined)
+  assert.deepEqual(packageJson.devDependencies, { 'cmd-shim': '7.0.0' })
   assert.equal(packageJson.optionalDependencies, undefined)
   assert.equal(packageJson.peerDependencies, undefined)
   for (const forbidden of ['install', 'postinstall', 'preinstall', 'prepare']) {
@@ -370,6 +396,16 @@ test('package metadata is public-ready under the exact available name and declar
   assert.deepEqual(packageJson.files, [
     'bin/',
     'scripts/codex-configure.cjs',
+    'scripts/darwin-runtime-setup.cjs',
+    'scripts/provider-closure.cjs',
+    'scripts/hermes-runtime-closure.cjs',
+    'scripts/lima-runtime.cjs',
+    'scripts/lima-runtime-guest.cjs',
+    'scripts/lima-runtime-guest-lifecycle.cjs',
+    'scripts/lima-runtime-guest-worker.cjs',
+    'scripts/lima-runtime-vscode-display.cjs',
+    'scripts/wsl-runtime.cjs',
+    'scripts/wsl-runtime.ps1',
     'scripts/codex-runtime-identity.cjs',
     'scripts/local-only-safety.cjs',
     'scripts/harness-provider-config.cjs',
@@ -402,6 +438,8 @@ test('package metadata is public-ready under the exact available name and declar
     'assets/',
     'docs/CODE_OF_CONDUCT.md',
     'docs/CONTRIBUTING.md',
+    'docs/CONTRIBUTORS.md',
+    'docs/lima-runtime.md',
     'docs/SECURITY.md',
     'docs/SUPPORT.md',
     'docs/benchmarks/codex-canary-2026-08-22.md',
@@ -421,6 +459,10 @@ test('package metadata is public-ready under the exact available name and declar
     'scripts/reasonix-package.cjs',
     'scripts/reasonix-configure.cjs',
     ...CONFORMANCE_FILES,
+    'agents/hermes/',
+    'agents/manifests/hermes-runtime.json',
+    'agents/grok/',
+    'agents/manifests/grok-runtime.json',
   ])
   assert.equal(fs.existsSync(path.join(ROOT, 'package-lock.json')), true)
   assert.equal(fs.existsSync(path.join(ROOT, '.npmignore')), false)
@@ -674,6 +716,9 @@ test('packed tarball installs offline into an isolated temporary global prefix a
     }
     const installedPackage = path.join(prefix, ...(process.platform === 'win32' ? [] : ['lib']), 'node_modules', 'autoprompt-skill')
     const reasonix = require(path.join(installedPackage, 'scripts/reasonix-package.cjs'))
+    assert.deepEqual(reasonix.sourceInventory(installedPackage).files,
+      require('../../scripts/reasonix-package.cjs').sourceInventory(ROOT).files,
+      'packing must preserve the complete reviewed Reasonix runtime inventory')
     const reasonixRoot = path.join(temporaryRoot, 'reasonix-root')
     const receipt = reasonix.install(reasonixRoot, installedPackage)
     assert.equal(receipt.contractVersion, '2.0.0')
@@ -684,6 +729,12 @@ test('packed tarball installs offline into an isolated temporary global prefix a
     reasonix.uninstall(reasonixRoot)
 
     const harnessPackage = require(path.join(installedPackage, 'scripts/harness-v2-package.cjs'))
+    const sourceHarnessPackage = require('../../scripts/harness-v2-package.cjs')
+    for (const provider of harnessPackage.PROVIDERS) {
+      assert.deepEqual(harnessPackage.sourceInventory(provider, installedPackage).files,
+        sourceHarnessPackage.sourceInventory(provider, ROOT).files,
+        `packing must preserve the complete reviewed ${provider} runtime inventory`)
+    }
     const ompRoot = path.join(temporaryRoot, 'omp-root')
     const ompReceipt = harnessPackage.install('omp', ompRoot, installedPackage)
     assert.ok(ompReceipt.files['node_modules/@iarna/toml/package.json'])

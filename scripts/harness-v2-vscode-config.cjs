@@ -11,6 +11,8 @@ function sanitize(source = {}) {
     if (typeof source[field] !== 'string' || !source[field] || /[\r\n\0]/.test(source[field])) fail(`Invalid VS Code ${field}`)
     result[field] = source[field]
   }
+  if (source.supportsStructuredOutput !== undefined && typeof source.supportsStructuredOutput !== 'boolean') fail('Invalid VS Code structured-output capability')
+  result.supportsStructuredOutput = source.supportsStructuredOutput === true
   result.baseUrl ||= 'https://openrouter.ai/api/v1'
   let url
   try { url = new URL(result.baseUrl) } catch { fail('VS Code provider URL is invalid') }
@@ -31,9 +33,10 @@ function project(options, env) {
   if (options.effort !== undefined && options.effort !== null) connection.reasoningEffort = require('./harness-v2-native.cjs').validateEffort('vscode', options.effort)
   if (!connection.model) fail('VS Code owned BYOK execution needs an explicit model')
   if (!options.toolBoundary) fail('VS Code owned sessions require the controlled tool boundary')
-  const request = { version: 1, connection, sessionRoot: options.sessionRoot, targetPath: options.targetPath,
+  const request = { version: 1, connection, connectionIdentityBaseUrl: options.providerConnectionIdentity?.baseUrl || connection.baseUrl, sessionRoot: options.sessionRoot, targetPath: options.targetPath,
     prompt: options.prompt, input: options.input, continuationId: options.continuationId || null,
-    policyPath: options.toolBoundary.policyPath, policySha256: options.toolBoundary.policySha256 }
+    policyPath: options.toolBoundary.policyPath, policySha256: options.toolBoundary.policySha256,
+    ...(connection.supportsStructuredOutput && options.outputSchema ? { outputSchema: options.outputSchema } : {}) }
   const file = path.join(options.home, 'owned-session.json')
   const bytes = JSON.stringify(request)
   writePrivate(file, bytes)

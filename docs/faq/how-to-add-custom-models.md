@@ -1,35 +1,36 @@
 # How do I add custom models?
 
-Custom `agents=` routing is available in Claude Code and Codex. Reasonix v2 provides explicit model/effort configuration and measured-registry selection; production activation remains gated on independent provider conformance. OpenCode, Kilo, and VS Code inherit the active model. Prime Agent, Oh My Pi, and DeepSeek Harness inherit the selected parent model.
+Version 2 resolves model choices through the public `autoprompt configure` command. This applies to every declared provider; configuration acceptance and runtime admission are separate checks. Start with an installed provider and its working native BYOK connection.
 
-Create a registry whose names match the values used in `agents=`:
+For one exact model identifier:
 
-```json
-[
-  {
-    "name": "Strong",
-    "provider": "router",
-    "modelString": "provider/model-strong",
-    "baseUrl": "http://localhost:20128/v1",
-    "apiKeyEnv": "AUTOPROMPT_ROUTER_TOKEN",
-    "effortHint": "high"
-  }
-]
+```sh
+autoprompt configure claude --agents provider/model --effort low
 ```
 
-`name`, `provider`, and `modelString` are required. `baseUrl`, `apiKeyEnv`, and `effortHint` are optional. Store only an environment variable name in `apiKeyEnv`, never a secret.
+Replace `claude` with the intended provider and use a model and effort that its adapter supports. To inherit the configured native default:
 
-Claude Code accepts up to three selected models from one endpoint-compatible pool. Codex accepts up to five models available through its active provider. The selectors are:
+```sh
+autoprompt configure claude --agents off
+```
 
-| Selector | Result |
-|---|---|
-| `agents=off` | Inherit the current model. |
-| `agents=Strong,Fast` | Use the named models in that order. |
-| `agents=auto` | Rank the registry by `effortHint`. |
-| `agents=auto:Strong,Fast` | Rank only the named entries. |
+`--root /absolute/provider-config` selects a custom installation root. Supply the same root when installing, configuring, inspecting, and activating the provider.
 
-For the registry schema and launch details, see the [Claude model schema](../../agents/claude/autoprompt-models.schema.md) and [multi-provider guide](../guides/9router-multi-provider-setup.md).
+## Multiple models and automatic selection
 
-## Reasonix v2
+Multiple models require a fresh measured registry receipt. The receipt binds model capabilities, supported efforts, prices, observed latency, success measurements, and its validity period. A list of names or an `effortHint` does not establish those measurements.
 
-Use `autoprompt configure reasonix --agents provider/model --effort high` for one model. Use `--agents off` to inherit the configured Reasonix default. `--agents auto --model-map /absolute/registry.json` and explicit comma-separated lists require a fresh `reasonix-model-registry.v1` receipt with measured price, latency, capabilities, and success metadata. Supported effort values are `low`, `medium`, `high`, and `max`. Model selection does not change the task route.
+```sh
+autoprompt configure claude --agents provider/strong,provider/fast \
+  --model-map /absolute/measured-registry.json --effort low
+autoprompt configure claude --agents auto \
+  --model-map /absolute/measured-registry.json
+```
+
+The shared adapters use the `codex-model-registry.v1` receipt contract; Reasonix retains `reasonix-model-registry.v1`. The validators reject stale, incomplete, or modified receipts. An explicit list limits the eligible models; it does not assign fixed models to historical role aliases. Selection uses the assignment's workload and verified effort capabilities. Model selection never changes the DIRECT, LIGHT, or ROADMAP task route.
+
+Keep credentials in the provider's supported private credential source. Model selection does not create an upstream account, model alias, endpoint, or quota. Endpoint configuration belongs to the native connection, not the measured registry.
+
+Codex's controlled BYOK catalog includes `z-ai/glm-5.3-flash` and `openai/gpt-5.6-luna` at `low` effort. Both have native OpenRouter transport evidence; full workflow acceptance remains a separate check. Use the exact identifiers, including the provider prefix. An arbitrary model name accepted by configuration does not establish a supported controlled transport. DeepSeek Flash returned invalid terminal envelopes in testing and is not enabled in Codex's controlled catalog.
+
+See [v2 verification and native effort mappings](../guides/harness-v2-verification.md), the [provider support table](which-coding-agents-are-supported.md), and the [router connection guide](../guides/9router-multi-provider-setup.md). Non-Codex admission requires either imported independent signed conformance or an exact matching reviewed release followed by a fresh native canary. Selecting a model does not bypass either policy.

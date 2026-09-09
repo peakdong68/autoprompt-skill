@@ -695,6 +695,24 @@
       "effect": "stop or quarantine harmful activity before best-effort checkpoint"
     },
     {
+      "id": "T082",
+      "event": "CANCEL_MUTATION_ABORTED",
+      "from": "RELEASING_LOCK",
+      "to": "RELEASING_LOCK",
+      "guard": "the immutable cancellation intent is already durable, every owned process is proven drained, and the exact pre-cancellation mutation permit is still active",
+      "effect": "record the exact cancelled mutation rollback and close only its existing permit",
+      "boundedBy": "the single exact active mutation permit, cleared by this transition"
+    },
+    {
+      "id": "T083",
+      "event": "CANCEL_ACCOUNTING_CLOSED",
+      "from": "RELEASING_LOCK",
+      "to": "RELEASING_LOCK",
+      "guard": "the immutable cancellation intent and owned-process drain are durable, every admitted session is ended, and the accounting head binds the current release event",
+      "effect": "record the final cancellation budget and accounting snapshot without creating resumable work",
+      "boundedBy": "one final cancellation accounting closure per release intent"
+    },
+    {
       "id": "T058",
       "event": "BUDGET_EXHAUSTED_RESUMABLE",
       "from": [

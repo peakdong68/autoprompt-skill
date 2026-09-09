@@ -1,3 +1,5 @@
+> Esta página conserva la documentación de la versión v1. Para instalar esta rama v2 y consultar la selección de modelos y los requisitos de verificación, lee la [documentación actual en inglés](../../README.md) y la [guía de verificación de v2](../guides/harness-v2-verification.md). Las auditorías de v1 descritas abajo no certifican v2.
+
 <p align="center">
   <img src="../../assets/banner.svg" alt="Autoprompt Skill: nubes rosas y gansos en vuelo" width="1000"/>
 </p>

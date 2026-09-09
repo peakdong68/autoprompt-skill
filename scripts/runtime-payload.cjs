@@ -18,7 +18,7 @@ const HASH_PATTERN = /^[a-f0-9]{64}$/
 const CODEX_GENERATION_PATTERN = /^codex-v[0-9]+\.[0-9]+\.[0-9]+-[a-f0-9]{16}$/
 const CODEX_LOGICAL_ROLE_PATTERN = /^ap-[a-z0-9-]+$/
 const CODEX_PACKAGE_REGISTRY_PATH = 'scripts/install/codex-package-registry.json'
-const HARNESS_V2_PROVIDERS = Object.freeze(['claude', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek'])
+const HARNESS_V2_PROVIDERS = Object.freeze(['claude', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek', 'hermes', 'grok'])
 const PROVIDERS = {
   claude: {
     topLevel: ['GATES.md', 'MODES.md', 'PLAYBOOKS.md', 'VERSION', 'autoprompt-models.schema.md'],
@@ -71,6 +71,8 @@ const PROVIDERS = {
     agents: 'personas',
     workflow: [],
   },
+  grok: { topLevel: ['GATES.md', 'MODES.md', 'PLAYBOOKS.md', 'README.md', 'VERSION'], agents: 'agents', workflow: [] },
+  hermes: { topLevel: ['GATES.md', 'MODES.md', 'PLAYBOOKS.md', 'README.md', 'VERSION'], agents: 'agents', workflow: [] },
   deepseek: {
     topLevel: [
       'GATES.md',
@@ -93,7 +95,7 @@ const PROVIDERS = {
   },
 }
 
-const CODEX_RUNTIME_EXTENSIONS = new Set(['.js', '.ps1', '.sh'])
+const CODEX_RUNTIME_EXTENSIONS = new Set(['.js', '.ps1', '.sh', '.py', '.cs'])
 const CODEX_RUNTIME_ENTRYPOINTS = Object.freeze([
   'workflow/phase-budget.js',
   'workflow/supervisor.ps1',

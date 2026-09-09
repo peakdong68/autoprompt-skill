@@ -14,6 +14,25 @@
 
 set -u
 
+# macOS ships Bash 3.2, while install-lib.sh requires Bash 4.3 features.
+# Re-exec before sourcing it; this block itself stays Bash 3.2 compatible.
+if [[ "$(uname -s 2>/dev/null || true)" == Darwin ]] && (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 3) )); then
+  autoprompt_modern_bash=''
+  for autoprompt_bash_candidate in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+    if [[ -x "$autoprompt_bash_candidate" ]] && "$autoprompt_bash_candidate" -c '(( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 3) ))' >/dev/null 2>&1; then
+      autoprompt_modern_bash="$autoprompt_bash_candidate"; break
+    fi
+  done
+  if [[ -z "$autoprompt_modern_bash" ]] && command -v brew >/dev/null 2>&1; then
+    autoprompt_bash_prefix="$(brew --prefix bash 2>/dev/null || true)"
+    autoprompt_bash_candidate="$autoprompt_bash_prefix/bin/bash"
+    if [[ -x "$autoprompt_bash_candidate" ]] && "$autoprompt_bash_candidate" -c '(( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 3) ))' >/dev/null 2>&1; then autoprompt_modern_bash="$autoprompt_bash_candidate"; fi
+  fi
+  if [[ -n "$autoprompt_modern_bash" ]]; then exec "$autoprompt_modern_bash" "$0" "$@"; fi
+  printf 'Error: Bash 4.3 or newer is required on macOS. Install it with: brew install bash\n' >&2
+  exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB="$SCRIPT_DIR/lib/install-lib.sh"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -27,7 +46,7 @@ fi
 # shellcheck source=/dev/null
 . "$SCRIPT_DIR/harness-v2.sh"
 
-CLIENTS_ALL=(claude codex opencode kilo vscode prime omp deepseek reasonix)
+CLIENTS_ALL=(claude codex opencode kilo vscode prime omp deepseek hermes grok reasonix)
 
 config_root() {
   local client="$1"

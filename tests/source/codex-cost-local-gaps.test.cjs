@@ -120,7 +120,7 @@ function accountingRecord(sequenceNumber, causeId, tokens = 0) {
   }
 }
 
-test('pinned Codex 0.148 advertises only individually visible direct tools for every controlled model', async t => {
+test('pinned Codex 0.148 advertises only individually visible direct tools for every approved direct profile', async t => {
   const cli = pinnedCodexCli()
   if (!cli) {
     t.skip('the exact pinned Codex 0.148 CLI is not installed on this host')
@@ -174,7 +174,7 @@ test('pinned Codex 0.148 advertises only individually visible direct tools for e
   })
   t.after(() => new Promise(resolve => server.close(resolve)))
   const port = server.address().port
-  const controlledModels = ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']
+  const controlledModels = ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'z-ai/glm-5.3-flash', 'openai/gpt-5.6-luna']
   for (const model of controlledModels) {
     const transport = materializeCodexControlledTransport(
       path.join(directory, `transport-${model}`),
@@ -290,6 +290,68 @@ test('pinned Codex 0.148 advertises only individually visible direct tools for e
   ), error => error && error.code === 'PROVIDER_UNSUPPORTED')
 })
 
+for (const model of ['z-ai/glm-5.3-flash', 'openai/gpt-5.6-luna']) test(`${model} BYOK transport pins its exact low-effort catalog and conservative quota ceiling`, async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-glm-byok-profile-'))
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+  const transport = materializeCodexControlledTransport(path.join(directory, 'transport'), {
+    logicalRole: 'worker', assignment: { model: model, effort: 'low' },
+  })
+  assert.deepEqual(transport.modelLimits, { contextWindow: 32_768, maxOutputTokens: 4_096 })
+  const catalog = JSON.parse(fs.readFileSync(transport.modelCatalogPath, 'utf8'))
+  assert.deepEqual(catalog.models.map(model => model.slug), [model])
+  assert.deepEqual(catalog.models[0].supported_reasoning_levels.map(level => level.effort), ['low'])
+  assert.equal(catalog.models[0].tool_mode, 'direct')
+  assert.equal(catalog.models[0].shell_type, 'shell_command')
+  assert.equal(catalog.models[0].apply_patch_tool_type, 'freeform')
+  assert.throws(() => materializeCodexControlledTransport(path.join(directory, 'unsupported-effort'), {
+    logicalRole: 'worker', assignment: { model: model, effort: 'high' },
+  }), error => error && error.code === 'INVALID_EFFORT')
+
+  const upstreamBodies = []
+  const upstream = http.createServer((request, response) => {
+    let body = ''
+    request.setEncoding('utf8')
+    request.on('data', chunk => { body += chunk })
+    request.on('end', () => {
+      upstreamBodies.push(JSON.parse(body))
+      const event = {
+        type: 'response.completed', response: {
+          id: 'glm-byok-response',
+          usage: {
+            input_tokens: 20, input_tokens_details: { cached_tokens: 7 },
+            output_tokens: 5, output_tokens_details: { reasoning_tokens: 2 }, total_tokens: 25,
+          },
+        },
+      }
+      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      response.end(`event: response.completed\ndata: ${JSON.stringify(event)}\n\n`)
+    })
+  })
+  await new Promise((resolve, reject) => {
+    upstream.once('error', reject)
+    upstream.listen(0, '127.0.0.1', resolve)
+  })
+  t.after(() => new Promise(resolve => upstream.close(resolve)))
+  const usage = []
+  const proxy = await startCodexCumulativeQuotaProxy({
+    tokenLimit: Number.MAX_SAFE_INTEGER,
+    modelLimits: transport.modelLimits,
+    upstreamBaseUrl: `http://127.0.0.1:${upstream.address().port}/v1`,
+    onUsage: snapshot => usage.push(snapshot),
+  })
+  t.after(() => proxy.close())
+  const accepted = await postJson(`${proxy.baseUrl}/responses`, {
+    model: model, input: [{ role: 'user', content: 'bounded GLM BYOK request' }], stream: true,
+  })
+  assert.equal(accepted.status, 200)
+  assert.equal(upstreamBodies.length, 1)
+  assert.equal(upstreamBodies[0].model, model)
+  assert.equal(upstreamBodies[0].max_output_tokens, 4_096)
+  assert.deepEqual(usage, [{ noncachedInput: 13, cachedInput: 7, output: 5, reasoning: 2 }])
+  assert.equal(proxy.snapshot().latestMaximumUnaccountedTokens,
+    proxy.snapshot().latestInputBound.maximumInputTokens + 4_096)
+})
+
 test('pinned Codex 0.148 emits one countable lifecycle for each direct patch and shell call', async t => {
   const installedCli = pinnedCodexCli()
   if (!installedCli) {
@@ -323,7 +385,7 @@ test('pinned Codex 0.148 emits one countable lifecycle for each direct patch and
   })}\n`, { mode: 0o600 })
   const transport = materializeCodexControlledTransport(
     path.join(directory, 'transport'),
-    { logicalRole: 'worker', assignment: { model: 'gpt-5.6-sol' } },
+    { logicalRole: 'worker', assignment: { model: 'z-ai/glm-5.3-flash', effort: 'low' } },
   )
   const requests = []
   const server = http.createServer((request, response) => {
@@ -407,7 +469,8 @@ test('pinned Codex 0.148 emits one countable lifecycle for each direct patch and
     '-c', 'project_doc_max_bytes=0', '-c', 'plugins={}', '-c', 'marketplaces={}',
     '-c', 'tool_output_token_limit=1000', '-c', 'model_auto_compact_token_limit=32768',
     '-c', 'sandbox_workspace_write.network_access=false',
-    '-m', 'gpt-5.6-sol', '--sandbox', 'workspace-write', '-C', directory, '-',
+    '-m', 'z-ai/glm-5.3-flash', '-c', 'model_reasoning_effort="low"',
+    '--sandbox', 'workspace-write', '-C', directory, '-',
   ], {
     cwd: directory,
     env: environment,
@@ -1550,4 +1613,14 @@ test('AP-DESIGN-016/ROUTE-019 production calls freeze fallback and baseline befo
   assert.ok(baselineCall > 0)
   assert.ok(mutationBegin > baselineCall)
   assert.match(source.slice(baselineCall, mutationBegin), /readPreMutationBaseline\(\)/)
+})
+
+test('Codex BYOK rejects invalid endpoint shapes before opening its accounting relay', async () => {
+  const configure = require('../../scripts/codex-configure.cjs')
+  assert.equal(configure.providerApiBaseUrl({}), null)
+  assert.equal(configure.providerApiBaseUrl({ OPENAI_BASE_URL:'https://openrouter.ai/api/v1' }), 'https://openrouter.ai/api/v1')
+  for (const upstreamBaseUrl of ['file:///private/data', 'https://user:password@example.invalid/v1', 'https://example.invalid/v1?key=fixture', 'https://example.invalid/v1#fragment', 'not a URL']) {
+    assert.throws(() => configure.providerApiBaseUrl({ OPENAI_BASE_URL:upstreamBaseUrl }), { code:'PROVIDER_UNSUPPORTED' })
+    await assert.rejects(startCodexCumulativeQuotaProxy({ tokenLimit:1000, upstreamBaseUrl }), { code:'PROVIDER_UNSUPPORTED' })
+  }
 })

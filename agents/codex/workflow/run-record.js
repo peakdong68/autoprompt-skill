@@ -787,6 +787,31 @@ function terminalFinalizationIntentPath(runPath) {
   return intentPath
 }
 
+function nativeRecordCapture(fsImpl) {
+  const capture = process.platform === 'darwin' ? fsImpl.darwinCapture
+    : process.platform === 'win32' ? fsImpl.windowsCapture : null
+  if (!capture) return null
+  const mutations = process.platform === 'darwin' ? fsImpl.darwinMutations : fsImpl.windowsMutations || capture
+  for (const method of ['assertRecordParent', 'publishRecordExclusive', 'recoverRecordPublication']) {
+    if (typeof mutations?.[method] !== 'function') throw new RunRecordError('RUN_RECORD_UNSAFE', `native record authority lacks ${method}`)
+  }
+  if (typeof capture.captureFileBytes !== 'function') throw new RunRecordError('RUN_RECORD_UNSAFE', 'native record authority lacks captureFileBytes')
+  return { assertRecordParent: (...args) => mutations.assertRecordParent(...args),
+    publishRecordExclusive: (...args) => mutations.publishRecordExclusive(...args),
+    recoverRecordPublication: (...args) => mutations.recoverRecordPublication(...args),
+    captureFileBytes: (...args) => capture.captureFileBytes(...args) }
+}
+
+function recoverNativeRecordPublication(capture, publicationPath, prefix = '') {
+  const recovered = capture.recoverRecordPublication(publicationPath)
+  const basename = path.basename(publicationPath)
+  if (!Array.isArray(recovered) || recovered.some(name => typeof name !== 'string' || path.basename(name) !== name ||
+      ![ATOMIC_WRITE_TEMP_PATTERN, TERMINAL_CREATE_TEMP_PATTERN].some(pattern => pattern.exec(name)?.[1] === basename))) {
+    throw new RunRecordError('RUN_RECORD_UNSAFE', 'native publication recovery returned an invalid residue inventory')
+  }
+  return Object.freeze(recovered.map(name => prefix + name))
+}
+
 function withTerminalFinalizationIntentAuthority(runPath, fsImpl, operation) {
   const absolute = path.resolve(runPath)
   const intentPath = terminalFinalizationIntentPath(absolute)
@@ -810,6 +835,8 @@ function withTerminalFinalizationIntentAuthority(runPath, fsImpl, operation) {
 
 function assertTerminalFinalizationIntentAuthority(runPath, fsImpl) {
   const intentPath = terminalFinalizationIntentPath(path.resolve(runPath))
+  const capture = nativeRecordCapture(fsImpl)
+  if (capture) { capture.assertRecordParent(intentPath); return intentPath }
   withTerminalFinalizationIntentAuthority(runPath, fsImpl, () => true)
   return intentPath
 }
@@ -857,6 +884,13 @@ function readTerminalFinalizationIntentAnchored(authority, options = {}) {
   } finally {
     if (descriptor !== undefined) fsImpl.closeSync(descriptor)
   }
+  return parseTerminalFinalizationIntentBytes(bytes, options)
+}
+
+function parseTerminalFinalizationIntentBytes(bytes, options = {}) {
+  if (!Buffer.isBuffer(bytes) || bytes.length > TERMINAL_FINALIZATION_INTENT_MAX_BYTES + 1) {
+    throw new RunRecordError('TERMINAL_FINALIZATION_INTENT_INVALID', 'terminal finalization intent exceeds its exact byte boundary')
+  }
   let intent
   try { intent = JSON.parse(bytes.toString('utf8')) } catch (error) {
     throw new RunRecordError('TERMINAL_FINALIZATION_INTENT_INVALID', 'terminal finalization intent is not JSON', { cause: error.message })
@@ -874,6 +908,22 @@ function readTerminalFinalizationIntentAnchored(authority, options = {}) {
 
 function readTerminalFinalizationIntentAt(runPath, options = {}) {
   const fsImpl = options.fsImpl || fs
+  const capture = nativeRecordCapture(fsImpl)
+  if (capture) {
+    const intentPath = terminalFinalizationIntentPath(runPath)
+    try {
+      const result = capture.captureFileBytes(intentPath)
+      if (!result || !Buffer.isBuffer(result.content) || result.content.length !== result.bytes ||
+          crypto.createHash('sha256').update(result.content).digest('hex') !== result.hash) {
+        throw new RunRecordError('TERMINAL_FINALIZATION_INTENT_INVALID', 'native intent capture is not bound to exact bytes')
+      }
+      return parseTerminalFinalizationIntentBytes(result.content, options)
+    } catch (error) {
+      if (error instanceof RunRecordError) throw error
+      if (error.code === 'ENOENT') throw new RunRecordError('TERMINAL_FINALIZATION_INTENT_REQUIRED', 'terminal finalization intent is missing')
+      throw new RunRecordError('TERMINAL_FINALIZATION_INTENT_INVALID', 'native terminal finalization intent capture failed', { cause: error.code || error.message })
+    }
+  }
   return withTerminalFinalizationIntentAuthority(runPath, fsImpl, authority =>
     readTerminalFinalizationIntentAnchored(authority, options))
 }
@@ -931,12 +981,18 @@ function recoverTerminalPublicationResiduesAnchored(publicationPath, verifyLinea
 function recoverTerminalRecordPublicationResidues(runPath, options = {}) {
   const fsImpl = options.fsImpl || fs
   const terminalPath = path.join(path.resolve(runPath), RUNTIME_PATHS.terminal)
+  const capture = nativeRecordCapture(fsImpl)
+  if (capture) {
+    return recoverNativeRecordPublication(capture, terminalPath)
+  }
   return withStrictAnchoredManifestPath(terminalPath, fsImpl, (anchoredPath, verifyLineage) =>
     recoverTerminalPublicationResiduesAnchored(anchoredPath, verifyLineage, options))
 }
 
 function recoverTerminalFinalizationIntentPublicationResidues(runPath, options = {}) {
   const fsImpl = options.fsImpl || fs
+  const capture = nativeRecordCapture(fsImpl)
+  if (capture) return recoverNativeRecordPublication(capture, terminalFinalizationIntentPath(runPath), 'runtime/')
   return withTerminalFinalizationIntentAuthority(runPath, fsImpl, authority =>
     recoverTerminalFinalizationIntentPublicationResiduesAnchored(authority, options))
 }
@@ -944,6 +1000,20 @@ function recoverTerminalFinalizationIntentPublicationResidues(runPath, options =
 function createOrVerifyTerminalFinalizationIntentAt(runPath, input, options = {}) {
   const fsImpl = options.fsImpl || fs
   const expectedRunId = options.expectedRunId || input.runId
+  const capture = nativeRecordCapture(fsImpl)
+  if (capture) {
+    const expected = canonicalTerminalFinalizationIntent(input)
+    if (expected.runId !== expectedRunId) throw new RunRecordError('TERMINAL_FINALIZATION_INTENT_INVALID', 'terminal finalization intent run binding is foreign')
+    const intentPath = terminalFinalizationIntentPath(runPath)
+    capture.assertRecordParent(intentPath)
+    recoverNativeRecordPublication(capture, intentPath, 'runtime/')
+    try { capture.publishRecordExclusive(intentPath, Buffer.from(`${stableStringify(expected)}\n`, 'utf8')) } catch (error) {
+      if (error.code !== 'EEXIST') throw new RunRecordError('RUN_RECORD_WRITE_UNAVAILABLE', 'native terminal finalization intent publication failed', { cause: error.code || error.message })
+    }
+    const existing = readTerminalFinalizationIntentAt(runPath, { fsImpl, expectedRunId })
+    if (stableStringify(existing) !== stableStringify(expected)) throw new RunRecordError('TERMINAL_FINALIZATION_INTENT_CONFLICT', 'immutable terminal finalization intent conflicts with the requested finalization')
+    return existing
+  }
   return withTerminalFinalizationIntentAuthority(runPath, fsImpl, authority => {
     const intentPath = authority.anchoredIntentPath
     recoverTerminalFinalizationIntentPublicationResiduesAnchored(authority, { fsImpl })
@@ -1341,7 +1411,7 @@ function auditRunRecordTree(record, options = {}) {
   return { valid: true, directories: [...seenDirectories].sort() }
 }
 
-function facade(data) {
+function facade(data, fsImpl = fs) {
   const record = {
     schema: RUN_RECORD_SCHEMA, runId: data.runId, rootKind: data.rootKind, providerId: data.providerId,
     rootPath: data.rootPath, runPath: data.runPath, targetPath: data.targetPath, targetIdentity: data.targetIdentity,
@@ -1380,11 +1450,11 @@ function facade(data) {
     readAllWorkJoinedReceipt: { value: () => readAllWorkJoinedReceipt(record) },
     createOrVerifyTerminalFinalizationIntent: { value: input => {
       assertRunRecordBinding(record)
-      return createOrVerifyTerminalFinalizationIntentAt(record.runPath, input, { expectedRunId: record.runId })
+      return createOrVerifyTerminalFinalizationIntentAt(record.runPath, input, { fsImpl, expectedRunId: record.runId })
     } },
     readTerminalFinalizationIntent: { value: () => {
       assertRunRecordBinding(record)
-      return readTerminalFinalizationIntentAt(record.runPath, { expectedRunId: record.runId })
+      return readTerminalFinalizationIntentAt(record.runPath, { fsImpl, expectedRunId: record.runId })
     } },
     writeRouteAnalystFallbackState: { value: state => writeRouteAnalystFallbackState(record, state) },
     readRouteAnalystFallbackState: { value: () => readRouteAnalystFallbackState(record) },
@@ -1401,7 +1471,7 @@ function createRunRecord(options = {}) {
     runPath: allocation.runPath, targetPath: selection.targetPath, targetIdentity: selection.targetIdentity,
     targetIdentitySha256: selection.targetIdentitySha256, rootBinding: selection.binding, runBinding: allocation.binding,
     projectRejection: selection.projectRejection,
-  })
+  }, options.fsImpl || fs)
   const metadataBytes = Buffer.from(`${JSON.stringify(metadataFor(record, options), null, 2)}\n`, 'utf8')
   atomicWriteRegistered(record, RUNTIME_PATHS.metadata, metadataBytes, { initializeImmutable: true })
   atomicWriteRegistered(record, RUNTIME_PATHS.metadataDigest, `${crypto.createHash('sha256').update(metadataBytes).digest('hex')}\n`, { initializeImmutable: true })
@@ -1447,10 +1517,10 @@ function openRunRecord(runPath, options = {}) {
     runPath: metadata.run_path, targetPath: metadata.target_path, targetIdentity: metadata.target_identity,
     targetIdentitySha256: metadata.target_identity_sha256, rootBinding: metadata.root_binding, runBinding: metadata.run_binding,
     projectRejection: metadata.project_rejection,
-  })
+  }, options.fsImpl || fs)
   recoverContentAddressedPublicationResidues(record)
-  recoverTerminalFinalizationIntentPublicationResidues(record.runPath)
-  recoverTerminalRecordPublicationResidues(record.runPath)
+  recoverTerminalFinalizationIntentPublicationResidues(record.runPath, { fsImpl: options.fsImpl || fs })
+  recoverTerminalRecordPublicationResidues(record.runPath, { fsImpl: options.fsImpl || fs })
   recoverUnpublishedAtomicWriteResidues(record)
   auditRunRecordTree(record, { ...options, permissions: false })
   return record

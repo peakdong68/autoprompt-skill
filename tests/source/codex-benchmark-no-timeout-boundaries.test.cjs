@@ -487,6 +487,10 @@ test('the explicit cancellation entry point is the user-cancellation status prov
   runtime.cancelled = false
   runtime.finished = false
   runtime.lease = null
+  runtime.activation = { id: 'benchmark-explicit-cancel', generation: 1 }
+  runtime.now = Date.now
+  runtime.options = {}
+  runtime.pendingLaunchSettlements = new Set()
   runtime.scheduler = { dispose() {} }
   runtime.processOwner = {
     async cancelAll(options) { drainedWith = options },

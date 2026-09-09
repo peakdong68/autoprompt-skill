@@ -1,7 +1,7 @@
 # Private v2 package routing shared by the public PowerShell entrypoints.
 function Test-HarnessV2Provider {
     param([string]$Client)
-    return $Client -cin @('claude','opencode','kilo','vscode','prime','omp','deepseek')
+    return $Client -cin @('claude','opencode','kilo','vscode','prime','omp','deepseek','hermes','grok')
 }
 function Get-HarnessV2Root {
     param([string]$Client)
@@ -26,9 +26,17 @@ function Uninstall-HarnessV2Lifecycle {
     param([string]$Client)
     try {
         $root = Get-HarnessV2Root -Client $Client
-        & node (Join-Path $RepoRoot 'scripts/harness-v2-package.cjs') uninstall $Client --root $root
+        $output = @(& node (Join-Path $RepoRoot 'scripts/harness-v2-package.cjs') uninstall $Client --root $root)
         if ($LASTEXITCODE -ne 0) { throw 'Private v2 lifecycle failed' }
-        $script:ResultRows += "RESULT=OK client=$Client removed=private-v2"
+        if ($output.Count -ne 1) { throw 'Private v2 lifecycle returned an invalid result' }
+        $result = $output[0] | ConvertFrom-Json -ErrorAction Stop
+        if ($result.status -ceq 'uninstalled') {
+            $script:ResultRows += "RESULT=OK client=$Client removed=private-v2"
+        } elseif ($result.status -ceq 'not-installed') {
+            $script:ResultRows += "SKIP=skip client=$Client reason=no-receipt"
+        } else {
+            throw 'Private v2 lifecycle returned an unknown uninstall status'
+        }
     } catch {
         [Console]::Error.WriteLine($_)
         $script:ResultRows += "RESULT=FAIL client=$Client code=1"

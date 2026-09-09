@@ -38,7 +38,7 @@ function statIdentity(stats) {
   return {
     dev: String(stats.dev),
     ino: String(stats.ino),
-    mode: stats.mode,
+    mode: Number(stats.mode),
     nlink: Number(stats.nlink),
   }
 }
@@ -75,7 +75,7 @@ function inspectPathNoFollow(candidate, options = {}) {
   for (const prefix of existingPrefixes(absolute)) {
     let stats
     try {
-      stats = fileSystem.lstatSync(prefix)
+      stats = fileSystem.lstatSync(prefix, { bigint: true })
     } catch (error) {
       if (error.code === 'ENOENT') break
       throw new RunRecordError('RUN_RECORD_UNSAFE', `Cannot inspect run-record path without following links: ${prefix}`, { cause: error.code })
@@ -138,6 +138,7 @@ function assertDirectoryBinding(binding) {
 }
 
 function chmodPrivate(target, mode) {
+  ensureWindowsDefaultTokenOwner()
   try {
     fs.chmodSync(target, mode)
   } catch (error) {
@@ -145,12 +146,103 @@ function chmodPrivate(target, mode) {
   }
 }
 
+let windowsDefaultTokenOwnerEstablished = false
+function ensureWindowsDefaultTokenOwner() {
+  if (process.platform !== 'win32' || windowsDefaultTokenOwnerEstablished) {
+    return { supported: true, mechanism: process.platform === 'win32' ? 'windows-token-owner' : 'posix-owner' }
+  }
+  // Elevated Windows tokens can default newly-created objects to the local
+  // Administrators group even though the token user is the interactive user.
+  // Adjust this live Node process token once so every later run-record child
+  // is born with the owner that the native record authority verifies.
+  const source = [
+    'using System;',
+    'using System.ComponentModel;',
+    'using System.IO;',
+    'using System.Runtime.InteropServices;',
+    'public static class AutopromptDefaultTokenOwner {',
+    ' [StructLayout(LayoutKind.Sequential)] struct FILETIME { public uint Low, High; public ulong Value { get { return ((ulong)High << 32) | Low; } } }',
+    ' [StructLayout(LayoutKind.Sequential)] struct TOKEN_OWNER { public IntPtr Owner; }',
+    ' [DllImport("kernel32.dll",SetLastError=true)] static extern IntPtr OpenProcess(uint access,bool inherit,int pid);',
+    ' [DllImport("kernel32.dll",SetLastError=true)] static extern uint GetProcessId(IntPtr process);',
+    ' [DllImport("kernel32.dll",SetLastError=true,CharSet=CharSet.Unicode)] static extern bool QueryFullProcessImageName(IntPtr process,uint flags,System.Text.StringBuilder image,ref uint size);',
+    ' [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetProcessTimes(IntPtr process,out FILETIME creation,out FILETIME exit,out FILETIME kernel,out FILETIME user);',
+    ' [DllImport("kernel32.dll",SetLastError=true)] static extern bool CloseHandle(IntPtr handle);',
+    ' [DllImport("advapi32.dll",SetLastError=true)] static extern bool OpenProcessToken(IntPtr process,uint access,out IntPtr token);',
+    ' [DllImport("advapi32.dll",SetLastError=true)] static extern bool GetTokenInformation(IntPtr token,int kind,IntPtr data,int length,out int required);',
+    ' [DllImport("advapi32.dll",SetLastError=true)] static extern bool SetTokenInformation(IntPtr token,int kind,IntPtr data,int length);',
+    ' [DllImport("advapi32.dll")] static extern bool EqualSid(IntPtr first,IntPtr second);',
+    ' static void Need(bool value,string call) { if(!value) throw new Win32Exception(Marshal.GetLastWin32Error(),call); }',
+    ' static IntPtr TokenInfo(IntPtr token,int kind) { int required; GetTokenInformation(token,kind,IntPtr.Zero,0,out required); if(required<=0) throw new Win32Exception(Marshal.GetLastWin32Error(),"GetTokenInformation-size"); IntPtr data=Marshal.AllocHGlobal(required); try { Need(GetTokenInformation(token,kind,data,required,out required),"GetTokenInformation"); return data; } catch { Marshal.FreeHGlobal(data); throw; } }',
+    ' public static void Apply(int pid,string expectedImage) {',
+    '  IntPtr process=IntPtr.Zero,token=IntPtr.Zero,user=IntPtr.Zero,owner=IntPtr.Zero,ownerRecord=IntPtr.Zero;',
+    '  try {',
+    '   process=OpenProcess(0x1000,false,pid); Need(process!=IntPtr.Zero,"OpenProcess"); if(GetProcessId(process)!=(uint)pid) throw new InvalidOperationException("process identity changed");',
+    '   var image=new System.Text.StringBuilder(32768); uint size=(uint)image.Capacity; Need(QueryFullProcessImageName(process,0,image,ref size),"QueryFullProcessImageName"); if(!String.Equals(Path.GetFullPath(image.ToString()),Path.GetFullPath(expectedImage),StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("process image changed");',
+    '   FILETIME createdBefore,exit,kernel,userTime; Need(GetProcessTimes(process,out createdBefore,out exit,out kernel,out userTime),"GetProcessTimes");',
+    '   Need(OpenProcessToken(process,0x88,out token),"OpenProcessToken"); user=TokenInfo(token,1); IntPtr userSid=Marshal.ReadIntPtr(user);',
+    '   ownerRecord=Marshal.AllocHGlobal(IntPtr.Size); Marshal.WriteIntPtr(ownerRecord,userSid); Need(SetTokenInformation(token,4,ownerRecord,IntPtr.Size),"SetTokenInformation");',
+    '   owner=TokenInfo(token,4); if(!EqualSid(userSid,Marshal.ReadIntPtr(owner))) throw new InvalidOperationException("token owner was not applied");',
+    '   FILETIME createdAfter; Need(GetProcessTimes(process,out createdAfter,out exit,out kernel,out userTime),"GetProcessTimes"); if(createdBefore.Value!=createdAfter.Value) throw new InvalidOperationException("process creation identity changed");',
+    '  } finally { if(ownerRecord!=IntPtr.Zero)Marshal.FreeHGlobal(ownerRecord); if(owner!=IntPtr.Zero)Marshal.FreeHGlobal(owner); if(user!=IntPtr.Zero)Marshal.FreeHGlobal(user); if(token!=IntPtr.Zero)CloseHandle(token); if(process!=IntPtr.Zero)CloseHandle(process); }',
+    ' }',
+    '}',
+  ].join(' ')
+  const script = [
+    "$ErrorActionPreference='Stop'",
+    'Add-Type -TypeDefinition $env:AUTOPROMPT_TOKEN_OWNER_SOURCE -Language CSharp',
+    '[AutopromptDefaultTokenOwner]::Apply([int]$env:AUTOPROMPT_TOKEN_OWNER_PID,$env:AUTOPROMPT_TOKEN_OWNER_IMAGE)',
+  ].join(';')
+  const systemRoot = process.env.SystemRoot || process.env.WINDIR
+  if (typeof systemRoot !== 'string' || !/^[A-Za-z]:\\Windows$/iu.test(systemRoot)) {
+    throw new RunRecordError('PRIVACY_UNSUPPORTED', 'Windows system root is unavailable for the default-owner helper')
+  }
+  const powershell = path.win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-token-owner-'))
+  let result
+  try {
+    result = spawnSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
+      encoding: 'utf8', windowsHide: true, shell: false, timeout: 15000, maxBuffer: 1024 * 1024,
+      cwd: path.win32.dirname(powershell),
+      env: {
+        SystemRoot: systemRoot,
+        WINDIR: systemRoot,
+        SystemDrive: systemRoot.slice(0, 2),
+        PATH: path.win32.join(systemRoot, 'System32'),
+        PSModulePath: '',
+        TEMP: temporary,
+        TMP: temporary,
+        AUTOPROMPT_TOKEN_OWNER_SOURCE: source,
+        AUTOPROMPT_TOKEN_OWNER_PID: String(process.pid),
+        AUTOPROMPT_TOKEN_OWNER_IMAGE: process.execPath,
+      },
+    })
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true })
+  }
+  if (result.error || result.signal || result.status !== 0 || result.stderr) {
+    throw new RunRecordError('PRIVACY_UNSUPPORTED', 'Cannot establish the Windows token user as the default owner for new run-record objects', {
+      status: result.status,
+      cause: result.error && result.error.code,
+      stderr: result.stderr && result.stderr.trim(),
+    })
+  }
+  windowsDefaultTokenOwnerEstablished = true
+  return { supported: true, mechanism: 'windows-token-owner' }
+}
+
 function ensureWindowsPrivateAcl(target) {
   if (process.platform !== 'win32') return { supported: true, mechanism: 'posix-mode' }
-  const account = process.env.USERDOMAIN && process.env.USERNAME
-    ? `${process.env.USERDOMAIN}\\${process.env.USERNAME}`
-    : process.env.USERNAME
-  if (!account) throw new RunRecordError('PRIVACY_UNSUPPORTED', 'Windows account identity is unavailable for a private run-record DACL')
+  ensureWindowsDefaultTokenOwner()
+  // Environment account names need not identify the process token. Use the
+  // token's SID for both grants and ownership, including elevated sessions
+  // whose newly created objects otherwise belong to Administrators.
+  const identity = spawnSync('whoami.exe', ['/user', '/fo', 'csv', '/nh'], {
+    encoding: 'utf8', windowsHide: true,
+  })
+  const row = identity.status === 0 && String(identity.stdout || '').trim().match(/^"(?:[^"\r\n]|"")+","(S-1-(?:\d+-)+\d+)"$/i)
+  if (!row) throw new RunRecordError('PRIVACY_UNSUPPORTED', 'Windows token identity is unavailable for a private run-record DACL')
+  const account = `*${row[1]}`
   const result = spawnSync('icacls.exe', [target, '/inheritance:r', '/grant:r', `${account}:(OI)(CI)F`, '/grant:r', '*S-1-5-18:(OI)(CI)F'], {
     encoding: 'utf8',
     windowsHide: true,
@@ -159,6 +251,15 @@ function ensureWindowsPrivateAcl(target) {
     throw new RunRecordError('PRIVACY_UNSUPPORTED', `Cannot establish a private Windows DACL for run-record root: ${target}`, {
       status: result.status,
       stderr: result.stderr && result.stderr.trim(),
+    })
+  }
+  const owner = spawnSync('icacls.exe', [target, '/setowner', account], {
+    encoding: 'utf8', windowsHide: true,
+  })
+  if (owner.status !== 0) {
+    throw new RunRecordError('PRIVACY_UNSUPPORTED', `Cannot establish private Windows ownership for run-record root: ${target}`, {
+      status: owner.status,
+      stderr: owner.stderr && owner.stderr.trim(),
     })
   }
   return { supported: true, mechanism: 'windows-dacl' }
@@ -521,7 +622,7 @@ function withOwnedLock(lockPath, operation, options = {}) {
 function readFileNoFollow(filename) {
   const inspected = inspectPathNoFollow(filename, { mustBeDirectory: false })
   if (!inspected.exists) return null
-  const stats = fs.lstatSync(filename)
+  const stats = fs.lstatSync(filename, { bigint: true })
   if (!stats.isFile()) throw new RunRecordError('RUN_RECORD_UNSAFE', `Expected a regular ownership file: ${filename}`)
   if (Number(stats.nlink) !== 1) {
     throw new RunRecordError('RUN_RECORD_UNSAFE', `Hard-linked private run-record files are not allowed: ${filename}`, { nlink: Number(stats.nlink) })
@@ -529,7 +630,7 @@ function readFileNoFollow(filename) {
   const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0)
   const fd = fs.openSync(filename, flags)
   try {
-    const opened = fs.fstatSync(fd)
+    const opened = fs.fstatSync(fd, { bigint: true })
     if (!sameIdentity(statIdentity(stats), statIdentity(opened))) {
       throw new RunRecordError('RUN_RECORD_UNSAFE', `Ownership file changed while it was opened: ${filename}`)
     }
@@ -842,6 +943,7 @@ module.exports = {
   assertNpmPackExcludesRunRecords,
   assertRunRecordBoundary,
   ensureWindowsPrivateAcl,
+  ensureWindowsDefaultTokenOwner,
   validateWindowsAclSnapshot,
   auditPrivatePermissions,
   withOwnedLock,

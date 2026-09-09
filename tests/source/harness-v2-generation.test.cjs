@@ -152,7 +152,7 @@ test('native frontmatter and both DeepSeek preset encodings parse as YAML with e
   for (const [provider, outputs] of rendered) {
     const projection = json(outputs, `agents/${provider}/native-projection.json`)
     for (const [id, projected] of Object.entries(projection.roles)) {
-      if (provider === 'prime') continue
+      if (['prime', 'hermes', 'grok'].includes(provider)) continue
       payload.push({ provider, id, projected, source: outputs.get(`agents/${provider}/${projected.path}`) })
     }
   }
@@ -266,10 +266,10 @@ test('Prime retires the automatic injector and rejects both old Python dispatch 
   assert.match(result.stdout, /2 retired entries rejected/)
 })
 
-test('all nine generation ports open without changing capability evidence or admitting runtimes', () => {
+test('all registered generation ports open without changing capability evidence or admitting runtimes', () => {
   const before = read('agents/contracts/providers.json')
   const decisions = g.providerProjectionPlan(contracts)
-  assert.equal(decisions.length, 9)
+  assert.equal(decisions.length, contracts.providers.providers.length)
   assert.ok(decisions.every(item => item.portOpen && !item.runtimeAdmitted && !item.claimsRealBehavior))
   assert.ok(g.providerProjectionPlan(contracts, ['codex']).filter(item => item.provider !== 'codex').every(item => !item.portOpen))
   assert.equal(read('agents/contracts/providers.json'), before)

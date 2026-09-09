@@ -6,18 +6,26 @@
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const boundary = require('../../harness-v2-tool-boundary.cjs')
-const { openController, NAMES } = require('../pi/controller.cjs')
+const { openController } = require('../pi/controller.cjs')
+
+const STRUCTURED_OUTPUT_TOOL = 'autoprompt_structured_output'
+const STRUCTURED_OUTPUT_ACK = Object.freeze({ recorded: true })
 
 exports.name = 'autoprompt-deepseek-owned-sdk'
 exports.inject = ['agents', 'tools']
 exports.apply = async function apply(ctx, config) {
   if (!path.isAbsolute(config.packageRoot || '')) throw new Error('An exact official SDK package root is required')
+  if (config.oneShot !== true) throw new Error('The owned DeepSeek structured-output bridge is one-shot only')
   const load = name => import(pathToFileURL(path.join(config.packageRoot, name, 'lib/index.js')).href)
   const [{ HarnessSdkJsonRpcServer }, { JsonRpcLineTransport }] = await Promise.all([
     load('dsh-sdk-jsonrpc-server'), load('dsh-sdk-protocol'),
   ])
   const controller = openController('deepseek')
-  for (const tool of boundary.TOOLS) {
+  const allowedTools = controller.state.policy.toolFree === true ? [] : boundary.TOOLS
+  const allowedNames = allowedTools.map(tool => `autoprompt_owned_${tool.name}`)
+  if (!config.initialize.outputSchema || config.initialize.outputSchema.type !== 'object') throw new Error('DeepSeek requires an object-rooted structured-output schema')
+  let structuredRecorded = false
+  for (const tool of allowedTools) {
     const name = `autoprompt_owned_${tool.name}`
     ctx.tools.register({ name, description: tool.description, parameters: tool.inputSchema,
       output: { schema: { type: 'object', additionalProperties: true },
@@ -25,6 +33,21 @@ exports.apply = async function apply(ctx, config) {
       execute: async (args, execution) => (await controller.execute(name, args, execution.signal)).details.actualResult,
     })
   }
+  ctx.tools.register({
+    name: STRUCTURED_OUTPUT_TOOL,
+    description: 'Report the final controller result. Call this exactly once when the assignment is complete; the arguments must match this tool schema.',
+    parameters: config.initialize.outputSchema,
+    output: {
+      schema: { type: 'object', properties: { recorded: { type: 'boolean', const: true } }, required: ['recorded'], additionalProperties: false },
+      render: () => [{ type: 'text', text: JSON.stringify(STRUCTURED_OUTPUT_ACK) }],
+    },
+    execute: async (_args, execution) => {
+      if (structuredRecorded) throw new Error('Structured output was already recorded')
+      structuredRecorded = true
+      execution.concludeTurn()
+      return STRUCTURED_OUTPUT_ACK
+    },
+  })
   class OwnedServer extends HarnessSdkJsonRpcServer {
     async initialize(params) {
       if (params.resumeSessionId !== undefined && !/^[A-Za-z0-9_.:-]{1,256}$/.test(params.resumeSessionId)) throw new Error('Invalid bound native resume identity')
@@ -36,7 +59,15 @@ exports.apply = async function apply(ctx, config) {
       const agentOptions = { provider: this.provider, model: this.model,
         ...(this.reasoningEffort === undefined ? {} : { reasoningEffort: this.reasoningEffort }),
         ...(this.maxTokens === undefined ? {} : { maxTokens: this.maxTokens }) }
-      const setup = agentCtx => { agentCtx.tools.restrict({ allow: [...NAMES] }) }
+      const setup = agentCtx => {
+        agentCtx.systemPrompt.section({
+          name: `tool:${STRUCTURED_OUTPUT_TOOL}`,
+          order: agentCtx.systemPrompt.getSectionOrder('STRUCTURED_OUTPUT'),
+          text: `When the assignment is complete, call ${STRUCTURED_OUTPUT_TOOL} exactly once with the final result. A plain text final answer is invalid.`,
+        })
+        agentCtx.tools.guard(execution => structuredRecorded ? `structured output already recorded: ${execution.name} is not executed` : undefined)
+        agentCtx.tools.restrict({ allow: [...allowedNames, STRUCTURED_OUTPUT_TOOL] })
+      }
       const handle = this.resumeSessionId
         ? await this.ctx.agents.resume({ resumeSessionId: sessionId, agentOptions, setup })
         : await this.ctx.agents.create({ sessionId, meta: { cwd: this.cwd }, agentOptions, setup })

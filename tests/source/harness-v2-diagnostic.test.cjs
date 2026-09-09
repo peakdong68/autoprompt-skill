@@ -17,7 +17,7 @@ function tap(cases, totals = summary({ tests: cases.length, pass: cases.length }
 }
 
 test('native diagnostic selects only registered actual-binary suites and exact case names', () => {
-  assert.deepEqual(Object.keys(diagnostic.NATIVE_SUITES).sort(), ['claude', 'deepseek', 'kilo', 'omp', 'opencode', 'prime', 'reasonix', 'vscode'])
+  assert.deepEqual(Object.keys(diagnostic.NATIVE_SUITES).sort(), ['claude', 'deepseek', 'grok', 'hermes', 'kilo', 'omp', 'opencode', 'prime', 'reasonix', 'vscode'])
   for (const provider of Object.keys(diagnostic.PROVIDERS)) {
     const plan = diagnostic.nativeTestPlan(provider)
     if (!Object.hasOwn(diagnostic.NATIVE_SUITES, provider)) { assert.equal(plan, null); continue }
@@ -41,9 +41,9 @@ test('native diagnostic selects only registered actual-binary suites and exact c
 test('native diagnostic completion requires observed named passes, not just success totals', () => {
   const names = diagnostic.NATIVE_SUITES.claude.cases
   const good = diagnostic.selectedCaseSummary(tap(names), names)
-  assert.equal(diagnostic.suiteCompleted({ ok: true }, summary(), good), true)
+  assert.equal(diagnostic.suiteCompleted({ ok: true }, summary({ tests: names.length, pass: names.length }), good), true)
   // Older Node versions may count the two unselected provider cases as skipped.
-  assert.equal(diagnostic.suiteCompleted({ ok: true }, summary({ tests: 3, skipped: 2 }), good), true)
+  assert.equal(diagnostic.suiteCompleted({ ok: true }, summary({ tests: names.length + 2, pass: names.length, skipped: 2 }), good), true)
   for (const text of [tap([]), tap(['an unrelated passing test']),
     tap(names).replace(' - ', ' - unrelated '),
     tap(names).replace(names[0], `${names[0]} # SKIP no selected native binary`),
@@ -65,7 +65,7 @@ test('TAP case matching treats punctuation literally and rejects duplicate obser
   assert.equal(diagnostic.selectedCaseSummary(`ok 1 - ${names[0]}\nok 2 - ${names[0]}\n`, names)[0].status, 'ambiguous')
 })
 
-for (const provider of ['claude', 'opencode', 'kilo', 'prime', 'omp', 'deepseek', 'vscode']) {
+for (const provider of ['claude', 'opencode', 'kilo', 'prime', 'omp', 'deepseek', 'vscode', 'hermes']) {
   test(`${provider} diagnostic launches its native suite with an isolated selected executable`, t => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), `harness-diagnostic-${provider}-`))
     t.after(() => fs.rmSync(root, { recursive: true, force: true }))

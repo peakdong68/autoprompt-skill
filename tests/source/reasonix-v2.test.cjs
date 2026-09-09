@@ -1,6 +1,8 @@
 'use strict'
 
 const assert = require('node:assert/strict')
+const childProcess = require('node:child_process')
+const { EventEmitter } = require('node:events')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -8,7 +10,103 @@ const test = require('node:test')
 const toml = require('@iarna/toml')
 const generator = require('../../scripts/generate-provider-contracts.cjs')
 const native = require('../../agents/reasonix/workflow/native.js')
-const { ReasonixEventStream } = require('../../agents/reasonix/workflow/transport.js')
+const { ReasonixEventStream, reasonixQuotaConnection } = require('../../agents/reasonix/workflow/transport.js')
+const { runAbortOwnedSupervisor } = require('../../agents/codex/workflow/phase-budget.js')
+const { awaitReasonixChild, armActivationExpiry } = require('../../scripts/reasonix-configure.cjs')
+
+test('Reasonix activation expiry aborts a held provider supervisor through the shared ownership cancellation path', async () => {
+  let fired = null, cleared = null, reason = null
+  const disarm = armActivationExpiry({ record: { capability: { expiresAt: '2026-09-09T00:00:05.000Z' } } }, value => { reason = value }, {
+    wallNowMs: () => Date.parse('2026-09-09T00:00:00.000Z'),
+    timerApi: { setTimeout(fn, delay) { fired = { fn, delay }; return 'expiry' }, clearTimeout(token) { cleared = token } },
+  })
+  assert.equal(fired.delay, 5000)
+  fired.fn()
+  assert.equal(reason, 'activation authorization expired')
+  disarm()
+  assert.equal(cleared, 'expiry')
+  assert.throws(() => armActivationExpiry({ record: { capability: { expiresAt: 'bad' } } }, () => {}), { code: 'ACTIVATION_INVALID' })
+
+  const controller = new AbortController()
+  let nativeStart = 0, nativeCancel = 0, cancelReason = null
+  const heldRuntime = {
+    start() { nativeStart++; return new Promise(() => {}) },
+    async cancel(value) { nativeCancel++; cancelReason = value; return { outcome: 'CANCELLED', durable: true } },
+  }
+  let expiryFire = null
+  const expired = armActivationExpiry({ record: { capability: { expiresAt: '2026-09-09T00:00:05.000Z' } } }, value => controller.abort(value), {
+    wallNowMs: () => Date.parse('2026-09-09T00:00:00.000Z'),
+    timerApi: { setTimeout(fn) { expiryFire = fn; return 'held-expiry' }, clearTimeout() {} },
+  })
+  const settled = runAbortOwnedSupervisor(heldRuntime, controller.signal)
+  await new Promise(resolve => setImmediate(resolve))
+  expiryFire()
+  assert.equal(nativeStart, 1)
+  const result = await settled
+  assert.equal(nativeCancel, 1)
+  assert.equal(cancelReason, 'activation authorization expired')
+  assert.deepEqual(result, { outcome: 'CANCELLED', durable: true })
+  expired()
+})
+
+test('Reasonix tracked launcher forwards repeated termination signals and waits for the real child drain', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-launch-signal-')), marker = path.join(root, 'marker')
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const child = childProcess.spawn(process.execPath, ['-e', "const fs=require('fs'),p=process.argv[1];fs.writeFileSync(p,'ready');process.on('SIGTERM',()=>{fs.appendFileSync(p,':term');setTimeout(()=>process.exit(0),80)});setInterval(()=>{},1000)", marker], { stdio:'ignore' })
+  t.after(() => { if (child.exitCode === null) child.kill('SIGKILL') })
+  while (!fs.existsSync(marker)) await new Promise(resolve => setTimeout(resolve, 10))
+  const signals = new EventEmitter(), pending = awaitReasonixChild(child, { signalSource: signals })
+  signals.emit('SIGTERM'); signals.emit('SIGTERM')
+  assert.deepEqual(await pending, { status: 0, signal: null })
+  assert.match(fs.readFileSync(marker, 'utf8'), /^ready(?::term)+$/)
+  assert.equal(signals.listenerCount('SIGTERM'), 0)
+})
+
+test('Reasonix quota provider resolution preserves native provider/model precedence and vendor-slash model IDs', () => {
+  const provider = (name, model, base = `https://${name}.invalid/v1`) => ({ name, kind: 'openai', model, base_url: base, api_key_env: 'FIXTURE_KEY' })
+  const record = { providerTokenLimit: 50000 }
+  const vendorModel = 'z-ai/glm-5.3-flash'
+  const vendor = reasonixQuotaConnection({ default_model: vendorModel, providers: [provider('openrouter', vendorModel)] }, record)
+  assert.equal(vendor.upstreamBaseUrl, 'https://openrouter.invalid/v1')
+  assert.equal(vendor.project('http://127.0.0.1:1/v1').default_model, vendorModel)
+
+  const direct = reasonixQuotaConnection({ default_model: `openrouter/${vendorModel}`, providers: [provider('openrouter', vendorModel)] }, record)
+  assert.equal(direct.upstreamBaseUrl, 'https://openrouter.invalid/v1')
+
+  const precedence = reasonixQuotaConnection({ default_model: vendorModel, providers: [
+    provider('z-ai', 'glm-5.3-flash', 'https://prefix.invalid/v1'),
+    provider('openrouter', vendorModel, 'https://bare.invalid/v1'),
+  ] }, record)
+  assert.equal(precedence.upstreamBaseUrl, 'https://prefix.invalid/v1', 'native provider/model resolution precedes a bare vendor-slash model match')
+
+  assert.throws(() => reasonixQuotaConnection({ default_model: vendorModel, providers: [
+    provider('first', vendorModel), provider('second', vendorModel),
+  ] }, record), { code: 'PROVIDER_UNSUPPORTED' }, 'ambiguous bare model ownership must not select a provider')
+  assert.throws(() => reasonixQuotaConnection({ default_model: `openrouter/${vendorModel}`, providers: [
+    provider('openrouter', vendorModel), provider('openrouter', vendorModel),
+  ] }, record), { code: 'PROVIDER_UNSUPPORTED' }, 'ambiguous provider/model ownership must not select a provider')
+})
+
+test('Reasonix accepts native reason metadata without widening the controlled call or tool schema', () => {
+  const { controlledToolProtocolProjection } = require('../../agents/reasonix/workflow/transport.js')
+  const { validateJsonSchema } = require('../../agents/codex/workflow/json-schema-validator.js')
+  const schema = JSON.parse(controlledToolProtocolProjection('/tmp/target', '/tmp/scratch')[1])
+  const envelope = { action: 'call', capability_id: 'mcp-tool:autoprompt_owned/read', arguments: { path: '/tmp/target/file', startLine: 1, lineCount: 1 } }
+  for (const reason of ['', 'Read the assigned input']) {
+    const stream = new ReasonixEventStream()
+    stream.receiptVerifier = {} // No result is admitted or tool executed by this dispatch-only unit.
+    const args = { ...envelope, reason }
+    assert.equal(validateJsonSchema(schema, args).valid, true)
+    stream.push(JSON.stringify({ kind: 'tool_dispatch', tool: { id: 'read', name: 'use_capability', args: JSON.stringify(args) } }))
+    assert.deepEqual(stream.toolDispatches.get('read').invocation, { name: 'mcp__autoprompt_owned__read', args: envelope.arguments })
+  }
+  for (const changed of [{ reason: null }, { reason: {} }, { reason: 1 }, { action: 'decline', reason: 'no' }, { action: 'list' }, { capability_id: 'native:bash' }, { extra: true }]) {
+    const stream = new ReasonixEventStream(); stream.receiptVerifier = {}
+    assert.throws(() => stream.push(JSON.stringify({ kind: 'tool_dispatch', tool: { id: 'bad', name: 'use_capability', args: JSON.stringify({ ...envelope, ...changed }) } })), { code: 'ROLE_POLICY_DENIED' })
+  }
+  assert.equal(validateJsonSchema(schema, { action: 'call', capability_id: 'mcp-tool:autoprompt_owned/edit', reason: '', arguments: { oldText: 'old', newText: 'new' } }).valid, false,
+    'descriptive metadata cannot supply a missing edit path')
+})
 
 test('native preflight refuses a CLI missing the permission-mode flag used at launch', () => {
   assert.throws(() => native.probeExecutable({ executable: process.execPath, spawnSync: (_file, argv) => ({
@@ -35,7 +133,7 @@ test('native adapter refuses terminal JSON when the owned process failed or was 
     fs.writeFileSync(executable, 'not a native binary')
     for (const [index, processResult] of [{ status: 1, signal: null }, { status: 0, signal: 'OWNED_STOP' }, { status: null, signal: 'SIGTERM' }].entries()) {
       const adapter = new ReasonixExecAdapter({ nativeRoot: path.join(root, `native-${index}`), connection: { providers: [] },
-        executableBinding: { path: executable, sha256: native.sha256(fs.readFileSync(executable)) },
+        executableBinding: { path: executable, sha256: native.sha256(fs.readFileSync(executable)), runtimeIdentity: require('../../scripts/harness-v2-native.cjs').runtimeDependencyIdentity(executable) },
         outputSchemaResolver: () => schema, rolePrompt: () => 'Return JSON.', targetPath: target,
         runner: { run: async spec => {
           spec.onStdoutLine(JSON.stringify({ kind: 'usage', usage: { promptTokens: 10, cacheHitTokens: 0, completionTokens: 2 } }))
@@ -75,7 +173,7 @@ test('native private config excludes user runtime extensions and isolates checke
   try {
     const file = path.join(root, 'config.toml')
     fs.writeFileSync(file, toml.stringify({
-      default_model: 'fixture', providers: [{ name: 'fixture', kind: 'openai', model: 'test', base_url: 'http://127.0.0.1:1/v1', api_key_env: 'FIXTURE_KEY' }],
+      default_model: 'fixture', providers: [{ name: 'fixture', kind: 'openai', model: 'test', base_url: 'http://127.0.0.1:1/v1', api_key_env: 'FIXTURE_KEY', max_output_tokens: 731 }],
       agent: { system_prompt: 'foreign instructions' }, hooks: { stop: 'foreign command' },
       permissions: { deny: [], mode: 'bypassPermissions' }, skills: { paths: ['/foreign'] },
     }))
@@ -88,10 +186,13 @@ test('native private config excludes user runtime extensions and isolates checke
     assert.equal(parsed.sandbox.network, false)
     assert.equal(parsed.skills.disable_implicit_invocation, true)
     assert.equal(parsed.telemetry.cli_metrics, 'off')
+    assert.equal(parsed.providers[0].max_output_tokens, 731)
     assert.equal(parsed.secrets.filter_subprocess_env, true)
     assert.equal(parsed.hooks, undefined)
     assert.ok(parsed.permissions.deny.includes('task'))
     assert.ok(parsed.permissions.deny.includes('write_file'))
+    fs.writeFileSync(file, toml.stringify({ providers: [{ name: 'fixture', kind: 'openai', max_output_tokens: 0 }] }))
+    assert.throws(() => native.connectionConfig(file), { code: 'PROFILE_INVALID' })
   } finally { fs.rmSync(root, { recursive: true, force: true }) }
 })
 
@@ -131,11 +232,20 @@ test('Reasonix lifecycle verifies a private closure, rejects tampering and prese
     for (const name of ['tool-boundary', 'tool-server', 'controlled-tools']) {
       assert.match(first.files[`scripts/harness-v2-${name}.cjs`], /^[a-f0-9]{64}$/)
     }
+    for (const file of ['scripts/harness-v2-canary.cjs', 'scripts/harness-v2-closed-canary.cjs', 'scripts/harness-v2-trust/evidence.json']) {
+      assert.match(first.files[file], /^[a-f0-9]{64}$/)
+    }
     // Resolve the installed closure itself; checkout dependencies must not mask
     // a missing runtime module after installation.
     const installedTransport = require(path.join(first.bundle, 'agents/reasonix/workflow/transport.js'))
+    const installedAdmission = require(path.join(first.bundle, 'agents/reasonix/workflow/admission.js'))
+    const installedCanary = require(path.join(first.bundle, 'scripts/harness-v2-canary.cjs'))
+    const installedClosedCanary = require(path.join(first.bundle, 'scripts/harness-v2-closed-canary.cjs'))
     const installedControlled = require(path.join(first.bundle, 'scripts/harness-v2-controlled-tools.cjs'))
     assert.equal(typeof installedTransport.ReasonixExecAdapter, 'function')
+    assert.equal(typeof installedAdmission.reviewedLocalPending, 'function')
+    assert.equal(typeof installedCanary.verifyReview, 'function')
+    assert.equal(typeof installedClosedCanary.run, 'function')
     assert.equal(installedControlled.toolName('reasonix', 'read'), 'mcp__autoprompt_owned__read')
     assert.equal(packaging.install(root).payloadDigest, first.payloadDigest)
     assert.equal(fs.existsSync(path.join(root, 'skills/ap-worker/SKILL.md')), false)
@@ -168,7 +278,7 @@ test('installation refuses linked private ancestors before writing outside the r
 
 test('native partial and refreshed tool events are one observed call; inconsistent final usage is refused', () => {
   let calls = 0
-  const stream = new ReasonixEventStream({ onToolCallObserved: () => calls++ })
+  const stream = new ReasonixEventStream({ continuationId: 'one', onToolCallObserved: () => calls++ })
   for (const tool of [
     { id: 'one', name: 'bash', partial: true },
     { id: 'one', name: 'bash', args: '{"command":"echo checked"}' },
@@ -381,4 +491,36 @@ test('a declarative Reasonix profile cannot forge an enforced safety channel', (
     assert.equal(inspected.mechanicallyEnforced, false)
     assert.ok(inspected.residuals.some(item => item.code === 'ENFORCEMENT_PROOF_INVALID'))
   } finally { fs.rmSync(root, { recursive: true, force: true }) }
+})
+
+test('installed Reasonix includes the complete local-admission and native-canary module closure', () => {
+  const cp = require('node:child_process')
+  const packaging = require('../../scripts/reasonix-package.cjs')
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-installed-closure-'))
+  try {
+    const installed = packaging.install(path.join(root, 'home'))
+    assert.ok(installed.files['node_modules/@iarna/toml/package.json'])
+    const portable = { schemaVersion: 1, provider: 'reasonix', platform: process.platform, architecture: process.arch, files: [['entrypoint/reasonix', 'a'.repeat(64)]] }
+    const scope = require('../../scripts/harness-v2-canary.cjs').portableIdentity('reasonix', installed, { sha256: 'a'.repeat(64), version: '1.30.0',
+      portableRuntimeIdentity: { ...portable, sha256: native.sha256(JSON.stringify(portable)), fileCount: 1, packageCount: 0 } })
+    assert.match(scope.reviewedRuntimeDigest, /^[a-f0-9]{64}$/)
+    const script = `const path=require('node:path'),fs=require('node:fs');const root=process.argv[1];require(path.join(root,'scripts/harness-v2-local-admission.cjs'));require(path.join(root,'scripts/reasonix-configure.cjs'));const plan=require(path.join(root,'scripts/harness-v2-conformance.cjs')).nativeTestPlan('reasonix',root);if(plan.cases.length!==11||!fs.existsSync(plan.file))throw new Error('missing native capability suite');`
+    cp.execFileSync(process.execPath, ['-e', script, installed.bundle], { cwd: root, stdio: 'pipe' })
+  } finally { fs.rmSync(root, { recursive: true, force: true }) }
+})
+
+test('fresh Reasonix tool observations bind only after native session identification and enforce the physical ceiling', () => {
+  const calls = []; let known = null
+  const stream = new ReasonixEventStream({ providerToolCallLimit: 1,
+    onSessionIdentified: id => { known = id },
+    onToolCallObserved: evidence => { assert.ok(known); assert.equal(evidence.continuationId, known); calls.push(evidence) } })
+  const tool = { id: 'first', name: 'bash', args: '{"command":"pwd"}', readOnly: true }
+  stream.push(JSON.stringify({ kind: 'tool_dispatch', tool }))
+  assert.equal(stream.toolCount, 1); assert.equal(calls.length, 0)
+  stream.push(JSON.stringify({ kind: 'tool_result', tool: { ...tool, output: 'fixture', execution: { exitCode: 0 } } }))
+  stream.push(JSON.stringify({ kind: 'usage', usage: { promptTokens: 10, cacheHitTokens: 0, completionTokens: 2 } }))
+  stream.push(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, session_id: 'actual-native-context', result: '{"ok":true}', usage: { input_tokens: 10, output_tokens: 2, cache_read_input_tokens: 0 } }))
+  assert.equal(calls.length, 1); assert.equal(calls[0].attemptedCount, 1)
+  const resumed = new ReasonixEventStream({ priorToolCallCount: 1, providerToolCallLimit: 1, continuationId: known })
+  assert.throws(() => resumed.push(JSON.stringify({ kind: 'tool_dispatch', tool })), { code: 'CHILD_TOOL_CALL_LIMIT_EXHAUSTED' })
 })

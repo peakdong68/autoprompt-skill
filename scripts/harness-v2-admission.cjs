@@ -1,8 +1,9 @@
 'use strict'
 
 const path = require('node:path')
-const { descriptor, fail, readBound, sha256 } = require('./harness-v2-native.cjs')
+const { descriptor, executableInvocation, fail, readBound, sha256 } = require('./harness-v2-native.cjs')
 const { verifyCapabilityAttestation } = require('../agents/codex/workflow/router.js')
+const localCanary = require('./harness-v2-canary.cjs')
 
 const EVIDENCE = 'scripts/harness-v2-trust/evidence.json'
 const KEY_RING = 'scripts/harness-v2-trust/trusted-public-keys.json'
@@ -85,7 +86,15 @@ function runtimeIdentityBody(provider, installed, executable) {
       fail('PAYLOAD_INVALID', 'Admission runtime inventory contains an invalid path or digest')
     }
   }
+  // Windows npm shims are never executed through cmd.exe. Their raw shim hash
+  // remains the executable identity, while this separately binds the exact
+  // Node interpreter and package script used for every shell:false launch.
+  const launchInvocationSha256 = executable.invocation ? (() => {
+    executableInvocation(executable)
+    return executable.invocation.sha256
+  })() : undefined
   return { provider, executablePath: executable.path, executableSha256: executable.sha256,
+    ...(launchInvocationSha256 ? { executableLaunchInvocationSha256: launchInvocationSha256 } : {}),
     nativeRuntimeIdentity: { sha256: dependencies.sha256, fileCount: dependencies.fileCount,
       packageCount: dependencies.packageCount },
     version: executable.version, platform: process.platform, architecture: process.arch, files }
@@ -93,6 +102,23 @@ function runtimeIdentityBody(provider, installed, executable) {
 
 function runtimeIdentity(provider, installed, executable) {
   return sha256(JSON.stringify(runtimeIdentityBody(provider, installed, executable)))
+}
+
+// A bundled reviewed-local record is authenticated by the immutable installed
+// payload, but is deliberately distinct from independently signed live trust.
+// It only opens a pending state; configure must execute the closed per-install
+// canary before the mission and bind its fresh observations.
+function reviewedLocalPending(provider, installed, executable, options = {}) {
+  let evidence
+  try { evidence = JSON.parse(readBound(path.join(installed.bundle, EVIDENCE))) } catch { return null }
+  const records = evidence?.reviewedLocalRecords
+  if (records === undefined) return null
+  if (!Array.isArray(records)) fail('PROVIDER_UNSUPPORTED', 'Reviewed-local release records are invalid')
+  try {
+    const review = localCanary.selectReview(records, provider, installed, executable)
+    return review ? localCanary.verifyReview(review, provider, installed, executable, options.now) : null
+  }
+  catch (error) { fail('PROVIDER_UNSUPPORTED', `Reviewed-local release record is rejected: ${error.message}`) }
 }
 
 function verifyAdmission(provider, installed, executable, options = {}) {
@@ -143,4 +169,4 @@ function verifyAdmission(provider, installed, executable, options = {}) {
 }
 
 module.exports = { EVIDENCE, KEY_RING, REQUIRED, IMPORTED_TRUST_DIRECTORY, importedTrustDirectory, trustSource,
-  runtimeIdentityBody, runtimeIdentity, verifyAdmission }
+  runtimeIdentityBody, runtimeIdentity, reviewedLocalPending, verifyAdmission }

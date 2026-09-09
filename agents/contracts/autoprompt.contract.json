@@ -33,7 +33,7 @@
     {
       "id": "ap-execharness-resolver",
       "tier": "R3",
-      "description": "L3 executor - EXECHARNESS RESOLVE. Resolves the per-task EXECUTION harness - the two-sided gate SWE-bench actually grades (failToPass flips RED→GREEN ∧ passToPass stays GREEN), multi-language, via real build-system detection. Ingests shipped FAIL_TO_PASS/PASS_TO_PASS, else derives failToPass from the mission's behavioral acceptance asks. An unresolvable environment is BLOCKED, never a stand-in.",
+      "description": "L3 executor - EXECHARNESS RESOLVE. Resolves the per-task EXECUTION harness - the two-sided gate SWE-bench actually grades (failToPass flips RED\u2192GREEN \u2227 passToPass stays GREEN), multi-language, via real build-system detection. Ingests shipped FAIL_TO_PASS/PASS_TO_PASS, else derives failToPass from the mission's behavioral acceptance asks. An unresolvable environment is BLOCKED, never a stand-in.",
       "capabilities": [
         "Read",
         "Write",
@@ -780,6 +780,50 @@
         "skill-frontmatter",
         "subagent-skill-export",
         "selected-model-inheritance"
+      ]
+    },
+    "hermes": {
+      "status": "degraded",
+      "target": "0.21.1",
+      "profile": {
+        "dispatch": "controller-owned-plugin",
+        "activation": "explicit-private-controller",
+        "model": "explicit-or-inherited"
+      },
+      "capabilities": [
+        "private-plugin-tools",
+        "durable-session-resume",
+        "native-sqlite-usage"
+      ],
+      "runtimePrerequisites": {
+        "nativeConformance": "required",
+        "commandBoundary": "linux-bubblewrap"
+      },
+      "allowedDeltas": [
+        "private-role-prompts",
+        "owned-plugin-transport"
+      ]
+    },
+    "grok": {
+      "status": "degraded",
+      "target": "1.0.13",
+      "profile": {
+        "dispatch": "controller-filtered-mcp",
+        "activation": "explicit-private-controller",
+        "model": "explicit-or-inherited"
+      },
+      "capabilities": [
+        "private-mcp-tools",
+        "durable-session-resume",
+        "native-json-usage"
+      ],
+      "runtimePrerequisites": {
+        "nativeConformance": "required",
+        "commandBoundary": "linux-bubblewrap"
+      },
+      "allowedDeltas": [
+        "private-role-prompts",
+        "owned-model-proxy"
       ]
     }
   },

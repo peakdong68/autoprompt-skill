@@ -3,6 +3,7 @@
 
 const assert = require('node:assert/strict')
 const childProcess = require('node:child_process')
+const crypto = require('node:crypto')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -100,6 +101,21 @@ function assertDraft202012Valid(schemaPath, records) {
     input: JSON.stringify(records),
     encoding: 'utf8',
     windowsHide: true,
+  })
+  assert.equal(result.status, 0, result.stdout || result.stderr)
+}
+
+function assertDraft202012Invalid(schemaPath, record) {
+  const script = [
+    'import json, sys',
+    'from jsonschema import Draft202012Validator, FormatChecker',
+    "schema = json.load(open(sys.argv[1], encoding='utf-8'))",
+    'record = json.load(sys.stdin)',
+    'validator = Draft202012Validator(schema, format_checker=FormatChecker())',
+    'raise SystemExit(0 if list(validator.iter_errors(record)) else 1)',
+  ].join('\n')
+  const result = childProcess.spawnSync('python', ['-c', script, schemaPath], {
+    input: JSON.stringify(record), encoding: 'utf8', windowsHide: true,
   })
   assert.equal(result.status, 0, result.stdout || result.stderr)
 }
@@ -415,6 +431,39 @@ test('verification-limited candidate delivery closes one exact inconclusive stat
   assert.equal(Object.hasOwn(state.retryState, 'inconclusiveChecker'), false)
   assert.deepEqual(eventLog.readAll().slice(-3).map(event =>
     event.details.stateEvent.transitionId), ['T033', 'T034', 'T052'])
+})
+
+test('verification-limited terminal delivery names the preserved candidate without claiming checker acceptance', t => {
+  const harness = stateHarness(t)
+  const deliverable = path.join(harness.directory, 'preserved-result.txt')
+  fs.writeFileSync(deliverable, 'preserved candidate\n', { mode: 0o600 })
+  advanceToFinalCheck(harness.store)
+  transition(harness.store, 'FINALIZING')
+  const bound = harness.store.bindTerminal('DONE', {
+    capability: harness.capability,
+    cause: 'the bounded checker did not produce command-bound acceptance evidence',
+    terminalEnvelope: {
+      status: 'DONE_WITH_VERIFICATION_LIMITATIONS',
+      controllerReason: 'CHECK_OBSERVATION_INCOMPLETE',
+    },
+    deliverables: [{ path: deliverable, hash: sha256(fs.readFileSync(deliverable)) }],
+  })
+  const envelope = bound.terminal.terminalEnvelope
+  assert.equal(envelope.code, 'DONE')
+  assert.equal(envelope.description,
+    'The usable requested results are preserved, but the required verification evidence is incomplete.')
+  assert.equal(envelope.completedResults[0].description,
+    'Requested result 1 is preserved; required verification evidence is incomplete.')
+  const schemaPath = path.join(ROOT, 'agents', 'contracts', 'schemas', 'outcome.schema.json')
+  assertDraft202012Invalid(schemaPath, {
+    ...envelope,
+    description: 'Every requested result passed its current required checks.',
+  })
+  assertDraft202012Invalid(schemaPath, {
+    ...envelope,
+    description: 'The usable requested results are preserved, but the required verification evidence is incomplete.',
+    payload: { ...envelope.payload, providerTerminal: { status: 'DONE' } },
+  })
 })
 
 test('corrected ROADMAP plan marker binds the rejected and replacement plans without consuming the product candidate', t => {
@@ -1067,6 +1116,245 @@ test('failed workers close the exact live mutation permit without reopening the 
   )
 })
 
+test('cancellation release retains authority to abort its exact pre-terminal mutation permit', (t) => {
+  const { capability, directory, store } = stateHarness(t)
+  const deliverable = path.join(directory, 'cancelled-worker.txt')
+  fs.writeFileSync(deliverable, 'before\n')
+  advanceToWork(store)
+  const permit = store.beginAuthorizedMutation({
+    capability,
+    expectedEpoch: 0,
+    cause: 'admit cancellable worker preimage',
+    authority: { runId: 'run-0001', activationId: 'activation-001', nonce: 'nonce_123456789012', generation: 1 },
+    preimages: [{ path: deliverable, hash: sha256(fs.readFileSync(deliverable)) }],
+  })
+  transition(store, 'RELEASING_LOCK', 'authorization expired', 'CANCEL_REQUESTED')
+  const releasing = store.load()
+  const accountingCheckpoint = {
+    runId: releasing.runId,
+    activationId: releasing.activation.id,
+    activationNonce: releasing.activation.nonce,
+    generation: releasing.activation.generation,
+    stateEventSequence: releasing.sequence,
+    stateEventHash: releasing.lastEventHash,
+    lastAccountingSequence: 2,
+    lastAccountingHash: digest('accounting-head'),
+    snapshotHash: digest('accounting-snapshot'),
+    cumulativeHash: digest('accounting-cumulative'),
+    ceilingContractHash: digest('accounting-ceilings'),
+  }
+  const drainEvidenceHash = digest('owned-process-drain')
+  assert.throws(() => store.abortAuthorizedMutation(permit, {
+    capability,
+    cause: 'cannot close before process drain',
+    failureCode: 'CANCELLED',
+  }), error => error.code === 'MUTATION_RELEASE_CLEANUP_INVALID')
+  assert.throws(() => store.abortAuthorizedMutation(permit, {
+    capability,
+    cause: 'cannot close while a durable session remains live',
+    failureCode: 'CANCELLED',
+    processesDrained: true,
+    processDrainEvidenceHash: drainEvidenceHash,
+    budgets: { sessions: { worker: { status: 'RUNNING' } } },
+    accountingCheckpoint,
+  }), error => error.code === 'MUTATION_RELEASE_CLEANUP_INVALID')
+  const aborted = store.abortAuthorizedMutation(permit, {
+    capability,
+    cause: 'close exact cancelled worker mutation',
+    failureCode: 'CANCELLED',
+    processesDrained: true,
+    processDrainEvidenceHash: drainEvidenceHash,
+    budgets: { sessions: { worker: { status: 'FAILED' } } },
+    accountingCheckpoint,
+  })
+  assert.equal(aborted.state, 'RELEASING_LOCK')
+  assert.equal(aborted.activeMutation, null)
+  assert.equal(aborted.workspaceEpoch, 1)
+  assert.equal(aborted.budgets.sessions.worker.status, 'FAILED')
+  const cleanup = store.eventLog.readAll().at(-1)
+  assert.equal(cleanup.details.stateEvent.transitionId, 'T082')
+  assert.equal(cleanup.details.stateEvent.eventId, 'CANCEL_MUTATION_ABORTED')
+  assert.equal(cleanup.details.processDrainEvidenceHash, drainEvidenceHash)
+  const finalAccountingCheckpoint = {
+    ...accountingCheckpoint,
+    stateEventSequence: cleanup.sequence,
+    stateEventHash: cleanup.hash,
+    lastAccountingSequence: 3,
+    lastAccountingHash: digest('final-accounting-head'),
+    snapshotHash: digest('final-accounting-snapshot'),
+  }
+  const accountingClosed = store.recordCancellationAccountingClosure({
+    capability,
+    cause: 'bind every ended cancelled session',
+    processesDrained: true,
+    processDrainEvidenceHash: drainEvidenceHash,
+    budgets: { sessions: { worker: { status: 'FAILED' } } },
+    accountingCheckpoint: finalAccountingCheckpoint,
+  })
+  const finalCleanup = store.eventLog.readAll().at(-1)
+  assert.equal(finalCleanup.details.stateEvent.transitionId, 'T083')
+  assert.equal(accountingClosed.budgets.sessions.worker.status, 'FAILED')
+  assert.throws(() => store.recordCancellationAccountingClosure({
+    capability,
+    cause: 'duplicate accounting closure is forbidden',
+    processesDrained: true,
+    processDrainEvidenceHash: drainEvidenceHash,
+    budgets: { sessions: { worker: { status: 'FAILED' } } },
+    accountingCheckpoint: finalAccountingCheckpoint,
+  }), error => error.code === 'CANCEL_ACCOUNTING_CLOSURE_INVALID')
+  assert.throws(() => store.abortAuthorizedMutation(permit, {
+    capability,
+    cause: 'duplicate cleanup is forbidden',
+    failureCode: 'CANCELLED',
+    processesDrained: true,
+    processDrainEvidenceHash: drainEvidenceHash,
+    budgets: { sessions: { worker: { status: 'FAILED' } } },
+    accountingCheckpoint,
+  }), error => error.code === 'MUTATION_PERMIT_INVALID')
+  assert.throws(
+    () => store.beginAuthorizedMutation({
+      capability,
+      expectedEpoch: 1,
+      cause: 'forbid replacement mutation during release',
+      authority: { runId: 'run-0001', activationId: 'activation-001', nonce: 'nonce_123456789012', generation: 1 },
+      preimages: [],
+    }),
+    error => error.code === 'MUTATION_AFTER_TERMINAL',
+  )
+  assert.throws(
+    () => store.commitAuthorizedMutation(permit, {
+      capability, cause: 'forbid commit during release', postimages: [],
+    }),
+    error => error.code === 'MUTATION_PERMIT_INVALID',
+  )
+  const bound = store.bindTerminal('CANCELLED', {
+    capability,
+    cause: 'bind original cancellation after exact cleanup',
+    terminalEnvelope: { status: 'CANCELLED' },
+    deliverables: [],
+  })
+  assert.equal(bound.terminal.releaseIntent.transitionId, 'T057')
+  assert.equal(bound.terminal.sequence, finalCleanup.sequence)
+  assert.equal(store.validateTerminal(bound).valid, true)
+  const reconciliation = store.prepareReleaseReconciliation()
+  assert.equal(reconciliation.transitionId, 'T057')
+  assert.equal(reconciliation.stateEventSequence, finalCleanup.sequence)
+  store.completeReleasedTerminal('CANCELLED', {
+    capability,
+    cause: 'physical release proven after cleanup',
+  })
+  assert.equal(store.validateTerminal().valid, true)
+})
+
+test('release-time mutation cleanup rejects a foreign permit, isolation, and non-cancel outcome', (t) => {
+  const createPermit = (label) => {
+    const harness = stateHarness(t)
+    const deliverable = path.join(harness.directory, `${label}.txt`)
+    fs.writeFileSync(deliverable, 'before\n')
+    advanceToWork(harness.store)
+    const isolationBindingHash = digest(`${label}-isolation`)
+    const permit = harness.store.beginAuthorizedMutation({
+      capability: harness.capability,
+      expectedEpoch: 0,
+      cause: 'admit exact worker',
+      authority: { runId: 'run-0001', activationId: 'activation-001', nonce: 'nonce_123456789012', generation: 1 },
+      isolation: { bindingHash: isolationBindingHash },
+      preimages: [{ path: deliverable, hash: sha256(fs.readFileSync(deliverable)) }],
+    })
+    return { ...harness, permit, isolationBindingHash }
+  }
+  const foreign = createPermit('foreign-permit')
+  transition(foreign.store, 'RELEASING_LOCK', 'authorization expired', 'CANCEL_REQUESTED')
+  assert.throws(() => foreign.store.abortAuthorizedMutation({ ...foreign.permit, id: 'foreign' }, {
+    capability: foreign.capability,
+    isolationBindingHash: foreign.isolationBindingHash,
+    cause: 'reject foreign permit', processesDrained: true,
+    processDrainEvidenceHash: digest('foreign-drain'),
+  }), error => error.code === 'MUTATION_PERMIT_INVALID')
+  assert.throws(() => foreign.store.abortAuthorizedMutation(foreign.permit, {
+    capability: foreign.capability,
+    isolationBindingHash: digest('foreign-isolation'),
+    cause: 'reject foreign isolation', processesDrained: true,
+    processDrainEvidenceHash: digest('foreign-drain'),
+  }), error => error.code === 'MUTATION_ISOLATION_MISMATCH')
+
+  const partial = createPermit('partial-release')
+  transition(partial.store, 'RELEASING_LOCK', 'budget ended', 'BUDGET_EXHAUSTED_FINAL')
+  const partialState = partial.store.load()
+  assert.throws(() => partial.store.abortAuthorizedMutation(partial.permit, {
+    capability: partial.capability,
+    isolationBindingHash: partial.isolationBindingHash,
+    cause: 'reject cleanup under alternate outcome', processesDrained: true,
+    processDrainEvidenceHash: digest('partial-drain'),
+    budgets: { sessions: { worker: { status: 'FAILED' } } },
+    accountingCheckpoint: {
+      runId: partialState.runId,
+      activationId: partialState.activation.id,
+      activationNonce: partialState.activation.nonce,
+      generation: partialState.activation.generation,
+      stateEventSequence: partialState.sequence,
+      stateEventHash: partialState.lastEventHash,
+      lastAccountingSequence: 2,
+      lastAccountingHash: digest('partial-accounting-head'),
+      snapshotHash: digest('partial-accounting-snapshot'),
+      cumulativeHash: digest('partial-accounting-cumulative'),
+      ceilingContractHash: digest('partial-accounting-ceilings'),
+    },
+  }), error => error.code === 'MUTATION_RELEASE_CLEANUP_INVALID')
+})
+
+test('read-only cancellation durably closes ended session accounting after process drain', (t) => {
+  const { capability, store } = stateHarness(t)
+  advanceToWork(store)
+  transition(store, 'RELEASING_LOCK', 'authorization expired during route analysis', 'CANCEL_REQUESTED')
+  const releasing = store.load()
+  const processDrainEvidenceHash = digest('readonly-owned-process-drain')
+  const accountingCheckpoint = {
+    runId: releasing.runId,
+    activationId: releasing.activation.id,
+    activationNonce: releasing.activation.nonce,
+    generation: releasing.activation.generation,
+    stateEventSequence: releasing.sequence,
+    stateEventHash: releasing.lastEventHash,
+    lastAccountingSequence: 2,
+    lastAccountingHash: digest('readonly-accounting-head'),
+    snapshotHash: digest('readonly-accounting-snapshot'),
+    cumulativeHash: digest('readonly-accounting-cumulative'),
+    ceilingContractHash: digest('readonly-accounting-ceilings'),
+  }
+  assert.throws(() => store.recordCancellationAccountingClosure({
+    capability,
+    cause: 'reject live read-only session',
+    processesDrained: true,
+    processDrainEvidenceHash,
+    budgets: { sessions: { analyst: { status: 'RUNNING' } } },
+    accountingCheckpoint,
+  }), error => error.code === 'CANCEL_ACCOUNTING_CLOSURE_INVALID')
+  const closed = store.recordCancellationAccountingClosure({
+    capability,
+    cause: 'close ended read-only session accounting',
+    processesDrained: true,
+    processDrainEvidenceHash,
+    budgets: { sessions: { analyst: { status: 'FAILED' } } },
+    accountingCheckpoint,
+  })
+  assert.equal(closed.activeMutation, null)
+  assert.equal(closed.budgets.sessions.analyst.status, 'FAILED')
+  const cleanup = store.eventLog.readAll().at(-1)
+  assert.equal(cleanup.details.stateEvent.transitionId, 'T083')
+  assert.equal(cleanup.details.stateEvent.eventId, 'CANCEL_ACCOUNTING_CLOSED')
+  assert.equal(cleanup.details.endedSessionCount, 1)
+  const bound = store.bindTerminal('CANCELLED', {
+    capability,
+    cause: 'bind read-only cancellation after accounting closure',
+    terminalEnvelope: { status: 'CANCELLED' },
+    deliverables: [],
+  })
+  assert.equal(bound.terminal.releaseIntent.transitionId, 'T057')
+  assert.equal(bound.terminal.sequence, cleanup.sequence)
+  assert.equal(store.validateTerminal(bound).valid, true)
+})
+
 test('checker repair mutates in REPAIRING, invalidates C1, and freezes a fresh C2 before verdicts', (t) => {
   const { capability, directory, store } = stateHarness(t)
   const deliverable = path.join(directory, 'repair-target.txt')
@@ -1553,6 +1841,25 @@ test('mission takeover distinguishes an exact live root from a reused PID by OS 
   assert.equal(takeover.ownerProcessEvidence.expectedProcessIdentity, 'os-epoch-owner-a')
   assert.equal(takeover.ownerProcessEvidence.observedProcessIdentity, 'os-epoch-reused-pid')
   assert.equal(takeover.ownerProcessVerifiedDead, true)
+})
+
+test('physical target identity distinguishes adjacent 64-bit file ids beyond Number precision', t => {
+  const target = temporary(t)
+  const exactFs = Object.create(fs)
+  let fileId = 9007199254740992n
+  exactFs.statSync = (filename, options) => {
+    const value = fs.statSync(filename, options)
+    return Object.assign(Object.create(Object.getPrototypeOf(value)), value, {
+      dev: options?.bigint ? 123n : 123,
+      ino: options?.bigint ? fileId : Number(fileId),
+    })
+  }
+  const first = physicalDirectoryIdentity(target, exactFs)
+  fileId += 1n
+  const second = physicalDirectoryIdentity(target, exactFs)
+  assert.equal(first.identity, '123:9007199254740992')
+  assert.equal(second.identity, '123:9007199254740993')
+  assert.notEqual(first.identity, second.identity)
 })
 
 test('physical target identity fails closed without a stable file id and create/release sync containing directories', (t) => {
@@ -3805,6 +4112,22 @@ test('process owner finalizes conclusively drained groups but rejects live ident
   assert.equal(reusedOwner.listRecords()[0].status, 'RUNNING')
 })
 
+test('process cancellation tolerates exit during identity verification without signalling a reused group', async t => {
+  const directory = temporary(t)
+  for (const exits of [true, false]) {
+    const adapter = new FakeProcessAdapter()
+    adapter.verifyOwnership = async ({ groupIdentity }) => {
+      if (exits) adapter.groups.set(groupIdentity, [])
+      return false
+    }
+    const owner = new ProcessOwner({ adapter, registryPath: path.join(directory, `race-${exits}.json`), allowTestAdapter: true, pollMs: 1 })
+    const child = await owner.launch({ executable: 'fake', argv: [], targetKey: 'exit-race' })
+    if (exits) assert.equal((await owner.cancelGroup(child.ownershipId, { graceMs: 0, killMs: 1 })).status, 'CANCELLED')
+    else await assert.rejects(owner.cancelGroup(child.ownershipId, { graceMs: 0, killMs: 1 }), { code: 'PROCESS_IDENTITY_CHANGED' })
+    assert.deepEqual(adapter.signals, [], 'identity failure must never authorize a signal')
+  }
+})
+
 test('AP-RUN-032 process and cleanup registries bind activation generation and monotonic sequence', async (t) => {
   const directory = temporary(t)
   const binding = { activationId: 'activation-run-032', generationId: 7 }
@@ -4302,15 +4625,46 @@ test('POSIX launch uses only the pre-attested exact environment and resolves no 
   }), (error) => error.code === 'LAUNCH_SPEC_INVALID')
 })
 
+test('macOS process ownership refuses before a process probe or launch without a durable recovery implementation', async (t) => {
+  const directory = temporary(t)
+  let probes = 0
+  let launches = 0
+  const adapter = createPosixProcessAdapter({
+    platform: 'darwin',
+    execFileSync() { probes += 1; return '' },
+    spawn() { launches += 1; return { pid: 8124 } },
+  })
+  const reservationId = 'darwin-reservation'
+  const owner = new ProcessOwner({
+    adapter,
+    registryPath: path.join(directory, 'processes.json'),
+  })
+  await assert.rejects(owner.launch({
+    executable: process.execPath,
+    argv: ['--version'],
+    env: prepareProcessLaunchEnvironment(adapter, reservationId, {}),
+    reservationId,
+    targetKey: 'target-key',
+  }), (error) => error.code === 'PROVIDER_UNSUPPORTED' &&
+    /Linux \/proc or a provider implementation/.test(error.message))
+  assert.equal(probes, 0)
+  assert.equal(launches, 0)
+})
+
 test('POSIX signal authority binds one exact reservation environment entry and rejects numeric process-group reuse', async () => {
   let environmentEntry = 'AUTOPROMPT_OWNERSHIP_RESERVATION=unrelated-reservation\0'
+  let statSequence = []
+  const signals = []
   const fsImpl = {
     readdirSync: () => ['999'],
     readFileSync(filename) {
       if (filename.endsWith('/environ')) {
         return Buffer.from(environmentEntry)
       }
-      if (filename.endsWith('/stat')) return '999 (fixture) S 1 123 123 0 0 0'
+      if (filename.endsWith('/stat')) {
+        const startTimeTicks = statSequence.length ? statSequence.shift() : '456'
+        return `999 (fixture) S 1 123 123 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ${startTimeTicks}`
+      }
       throw new Error(`unexpected POSIX fixture read: ${filename}`)
     },
   }
@@ -4318,6 +4672,7 @@ test('POSIX signal authority binds one exact reservation environment entry and r
     platform: 'linux',
     fsImpl,
     execFileSync: () => '999 123\n',
+    kill: (...args) => signals.push(args),
   })
   const identity = {
     reservationId: 'owned-reservation',
@@ -4335,6 +4690,13 @@ test('POSIX signal authority binds one exact reservation environment entry and r
   environmentEntry = 'FIRST=value\0AUTOPROMPT_OWNERSHIP_RESERVATION=owned-reservation\0LAST=value\0'
   assert.equal(await adapter.verifyOwnership(identity), true,
     'one exact NUL-delimited live reservation marker restores signal authority')
+  statSequence = ['456', '789']
+  await assert.rejects(adapter.signalReservationOwned('owned-reservation', 'KILL'),
+    (error) => error.code === 'PROCESS_IDENTITY_CHANGED')
+  assert.deepEqual(signals, [], 'PID/start-time reuse must fail before signalling its numeric process group')
+  statSequence = ['456', '456', '456']
+  assert.deepEqual(await adapter.signalReservationOwned('owned-reservation', 'KILL'), ['posix-pgid:123'])
+  assert.deepEqual(signals, [[-123, 'SIGKILL']])
 })
 
 test('POSIX group liveness excludes unreaped zombies without hiding executable members', async () => {
@@ -4345,6 +4707,192 @@ test('POSIX group liveness excludes unreaped zombies without hiding executable m
       : '',
   })
   assert.deepEqual(await adapter.listOwned('posix-pgid:321'), [702])
+})
+
+test('reopened POSIX ownership drains an exact reservation descendant that escapes with setsid', {
+  skip: process.platform === 'win32',
+  timeout: 30000,
+}, async (t) => {
+  const directory = temporary(t)
+  const childScript = path.join(directory, 'setsid-child.cjs')
+  const statePath = path.join(directory, 'setsid-state.json')
+  const registryPath = path.join(directory, 'processes.json')
+  fs.writeFileSync(childScript, [
+    "'use strict'",
+    "const fs=require('node:fs')",
+    "const {spawn}=require('node:child_process')",
+    "process.on('SIGTERM',()=>{})",
+    "if(process.argv[2]==='grandchild'){setInterval(()=>{},1000)}else{",
+    " const child=spawn(process.execPath,[__filename,'grandchild'],{env:{...process.env},detached:true,stdio:'ignore'})",
+    " if(!child.pid)throw new Error('setsid child did not expose a PID')",
+    " child.unref()",
+    ` fs.writeFileSync(${JSON.stringify(statePath)},JSON.stringify({rootPid:process.pid,grandchildPid:child.pid})+'\\n')`,
+    " setInterval(()=>{},1000)",
+    '}',
+    '',
+  ].join('\n'))
+  const statIdentity = (pid) => {
+    try {
+      const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8')
+      const fields = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)
+      return { pid, processGroup: Number(fields[2]), session: Number(fields[3]), startTimeTicks: fields[19] }
+    } catch (error) {
+      if (error.code === 'ENOENT') return null
+      throw error
+    }
+  }
+  let identities = []
+  t.after(() => {
+    for (const identity of identities) {
+      const current = statIdentity(identity.pid)
+      if (current?.startTimeTicks === identity.startTimeTicks) {
+        try { process.kill(identity.pid, 'SIGKILL') } catch {}
+      }
+    }
+  })
+  const reservationId = `setsid-${crypto.randomUUID()}`
+  const firstAdapter = createPosixProcessAdapter()
+  const first = new ProcessOwner({ adapter: firstAdapter, registryPath, pollMs: 10 })
+  const launched = await first.launch({
+    executable: process.execPath,
+    argv: [childScript],
+    cwd: directory,
+    env: prepareProcessLaunchEnvironment(firstAdapter, reservationId, { PATH: process.env.PATH }),
+    reservationId,
+    targetKey: 'setsid-target',
+  })
+  let childState = null
+  await waitFor(() => {
+    try { childState = JSON.parse(fs.readFileSync(statePath, 'utf8')); return true } catch { return false }
+  })
+  await waitFor(() => {
+    const root = statIdentity(childState.rootPid)
+    const grandchild = statIdentity(childState.grandchildPid)
+    if (!root || !grandchild) return false
+    identities = [root, grandchild]
+    return true
+  })
+  assert.equal(identities[0].processGroup, launched.rootPid)
+  assert.equal(identities[1].processGroup, identities[1].pid)
+  assert.notEqual(identities[1].processGroup, identities[0].processGroup)
+  assert.notEqual(identities[1].session, identities[0].session)
+
+  const reopenedAdapter = createPosixProcessAdapter()
+  const reservationSignals = []
+  const originalReservationSignal = reopenedAdapter.signalReservationOwned.bind(reopenedAdapter)
+  reopenedAdapter.signalReservationOwned = async (...args) => {
+    reservationSignals.push(args.slice(0, 2))
+    return originalReservationSignal(...args)
+  }
+  const reopened = new ProcessOwner({ adapter: reopenedAdapter, registryPath, pollMs: 10 })
+  const cancelled = await reopened.cancelAll({ graceMs: 50, killMs: 5000, reason: 'setsid regression' })
+  assert.equal(cancelled[0].status, 'CANCELLED')
+  assert.deepEqual(reservationSignals.map(([, signal]) => signal), ['TERM', 'KILL'])
+  assert.equal(await reopened.assertDrained(), true)
+  assert.equal(await reopened.assertTargetDrained('setsid-target'), true)
+  assert.equal(await reopenedAdapter.recoverReservation(reservationId), null)
+  await waitFor(() => identities.every(identity => {
+    const current = statIdentity(identity.pid)
+    return !current || current.startTimeTicks !== identity.startTimeTicks
+  }), 5000)
+})
+
+test('natural root exit drains only its escaped reservation descendant and preserves a legal sibling', {
+  skip: process.platform === 'win32',
+  timeout: 30000,
+}, async (t) => {
+  const directory = temporary(t)
+  const childScript = path.join(directory, 'natural-setsid-child.cjs')
+  const statePath = path.join(directory, 'natural-setsid-state.json')
+  const registryPath = path.join(directory, 'processes.json')
+  fs.writeFileSync(childScript, [
+    "'use strict'",
+    "const fs=require('node:fs')",
+    "const {spawn}=require('node:child_process')",
+    "process.on('SIGTERM',()=>{})",
+    "if(process.argv[2]==='hold'){setInterval(()=>{},1000)}else{",
+    " const child=spawn(process.execPath,[__filename,'hold'],{env:{...process.env},detached:true,stdio:'ignore'})",
+    " if(!child.pid)throw new Error('setsid child did not expose a PID')",
+    " child.unref()",
+    ` fs.writeFileSync(${JSON.stringify(statePath)},JSON.stringify({rootPid:process.pid,grandchildPid:child.pid})+'\\n')`,
+    " setTimeout(()=>process.exit(0),100)",
+    '}',
+    '',
+  ].join('\n'))
+  const statIdentity = (pid) => {
+    try {
+      const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8')
+      const fields = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)
+      return { pid, state: fields[0], processGroup: Number(fields[2]), session: Number(fields[3]), startTimeTicks: fields[19] }
+    } catch (error) {
+      if (error.code === 'ENOENT') return null
+      throw error
+    }
+  }
+  let identities = []
+  t.after(() => {
+    for (const identity of identities) {
+      const current = statIdentity(identity.pid)
+      if (current?.startTimeTicks === identity.startTimeTicks) {
+        try { process.kill(identity.pid, 'SIGKILL') } catch {}
+      }
+    }
+  })
+  const firstAdapter = createPosixProcessAdapter()
+  const first = new ProcessOwner({ adapter: firstAdapter, registryPath, pollMs: 10 })
+  const exitedReservation = `natural-setsid-${crypto.randomUUID()}`
+  const exited = await first.launch({
+    executable: process.execPath,
+    argv: [childScript],
+    cwd: directory,
+    env: prepareProcessLaunchEnvironment(firstAdapter, exitedReservation, { PATH: process.env.PATH }),
+    reservationId: exitedReservation,
+    targetKey: 'shared-target',
+  })
+  let state = null
+  await waitFor(() => {
+    try { state = JSON.parse(fs.readFileSync(statePath, 'utf8')); return true } catch { return false }
+  })
+  const siblingReservation = `legal-sibling-${crypto.randomUUID()}`
+  const sibling = await first.launch({
+    executable: process.execPath,
+    argv: [childScript, 'hold'],
+    cwd: directory,
+    env: prepareProcessLaunchEnvironment(firstAdapter, siblingReservation, { PATH: process.env.PATH }),
+    reservationId: siblingReservation,
+    targetKey: 'shared-target',
+  })
+  await waitFor(() => {
+    const root = statIdentity(state.rootPid)
+    const grandchild = statIdentity(state.grandchildPid)
+    const siblingRoot = statIdentity(sibling.rootPid)
+    if (!root || !grandchild || !siblingRoot) return false
+    identities = [root, grandchild, siblingRoot]
+    return true
+  })
+  assert.equal(identities[1].processGroup, identities[1].pid)
+  assert.notEqual(identities[1].session, identities[0].session)
+  await waitFor(() => {
+    const current = statIdentity(exited.rootPid)
+    return !current || current.state === 'Z'
+  })
+
+  const reopenedAdapter = createPosixProcessAdapter()
+  const reopened = new ProcessOwner({ adapter: reopenedAdapter, registryPath, pollMs: 10 })
+  const terminal = await reopened.observeRootExit(exited.ownershipId, { code: 0, killMs: 5000 })
+  assert.equal(terminal.status, 'DONE')
+  assert.equal(reopened.listRecords().find(record => record.ownershipId === sibling.ownershipId).status, 'RUNNING')
+  const siblingAfter = statIdentity(sibling.rootPid)
+  assert.equal(siblingAfter?.startTimeTicks, identities[2].startTimeTicks)
+  await waitFor(() => identities.slice(0, 2).every(identity => {
+    const current = statIdentity(identity.pid)
+    return !current || current.startTimeTicks !== identity.startTimeTicks
+  }), 5000)
+  assert.equal(await reopenedAdapter.recoverReservation(exitedReservation), null)
+  assert.deepEqual(await reopenedAdapter.listReservationOwned(siblingReservation), [sibling.rootPid])
+  const siblingTerminal = await reopened.cancelGroup(sibling.ownershipId, { graceMs: 20, killMs: 5000 })
+  assert.equal(siblingTerminal.status, 'CANCELLED')
+  assert.equal(await reopened.assertDrained(), true)
 })
 
 test('late descendants cannot race drain confirmation and terminal null reservations are not enumerated', async (t) => {
@@ -4578,9 +5126,12 @@ test('terminal process records mutate memory only after durable registry commit'
 
 test('Windows Job adapter assigns before resume and drains a real child plus grandchild', {
   skip: process.platform !== 'win32',
-  timeout: 90000,
+  // A real Windows guest measured ~4s for each uncached ACL audit. This
+  // scenario includes independent/restarted adapters and negative probes;
+  // retain every audit and the native launch/drain deadlines below.
+  timeout: 420000,
 }, async (t) => {
-  const directory = temporary(t)
+  const directory = fs.realpathSync.native(temporary(t))
   const providerPrivateOwnershipRoot = path.join(directory, 'provider-private-ownership')
   fs.mkdirSync(providerPrivateOwnershipRoot)
   ensureWindowsPrivateAcl(providerPrivateOwnershipRoot)
@@ -4719,7 +5270,9 @@ test('Windows Job adapter assigns before resume and drains a real child plus gra
     startupDeadlineAt: delayedDeadline,
     targetKey: delayedRecord.targetKey,
     executable: process.execPath,
-    argv: ['-e', 'setTimeout(() => {}, 30000)'],
+    // The reservation must remain live through independent identity audits;
+    // its identity-gated finally block below owns termination.
+    argv: ['-e', 'setInterval(() => {}, 1000)'],
     cwd: directory,
     env: { SystemRoot: process.env.SystemRoot },
     shell: false,
@@ -4764,11 +5317,11 @@ test('Windows Job adapter assigns before resume and drains a real child plus gra
   }]))[0].alive, false)
 })
 
-test('Windows Job adapter repeatedly drains terminal-then-live resumed children across control roots', {
+test('Windows Job adapter repeatedly drains resumed children with independent origin verification', {
   skip: process.platform !== 'win32',
-  timeout: 120000,
+  timeout: 420000,
 }, async (t) => {
-  const directory = temporary(t)
+  const directory = fs.realpathSync.native(temporary(t))
   const providerPrivateOwnershipRoot = path.join(directory, 'provider-private-ownership')
   fs.mkdirSync(providerPrivateOwnershipRoot)
   ensureWindowsPrivateAcl(providerPrivateOwnershipRoot)
@@ -4787,6 +5340,10 @@ test('Windows Job adapter repeatedly drains terminal-then-live resumed children 
 
   const priorIdentities = []
   const registryPath = path.join(providerPrivateOwnershipRoot, 'processes.json')
+  // Production resume reopens one run's registry and process-control root.
+  // Changing only the latter would instead request an unsupported registry
+  // migration and correctly trip the adapter-origin forgery guard.
+  const jobControlRoot = path.join(providerPrivateOwnershipRoot, 'job-control')
   // One independent adapter can verify every origin-bound identity beneath
   // the provider root. Rebuilding an identical verifier for each generation
   // only repeats Windows ACL and PowerShell cold-start work and adds no
@@ -4801,7 +5358,6 @@ test('Windows Job adapter repeatedly drains terminal-then-live resumed children 
   })
   for (let generation = 1; generation <= 3; generation += 1) {
     const generationRoot = path.join(providerPrivateOwnershipRoot, `generation-${generation}`)
-    const jobControlRoot = path.join(generationRoot, 'job-control')
     const proxyControlRoot = path.join(generationRoot, 'proxy-control')
     fs.mkdirSync(proxyControlRoot, { recursive: true })
     const adapter = createWindowsJobAdapter({
@@ -4847,7 +5403,7 @@ test('Windows Job adapter repeatedly drains terminal-then-live resumed children 
         onStdoutLine(line) {
           const event = JSON.parse(line)
           if (event.type === 'turn.completed' && !stopPromise) {
-            stopPromise = runner.stop({ sessionId, reason: 'terminal result persisted' })
+            stopPromise = runner.stop({ sessionId, reason: 'terminal result persisted', terminalStatus: 'CANCELLED' })
           }
         },
       })
@@ -4896,7 +5452,9 @@ test('Windows Job adapter repeatedly drains terminal-then-live resumed children 
 })
 
 test('finalizer drains target-global liveness, cleans only registered scratch, binds DONE, and releases lease', async (t) => {
-  const directory = temporary(t)
+  const directory = fs.realpathSync.native(temporary(t))
+  const nativeWindowsFilesystem = process.platform === 'win32' && process.env.AUTOPROMPT_REAL_WINDOWS_FILESYSTEM === '1'
+  if (nativeWindowsFilesystem) ensureWindowsPrivateAcl(directory)
   const target = path.join(directory, 'target')
   const runRoot = path.join(directory, 'run')
   const scratchRoot = path.join(runRoot, 'scratch')
@@ -4937,6 +5495,35 @@ test('finalizer drains target-global liveness, cleans only registered scratch, b
   fs.mkdirSync(scratch)
   fs.writeFileSync(path.join(scratch, 'temporary.txt'), 'remove me\n')
 
+  let runtimeFs = fs
+  if (process.platform === 'darwin' && process.env.AUTOPROMPT_REAL_DARWIN_FILESYSTEM === '1') {
+    // Real setup-bound filesystem authority; process ownership remains the
+    // explicit FakeProcessAdapter fixture below, not native admission evidence.
+    const python = process.env.AUTOPROMPT_REAL_DARWIN_PYTHON
+    assert.equal(typeof python, 'string')
+    const providerRoot = path.join(directory, 'provider')
+    const activationRoot = path.join(directory, 'activation')
+    fs.mkdirSync(providerRoot, { mode: 0o755 })
+    fs.mkdirSync(activationRoot, { mode: 0o700 })
+    const setup = require(path.join(ROOT, 'scripts', 'darwin-runtime-setup.cjs'))
+    setup.setup({ provider: 'codex', root: providerRoot, python, packageRoot: ROOT })
+    const binding = setup.bindActivation({ provider: 'codex', root: providerRoot, activationRoot })
+    const options = { python, helper: path.join(activationRoot, 'darwin-runtime-helper.py'),
+      runtimeClosure: { manifest: binding.path, manifestSha256: binding.sha256 } }
+    const wrapper = require(path.join(WORKFLOW, 'darwin-filesystem.js'))
+    runtimeFs = Object.create(fs)
+    runtimeFs.darwinCapture = wrapper.createDarwinFilesystemCapture(options)
+    runtimeFs.darwinMutations = wrapper.createDarwinFilesystemMutations(options)
+  }
+  if (nativeWindowsFilesystem) {
+    // Real HANDLE-based filesystem authority. FakeProcessAdapter below remains
+    // a process fixture and does not establish production process admission.
+    const wrapper = require(path.join(WORKFLOW, 'windows-filesystem.js'))
+    runtimeFs = Object.create(fs)
+    runtimeFs.windowsCapture = wrapper.createWindowsFilesystemCapture()
+    runtimeFs.windowsMutations = runtimeFs.windowsCapture
+  }
+
   const lock = new MissionLock({
     leaseRoot: path.join(directory, 'leases'),
     processIdentityObserver: leaseProcessObserver((pid) => pid === 900 ? 'finalizer-process' : null),
@@ -4957,6 +5544,7 @@ test('finalizer drains target-global liveness, cleans only registered scratch, b
   })
   const harness = stateHarness(t, {
     directory: runRoot,
+    fsImpl: runtimeFs,
     capability: lease,
     binding: { ...binding(), targetIdentity: lock.verifyCapability(lease).targetIdentity },
     capabilityVerifier: (candidate) => lock.verifyCapability(candidate),
@@ -4969,11 +5557,13 @@ test('finalizer drains target-global liveness, cleans only registered scratch, b
     allowTestAdapter: true,
   })
   const cleanupRegistry = new CleanupRegistry({
+    fsImpl: runtimeFs,
     registryPath: path.join(runRoot, 'cleanup.json'),
     allowedRoots: [scratchRoot],
   })
   cleanupRegistry.register({ path: scratch, owner: 'worker-one' })
   assert.throws(() => new Finalizer({
+    fsImpl: runtimeFs,
     stateStore: harness.store,
     processOwner,
     missionLock: lock,
@@ -4984,6 +5574,7 @@ test('finalizer drains target-global liveness, cleans only registered scratch, b
 
   let failAt = 'terminal-record'
   const finalizer = new Finalizer({
+    fsImpl: runtimeFs,
     stateStore: harness.store,
     processOwner,
     missionLock: lock,
@@ -4999,7 +5590,7 @@ test('finalizer drains target-global liveness, cleans only registered scratch, b
     expectedEpoch: 0,
     deliverables: [
       { path: deliverable, hash: sha256(fs.readFileSync(deliverable)) },
-      { path: deliverableDirectory, hash: hashDirectoryStateStrict(deliverableDirectory), type: 'directory' },
+      { path: deliverableDirectory, hash: hashDirectoryStateStrict(deliverableDirectory, runtimeFs), type: 'directory' },
       { path: finalResponseEvidence, hash: finalResponse.evidencePointer.hash },
     ],
     checkHashes: [digest('checks')],

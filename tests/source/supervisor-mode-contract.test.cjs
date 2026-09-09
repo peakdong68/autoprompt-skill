@@ -10,12 +10,10 @@ const test = require('node:test')
 const { runOwnedHarnessScenario } = require('../fixtures/codex-supervisor-contract-dry-run.cjs')
 
 const ROOT = path.resolve(__dirname, '..', '..')
-const GIT_BASH = 'C:\\Program Files\\Git\\bin\\bash.exe'
-const BASH = process.platform === 'win32' ? GIT_BASH : 'bash'
+const GIT_BASH = require('../helpers/resolve-bash.cjs').resolveBash()
+const BASH = GIT_BASH
 const POWERSHELL = process.platform === 'win32' ? 'powershell.exe' : 'pwsh'
-const HAS_BASH = process.platform === 'win32'
-  ? fs.existsSync(GIT_BASH)
-  : childProcess.spawnSync(BASH, ['--version'], { stdio: 'ignore' }).status === 0
+const HAS_BASH = Boolean(GIT_BASH)
 const HAS_POWERSHELL = process.platform === 'win32' || childProcess.spawnSync(
   POWERSHELL,
   ['-NoProfile', '-NonInteractive', '-Command', 'exit 0'],

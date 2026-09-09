@@ -13,7 +13,7 @@ const { processIdentityForPid } = require('../agents/codex/workflow/mission-lock
 const { createRunRecord } = require('../agents/codex/workflow/run-record.js')
 const { ReasonixExecAdapter } = require('../agents/reasonix/workflow/transport.js')
 const safety = require('./local-only-safety.cjs')
-const { verifyAdmission, importedTrustDirectory } = require('../agents/reasonix/workflow/admission.js')
+const { verifyAdmission, importedTrustDirectory, runtimeIdentityBody, runtimeIdentity, reviewedLocalPending, awaitingIndependentConformance } = require('../agents/reasonix/workflow/admission.js')
 const { selectModelAssignment, validateReceiptBoundRegistry } = require('../agents/codex/workflow/effort-policy.js')
 
 const PROFILE = Object.freeze({
@@ -59,7 +59,10 @@ function credentialEnvironment(connection, root, environment) {
 
 function importedAdmission(root) {
   const directory = importedTrustDirectory(root), file = path.join(directory, 'admission.json')
-  if (!fs.existsSync(file)) return null
+  if (!fs.existsSync(file)) {
+    if (fs.existsSync(directory)) throw new ReasonixError('PROVIDER_UNSUPPORTED', 'Reasonix imported conformance directory is incomplete')
+    return null
+  }
   try { new RootGuard(root).assertExisting(directory, 'directory') } catch { throw new ReasonixError('PROVIDER_UNSUPPORTED', 'Reasonix imported conformance directory is not physical and private') }
   let value
   try { value = JSON.parse(readBound(file)) } catch { throw new ReasonixError('PROVIDER_UNSUPPORTED', 'Reasonix imported conformance manifest is unreadable') }
@@ -78,6 +81,11 @@ function importedAdmission(root) {
   return { trustDirectory: directory, conformanceRequestSha256: value.conformanceRequestSha256 }
 }
 
+function reviewedLocalBindingMatches(record, pending) {
+  return Boolean(record?.reviewedLocal && pending && record.reviewedLocal.reviewDigest === pending.reviewDigest &&
+    record.reviewedLocal.releaseIdentityHash === pending.releaseIdentityHash)
+}
+
 function prepareActivation(options = {}) {
   const environment = options.env || process.env
   const root = options.root || packaging.resolveRoot(environment)
@@ -87,7 +95,17 @@ function prepareActivation(options = {}) {
   const request = requestEnvelope(options.missionArgs)
   const executable = probeExecutable({ env: environment, executable: options.executable })
   const localAdmission = importedAdmission(root)
-  const admission = verifyAdmission(installed, executable, localAdmission || {})
+  let admission, reviewedLocal = null
+  try { admission = verifyAdmission(installed, executable, localAdmission || {}) }
+  catch (error) {
+    // An explicit import is authoritative: malformed, expired, or rejected
+    // imported evidence must never silently fall back to a bundled record.
+    if (localAdmission || !awaitingIndependentConformance(installed)) throw error
+    reviewedLocal = reviewedLocalPending(installed, executable, { now: options.now })
+    if (!reviewedLocal) throw error
+    admission = { runtimeIdentityBody: runtimeIdentityBody(installed, executable), runtimeIdentityHash: runtimeIdentity(installed, executable),
+      evidenceSha256: reviewedLocal.reviewDigest, trustSource: { kind: 'reviewed-local-pending', reviewDigest: reviewedLocal.reviewDigest } }
+  }
   const connection = connectionConfig(path.join(root, 'config.toml'))
   const credentials = credentialEnvironment(connection, root, environment)
   const ttlSeconds = options.ttlSeconds === undefined ? 24 * 60 * 60 : Number(options.ttlSeconds)
@@ -105,10 +123,14 @@ function prepareActivation(options = {}) {
       record = JSON.parse(readBound(recordPath))
       if (record.providerId !== 'reasonix' || record.activationId !== activationId || record.target.realpath !== target ||
           record.request.sha256 !== request.sha256 || record.payloadDigest !== installed.payloadDigest ||
-          record.executable.sha256 !== executable.sha256 ||
+          record.executable.sha256 !== executable.sha256 || record.executable.path !== executable.path ||
+          JSON.stringify(record.executable.runtimeIdentity) !== JSON.stringify(executable.runtimeIdentity) ||
+          JSON.stringify(record.executable.portableRuntimeIdentity) !== JSON.stringify(executable.portableRuntimeIdentity) ||
           (record.status === 'active' && processIdentityForPid(record.ownerPid) !== null) ||
-          record.connectionSha256 !== sha256(JSON.stringify(connection))) {
-        throw new ReasonixError('RESUME_MISMATCH', 'Resume must bind the original request, target, payload, model configuration, and executable after the prior run stops')
+          record.connectionSha256 !== sha256(JSON.stringify(connection)) ||
+          Boolean(record.reviewedLocal) !== Boolean(reviewedLocal) ||
+          (reviewedLocal && !reviewedLocalBindingMatches(record, reviewedLocal))) {
+        throw new ReasonixError('RESUME_MISMATCH', 'Resume must bind the original request, target, payload, model configuration, executable, and reviewed-local release binding after the prior run stops')
       }
       if (Date.parse(record.capability.expiresAt) <= Date.now()) throw new ReasonixError('BUDGET_EXHAUSTED', 'The original run deadline has expired')
       record.capability.generation++
@@ -131,11 +153,13 @@ function prepareActivation(options = {}) {
         targetPath: target, providerId: 'reasonix', runId: activationId, readOnly: true, exactTree: true,
         canonicalProviderPrivateRoot: path.join(activationRoot, 'r'), assertStartBoundary: false,
       })
+      const darwinRuntimeClosure = process.platform === 'darwin' && fs.existsSync(path.join(root, '.autoprompt-private', 'darwin-runtime', 'darwin-runtime-closure.json'))
+        ? require('./darwin-runtime-setup.cjs').bindActivation({ provider: 'reasonix', root, activationRoot }) : null
       const metadataSha256 = sha256(readBound(path.join(run.runPath, 'metadata.json')))
       const modelFile = path.join(root, '.autoprompt-reasonix-models.json')
       const modelSelection = fs.existsSync(modelFile) ? validateSelection(JSON.parse(readBound(modelFile))) : { mode: 'provider-default', selector: 'off', models: [] }
       record = {
-        schemaVersion: 2, providerId: 'reasonix', activationId, activationRoot,
+        schemaVersion: 2, providerId: 'reasonix', activationId, activationRoot, darwinRuntimeClosure,
         payloadDigest: installed.payloadDigest, payloadGeneration: installed.payloadGeneration,
         createdAt: new Date().toISOString(), request, target: { realpath: target }, executable,
         connectionSha256: sha256(JSON.stringify(connection)), modelSelection,
@@ -147,6 +171,7 @@ function prepareActivation(options = {}) {
         activationBoundary: { gitConfig, ghConfigDir, payloadManifestSha256: installed.payloadDigest,
           supervisorAdapterSha256: sha256(readBound(path.join(installed.bundle, 'scripts/reasonix-configure.cjs'))),
           enforcementProof: { ...proof, path: proofPath, sha256: sha256(readBound(proofPath)) } },
+        ...(reviewedLocal ? { reviewedLocal } : {}),
       }
     }
     record.status = 'active'
@@ -154,7 +179,8 @@ function prepareActivation(options = {}) {
     record.ownerIdentity = processIdentityForPid(process.pid)
     const attestationBody = { provider: 'reasonix', activationId, generation: record.capability.generation,
       admissionEvidenceSha256: admission.evidenceSha256, executableSha256: executable.sha256, payloadDigest: installed.payloadDigest, requestHash: request.sha256,
-      targetIdentity: record.supervisorRuntime.targetIdentity, nonce: record.providerAttestation.attestation.activationNonce }
+      targetIdentity: record.supervisorRuntime.targetIdentity, nonce: record.providerAttestation.attestation.activationNonce,
+      ...(record.darwinRuntimeClosure ? { darwinRuntimeClosureSha256: record.darwinRuntimeClosure.sha256 } : {}) }
     record.activationAttestation = { hash: sha256(JSON.stringify(attestationBody)), ...attestationBody }
     atomicJson(recordPath, record)
     return {
@@ -170,11 +196,89 @@ function prepareActivation(options = {}) {
   } finally { release(lease) }
 }
 
+async function runReviewedLocalCanary(activation, options = {}) {
+  const pending = activation.record.reviewedLocal
+  if (!pending) return null
+  // Re-probe immediately before every canary, including a resumed activation.
+  // The persisted pending record is only a binding, never permission to reuse
+  // a replaced executable or dependency closure.
+  const current = probeExecutable({ env: options.env || process.env, executable: activation.executable.path })
+  const fresh = reviewedLocalPending(activation.installed, current, { now: options.now })
+  if (!fresh || fresh.reviewDigest !== pending.reviewDigest || fresh.releaseIdentityHash !== pending.releaseIdentityHash) {
+    throw new ReasonixError('PROVIDER_UNSUPPORTED', 'Reasonix reviewed-local release binding drifted before canary')
+  }
+  const canary = await require('./harness-v2-closed-canary.cjs').run({ provider: 'reasonix', activation, pending: fresh,
+    executable: current, environment: options.env || process.env, signal: options.signal })
+  if (!canary || typeof canary !== 'object' || !/^[A-Za-z0-9_-]{43}$/.test(canary.challenge || '') || !Array.isArray(canary.artifacts)) {
+    throw new ReasonixError('LOCAL_CANARY_INVALID', 'Reasonix closed canary result is malformed')
+  }
+  const verifier = require('./harness-v2-canary.cjs')
+  const observations = verifier.verifyObservations(fresh, canary.observations)
+  const root = path.join(activation.activationRoot, 'reviewed-local-canary', `generation-${activation.record.capability.generation}`)
+  const artifacts = canary.artifacts.map(item => {
+    if (!item || typeof item.capability !== 'string' || typeof item.path !== 'string' || !path.resolve(item.path).startsWith(`${root}${path.sep}`) || !/^[a-f0-9]{64}$/.test(item.sha256 || '')) {
+      throw new ReasonixError('LOCAL_CANARY_INVALID', 'Reasonix closed canary artifact binding is invalid')
+    }
+    const bytes = readBound(item.path)
+    if (sha256(bytes) !== item.sha256) throw new ReasonixError('LOCAL_CANARY_INVALID', 'Reasonix closed canary artifact drifted')
+    let artifact
+    try { artifact = JSON.parse(bytes) } catch { throw new ReasonixError('LOCAL_CANARY_INVALID', 'Reasonix closed canary artifact is unreadable') }
+    const capability = fresh.capabilityCases[item.capability]
+    if (!capability || artifact.schemaVersion !== 'harness-v2-closed-canary-observation.v1' || artifact.capability !== item.capability ||
+        artifact.caseSha256 !== capability.sha256 || artifact.testName !== capability.testName || artifact.activationId !== activation.activationId ||
+        artifact.generation !== activation.record.capability.generation || artifact.challenge !== canary.challenge ||
+        artifact.requestSha256 !== activation.record.request.sha256 || artifact.target !== activation.record.target.realpath ||
+        artifact.executableSha256 !== current.sha256 || JSON.stringify(artifact.executableRuntimeIdentity) !== JSON.stringify(current.runtimeIdentity || null) ||
+        artifact.connectionSha256 !== activation.record.connectionSha256 || artifact.payloadDigest !== activation.installed.payloadDigest ||
+        artifact.enforcementProofSha256 !== activation.enforcementProof.sha256 || artifact.reviewDigest !== fresh.reviewDigest || !/^[a-f0-9]{64}$/.test(artifact.outputSha256 || '')) {
+      throw new ReasonixError('LOCAL_CANARY_INVALID', 'Reasonix closed canary artifact does not bind this activation')
+    }
+    return { capability: item.capability, path: item.path, sha256: item.sha256 }
+  })
+  if (artifacts.length !== observations.length || new Set(artifacts.map(item => item.capability)).size !== observations.length ||
+      observations.some(item => !artifacts.some(artifact => artifact.capability === item.capability))) {
+    throw new ReasonixError('LOCAL_CANARY_INVALID', 'Reasonix closed canary artifacts are incomplete')
+  }
+  activation.record.reviewedLocalCanary = { reviewDigest: fresh.reviewDigest, releaseIdentityHash: fresh.releaseIdentityHash,
+    executableSha256: current.sha256, nativeRuntimeIdentity: current.portableRuntimeIdentity,
+    observedAt: new Date().toISOString(), challenge: canary.challenge, observations, artifacts }
+  atomicJson(activation.recordPath, activation.record)
+  return activation.record.reviewedLocalCanary
+}
+
+// The activation deadline is an immutable authorization boundary.  Keep the
+// timer outside native provider code so a held native response cannot turn an
+// expired capability into a still-authorized supervisor.
+function armActivationExpiry(activation, cancel, options = {}) {
+  const expiresAt = Date.parse(activation?.record?.capability?.expiresAt)
+  const timerApi = options.timerApi || { setTimeout, clearTimeout }
+  const now = typeof options.wallNowMs === 'function' ? options.wallNowMs : Date.now
+  if (!Number.isFinite(expiresAt) || typeof cancel !== 'function' ||
+      typeof timerApi.setTimeout !== 'function' || typeof timerApi.clearTimeout !== 'function') {
+    throw new ReasonixError('ACTIVATION_INVALID', 'Reasonix activation expiry cancellation binding is invalid')
+  }
+  const timer = timerApi.setTimeout(() => cancel('activation authorization expired'), Math.max(0, expiresAt - Number(now())))
+  return () => timerApi.clearTimeout(timer)
+}
+
 async function supervise(options = {}) {
-  const activation = prepareActivation(options)
-  let runtime
-  let outcome
+  let activation, runtime, outcome
+  let disarmExpiry = () => {}
+  const cancellation = new AbortController()
+  const cancel = reason => {
+    if (cancellation.signal.aborted) return
+    cancellation.abort(reason === 'activation authorization expired' ? reason : 'operator signal')
+  }
+  process.on('SIGINT', cancel); process.on('SIGTERM', cancel)
   try {
+    activation = prepareActivation(options)
+    disarmExpiry = armActivationExpiry(activation, cancel, options)
+    if (cancellation.signal.aborted) throw new ReasonixError('CHILD_CANCELLED', 'Reasonix activation was cancelled during preparation')
+    // Pending reviewed-local admission authorizes only this bounded native
+    // check. No repository inspection, safety operation, or mission runtime
+    // starts until the fresh canary has passed and been persisted.
+    await runReviewedLocalCanary(activation, { ...options, signal: cancellation.signal })
+    if (cancellation.signal.aborted) throw new ReasonixError('CHILD_CANCELLED', 'Reasonix activation was cancelled during native canary')
     const target = activation.record.target.realpath
     const expectedBranch = childProcess.spawnSync('git', ['-C', target, 'symbolic-ref', '--quiet', '--short', 'HEAD'], { encoding: 'utf8' }).stdout.trim()
     const safeOptions = { expectedBranch, configIsolationPath: activation.record.activationBoundary.gitConfig, ghConfigDir: activation.record.activationBoundary.ghConfigDir, enforcementProof: activation.enforcementProof }
@@ -200,21 +304,41 @@ async function supervise(options = {}) {
     const runtimeOptions = core.createDefaultRuntimeOptions({ activation, probe, context })
     runtimeOptions.activationReceipt = activation
     runtime = new core.CodexSupervisorRuntime(runtimeOptions)
-    const cancel = () => { runtime.cancel('operator signal').catch(error => { process.stderr.write(`Reasonix cancellation failed: ${error.code || 'FAILED'}\n`) }) }
-    process.once('SIGINT', cancel)
-    process.once('SIGTERM', cancel)
-    try { outcome = await runtime.start() }
-    finally { process.removeListener('SIGINT', cancel); process.removeListener('SIGTERM', cancel) }
+    outcome = await core.runAbortOwnedSupervisor(runtime, cancellation.signal)
     return { ...outcome, activationId: activation.activationId, runPath: activation.supervisorRuntime.runPath }
   } finally {
-    const latest = JSON.parse(readBound(activation.recordPath))
-    latest.status = 'revoked'
-    latest.revokedAt = new Date().toISOString()
-    latest.outcome = outcome?.outcome || 'FAILED'
-    atomicJson(activation.recordPath, latest)
+    disarmExpiry()
+    process.removeListener('SIGINT', cancel); process.removeListener('SIGTERM', cancel)
+    if (activation) {
+      const lease = acquire(activation.root, 'revoke-reasonix-v2')
+      try {
+        const latest = JSON.parse(readBound(activation.recordPath))
+        if (latest.ownerPid !== process.pid || latest.capability?.generation !== activation.record.capability.generation) {
+          throw new ReasonixError('RESUME_MISMATCH', 'Reasonix activation ownership changed before revocation')
+        }
+        latest.status = 'revoked'
+        latest.revokedAt = new Date().toISOString()
+        latest.outcome = outcome?.outcome || 'FAILED'
+        atomicJson(activation.recordPath, latest)
+      } finally { release(lease) }
+    }
   }
 }
 
+function awaitReasonixChild(child, options = {}) {
+  const signalSource = options.signalSource || process
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const stop = signal => { if (!settled && child.exitCode === null && child.signalCode === null) { try { child.kill(signal) } catch (error) { if (error.code !== 'ESRCH') rejectOnce(error) } } }
+    const cleanup = () => { signalSource.removeListener('SIGINT', onInterrupt); signalSource.removeListener('SIGTERM', onTerminate) }
+    const resolveOnce = result => { if (!settled) { settled = true; cleanup(); resolve(result) } }
+    const rejectOnce = error => { if (!settled) { settled = true; cleanup(); reject(error) } }
+    const onInterrupt = () => stop('SIGINT'), onTerminate = () => stop('SIGTERM')
+    signalSource.on('SIGINT', onInterrupt); signalSource.on('SIGTERM', onTerminate)
+    child.once('error', rejectOnce)
+    child.once('close', (status, signal) => resolveOnce({ status, signal }))
+  })
+}
 function launchActivation(options = {}) {
   const environment = options.env || process.env
   const root = packaging.resolveRoot(environment)
@@ -222,15 +346,23 @@ function launchActivation(options = {}) {
   const activationId = options.resume || `apv2-${crypto.randomBytes(16).toString('hex')}`
   const requestPath = path.join(root, '.autoprompt-private', `launch-${crypto.randomUUID()}.json`)
   writePrivate(requestPath, JSON.stringify({ root, activationId, target: options.target, missionArgs: options.missionArgs, ttlSeconds: options.ttlSeconds, resume: options.resume }))
-  try {
-    const result = (options.spawnSync || childProcess.spawnSync)(process.execPath, [path.join(installed.bundle, 'scripts/reasonix-configure.cjs'), '--supervise', requestPath], {
-      env: environment, stdio: options.stdio || 'inherit', shell: false,
-    })
-    if (result.error) throw result.error
+  const finish = result => {
     const recordPath = path.join(root, '.autoprompt-private', 'activations', activationId, 'activation.json')
     const record = fs.existsSync(recordPath) ? JSON.parse(readBound(recordPath)) : null
     return { status: result.status === null ? 1 : result.status, activationId, revoked: record ? record.status === 'revoked' : true }
-  } finally { fs.unlinkSync(requestPath) }
+  }
+  const argv = [path.join(installed.bundle, 'scripts/reasonix-configure.cjs'), '--supervise', requestPath]
+  if (options.spawnSync) {
+    try {
+      const result = options.spawnSync(process.execPath, argv, { env: environment, stdio: options.stdio || 'inherit', shell: false })
+      if (result.error) throw result.error
+      return finish(result)
+    } finally { fs.unlinkSync(requestPath) }
+  }
+  let child
+  try { child = childProcess.spawn(process.execPath, argv, { env: environment, stdio: options.stdio || 'inherit', shell: false }) }
+  catch (error) { fs.unlinkSync(requestPath); throw error }
+  return awaitReasonixChild(child, { signalSource: options.signalSource }).then(finish).finally(() => fs.unlinkSync(requestPath))
 }
 
 function validateSelection(selection) {
@@ -282,4 +414,4 @@ if (require.main === module) {
   } else { process.stderr.write('Reasonix supervisor requires an explicit activation request.\n'); process.exitCode = 2 }
 }
 
-module.exports = { PROFILE, configure, credentialEnvironment, importedAdmission, launchActivation, prepareActivation, requestEnvelope, resolveAssignment, validateSelection, supervise }
+module.exports = { PROFILE, armActivationExpiry, awaitReasonixChild, configure, credentialEnvironment, importedAdmission, launchActivation, prepareActivation, requestEnvelope, resolveAssignment, reviewedLocalBindingMatches, runReviewedLocalCanary, validateSelection, supervise }

@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict')
 const childProcess = require('node:child_process')
 const fs = require('node:fs')
+const Module = require('node:module')
 const os = require('node:os')
 const path = require('node:path')
 const test = require('node:test')
@@ -28,6 +29,24 @@ function sandboxProbeSpawn(mode) {
     }
     return childProcess.spawnSync(process.execPath, args.slice(nodeIndex + 1), options)
   }
+}
+
+function activationWithDelayedReadyPublication() {
+  const sourcePath = require.resolve('../../scripts/codex-configure.cjs')
+  const source = fs.readFileSync(sourcePath, 'utf8')
+  const original = "    '  fs.writeFileSync(ready,JSON.stringify({address,port:server.address().port}),{flag:\"wx\",mode:0o600})',"
+  const replacement = [
+    "    '  const readyDescriptor=fs.openSync(ready,\"wx\",0o600)',",
+    "    '  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,250)',",
+    "    '  fs.writeFileSync(readyDescriptor,JSON.stringify({address,port:server.address().port}))',",
+    "    '  fs.closeSync(readyDescriptor)',",
+  ].join('\n')
+  assert.ok(source.includes(original), 'test transform must bind the listener ready write')
+  const local = new Module(`${sourcePath}:delayed-ready-publication`, module)
+  local.filename = sourcePath
+  local.paths = Module._nodeModulePaths(path.dirname(sourcePath))
+  local._compile(source.replace(original, replacement), sourcePath)
+  return local.exports
 }
 
 test('Codex dynamic preflight distinguishes permitted loopback from denied non-loopback access', t => {
@@ -57,6 +76,25 @@ test('Codex dynamic preflight distinguishes permitted loopback from denied non-l
   assert.deepEqual(fs.readdirSync(target), [], 'preflight must remove every network receipt')
 })
 
+test('Codex network probe publishes its endpoint only after the ready bytes are complete', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-network-publication-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const codexHome = path.join(root, 'codex-home')
+  const target = path.join(root, 'target')
+  fs.mkdirSync(codexHome, { mode: 0o700 })
+  fs.mkdirSync(target, { mode: 0o700 })
+  const delayed = activationWithDelayedReadyPublication()
+  assert.match(
+    delayed.probeCodexCommandNetwork({
+      env: { ...process.env, CODEX_HOME: codexHome },
+      target,
+    }, sandboxProbeSpawn('denied')),
+    /^[a-f0-9]{64}$/,
+  )
+  assert.deepEqual(fs.readdirSync(codexHome), [], 'preflight must remove ready and publication artifacts')
+  assert.deepEqual(fs.readdirSync(target), [], 'preflight must remove every network receipt')
+})
+
 test('activation signer and supervisor bind the exact Windows sandbox identity', () => {
   const record = {
     activationId: 'apv2-11111111111111111111111111111111',
@@ -69,7 +107,7 @@ test('activation signer and supervisor bind the exact Windows sandbox identity',
       enforcementProof: { profileSha256: '4'.repeat(64) },
       privatePermissions: { mechanism: 'windows-dacl', auditedPaths: 1 },
       sandboxIdentity: {
-        kind: 'windows-cap-sid-v1', path: 'C:\\activation\\cap_sid',
+        kind: 'windows-cap-sid-v1', path: 'C:\\activation\\n\\cap_sid',
         sha256: '5'.repeat(64), sourceSha256: '6'.repeat(64),
       },
       supervisorAdapterSha256: '7'.repeat(64),
@@ -85,6 +123,33 @@ test('activation signer and supervisor bind the exact Windows sandbox identity',
   const changed = structuredClone(record)
   changed.activationBoundary.sandboxIdentity.sha256 = '8'.repeat(64)
   assert.notEqual(runtime.providerRuntimeIdentityHash(changed), signed)
+})
+
+test('Windows sandbox identity is installed and verified in the native CODEX_HOME', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-windows-cap-sid-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const activationRoot = path.join(root, 'activation')
+  fs.mkdirSync(activationRoot, { mode: 0o700 })
+  const sourceIdentity = {
+    readonly: 'S-1-5-21-100',
+    workspace: 'S-1-5-21-101',
+    workspace_by_cwd: { 'C:\\workspace': 'S-1-5-21-102' },
+    writable_root_by_path: { 'C:\\workspace': 'S-1-5-21-103' },
+  }
+  fs.writeFileSync(path.join(root, 'cap_sid'), `${JSON.stringify(sourceIdentity)}\n`, { mode: 0o600 })
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform')
+  Object.defineProperty(process, 'platform', { ...platform, value: 'win32' })
+  try {
+    const binding = activation.installWindowsSandboxIdentity(root, activationRoot)
+    const expected = activation.windowsSandboxIdentityPath(activationRoot)
+    assert.equal(expected, path.join(activationRoot, 'n', 'cap_sid'))
+    assert.equal(binding.path, expected)
+    assert.equal(fs.existsSync(expected), true)
+    assert.equal(fs.existsSync(path.join(activationRoot, 'cap_sid')), false)
+    assert.deepEqual(activation.verifyWindowsSandboxIdentity(activationRoot, binding), binding)
+  } finally {
+    Object.defineProperty(process, 'platform', platform)
+  }
 })
 
 test('manifest generation qualifies every physical provider role and rejects a wrong generation', t => {

@@ -7,7 +7,7 @@ const path = require('node:path')
 const crypto = require('node:crypto')
 const cp = require('node:child_process')
 const { readBound, writePrivate, privateDirectory, sha256 } = require('../agents/reasonix/workflow/native.js')
-const PROVIDERS = new Set(['claude', 'opencode', 'kilo', 'prime', 'omp', 'deepseek', 'vscode', 'reasonix'])
+const PROVIDERS = new Set(['claude', 'opencode', 'kilo', 'prime', 'omp', 'deepseek', 'vscode', 'reasonix', 'hermes', 'grok'])
 const OUTPUT_LIMIT = 1024 * 1024
 class BoundaryError extends Error {
   constructor(code, message) { super(message); this.name = 'BoundaryError'; this.code = code }
@@ -56,10 +56,11 @@ function ownedDirectory(file) {
 }
 function validatePolicy(input) {
   const allowed = new Set(['schemaVersion', 'provider', 'activationId', 'sessionId', 'reservationId', 'readOnly',
-    'targetPath', 'scratchPath', 'readableRoots', 'writableRoots', 'nestedDispatch', 'commandBoundary', 'externalWrites'])
+    'targetPath', 'scratchPath', 'readableRoots', 'writableRoots', 'nestedDispatch', 'commandBoundary', 'externalWrites', 'toolFree'])
   if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !allowed.has(key)) ||
       !PROVIDERS.has(input.provider) || typeof input.readOnly !== 'boolean' || input.nestedDispatch !== false ||
       input.commandBoundary !== true || input.externalWrites !== false ||
+      (input.toolFree !== undefined && typeof input.toolFree !== 'boolean') ||
       (input.schemaVersion !== undefined && input.schemaVersion !== 1)) fail('TOOL_POLICY_INVALID', 'Invalid controller tool policy')
   for (const key of ['activationId', 'sessionId', 'reservationId']) if (input[key] !== undefined &&
       (typeof input[key] !== 'string' || !input[key] || input[key].length > 512 || input[key].includes('\0'))) fail('TOOL_POLICY_INVALID', 'Invalid tool policy identity')
@@ -128,6 +129,16 @@ function atomicWrite(policy, file, content) {
   return { path: target, bytesWritten: Buffer.byteLength(content) }
 }
 function safeEnvironment() {
+  if (process.platform === 'win32') {
+    const systemRoot = process.env.SystemRoot
+    if (typeof systemRoot !== 'string' || !/^[A-Za-z]:\\Windows$/i.test(systemRoot)) fail('COMMAND_SANDBOX_UNSUPPORTED', 'Windows system root is unavailable')
+    return { SystemRoot: systemRoot, WINDIR: systemRoot, SystemDrive: systemRoot.slice(0, 2),
+      PATH: [path.dirname(process.execPath), path.join(systemRoot, 'System32')].join(path.delimiter),
+      ComSpec: path.join(systemRoot, 'System32', 'cmd.exe'), PATHEXT: '.COM;.EXE;.BAT;.CMD', LOCALAPPDATA: process.env.LOCALAPPDATA || '',
+      GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: 'NUL', GIT_ALLOW_PROTOCOL: '', GIT_TERMINAL_PROMPT: '0',
+      GIT_CONFIG_COUNT: '3', GIT_CONFIG_KEY_0: 'push.default', GIT_CONFIG_VALUE_0: 'nothing',
+      GIT_CONFIG_KEY_1: 'credential.helper', GIT_CONFIG_VALUE_1: '', GIT_CONFIG_KEY_2: 'core.sshCommand', GIT_CONFIG_VALUE_2: 'cmd /d /c exit 1' }
+  }
   return { PATH: [path.dirname(process.execPath), '/usr/local/bin', '/usr/bin', '/bin'].join(path.delimiter),
     HOME: '/tmp/home', TMPDIR: '/tmp', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8', TERM: 'dumb',
     GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_ALLOW_PROTOCOL: '', GIT_TERMINAL_PROMPT: '0',
@@ -158,10 +169,35 @@ function sandboxArguments(policy, cwd) {
   }
   return [...argv, '--chdir', cwd, '--', '/bin/bash', '--noprofile', '--norc']
 }
+
+// These outcomes are established before sandboxArguments() or cp.spawn(). A
+// caller may correct its assigned cwd, but no receipt may call that correction
+// a foreground command execution.
+const NOT_STARTED_CWD_CODES = new Set(['TOOL_PATH_DENIED', 'TOOL_PATH_INVALID'])
+function notStartedCommand(args, code) {
+  const message = code === 'TOOL_PATH_DENIED'
+    ? 'Command cwd is outside the assigned readable roots'
+    : 'Command cwd must be an existing assigned directory'
+  const output = `${code}: ${message}`
+  return { tool: 'bash', command: args.command, status: 'failed', exitCode: null,
+    output, outputSha256: sha256(output), code, executionState: 'NOT_STARTED' }
+}
 async function command(policy, args, options = {}) {
-  const cwd = authorize(policy, args.cwd || (policy.readOnly && policy.scratchPath ? policy.scratchPath : policy.targetPath))
-  if (!fs.statSync(cwd).isDirectory()) fail('TOOL_PATH_INVALID', 'Command cwd must be a directory')
   if (!args.command.trim() || Buffer.byteLength(args.command) > 65536) fail('TOOL_ARGUMENTS_INVALID', 'A bounded nonempty command is required')
+  let cwd
+  try {
+    cwd = authorize(policy, args.cwd || (policy.readOnly && policy.scratchPath ? policy.scratchPath : policy.targetPath))
+    if (!fs.statSync(cwd).isDirectory()) fail('TOOL_PATH_INVALID', 'Command cwd must be a directory')
+  } catch (error) {
+    // physical() can surface ENOENT/ENOTDIR while resolving this requested
+    // cwd. Only this synchronous pre-spawn region receives a no-spawn result;
+    // errors after it remain ordinary runtime failures.
+    const code = error instanceof BoundaryError ? error.code
+      : ['ENOENT', 'ENOTDIR'].includes(error?.code) ? 'TOOL_PATH_INVALID' : null
+    if (NOT_STARTED_CWD_CODES.has(code)) return notStartedCommand(args, code)
+    throw error
+  }
+  if (process.platform === 'win32') return require('../agents/codex/workflow/windows-appcontainer-command.js').runWindowsAppContainerCommand(policy, { ...args, cwd }, options)
   const argv = [...sandboxArguments(policy, cwd), '-c', args.command]
   const start = Date.now()
   return new Promise((resolve, reject) => {
@@ -199,6 +235,9 @@ async function command(policy, args, options = {}) {
 }
 async function executeTool(rawPolicy, name, args, options = {}) {
   const policy = validatePolicy(rawPolicy)
+  // Authority is in the hashed controller policy, not a native tool listing
+  // or a later event-parser rejection after a tool has already executed.
+  if (policy.toolFree === true) fail('TOOL_DENIED', 'This controller assignment authorizes no tools')
   validateArguments(name, args)
   if (options.signal?.aborted) fail('TOOL_CANCELLED', 'Tool execution was cancelled before it started')
   if (name === 'bash') return command(policy, args, options)
@@ -255,7 +294,7 @@ function prepareBoundary({ provider, root, policy }) {
   writePrivate(policyPath, bytes); writePrivate(receiptPath, '')
   return { root: directory, policy: normalized, policyPath, policySha256, receiptPath,
     serverSpec: { command: process.execPath, args: [path.join(__dirname, 'harness-v2-tool-server.cjs'), '--policy', policyPath, '--sha256', policySha256],
-      env: { ...safeEnvironment(), HOME: directory, TMPDIR: directory } } }
+      env: { ...safeEnvironment(), HOME: directory, TMPDIR: directory, ...(process.platform === 'win32' ? { TEMP: directory, TMP: directory } : {}) } } }
 }
 function loadBoundary(policyPath, policySha256) {
   if (!/^[a-f0-9]{64}$/.test(policySha256 || '')) fail('TOOL_POLICY_INVALID', 'Tool policy digest is invalid')
@@ -282,6 +321,7 @@ function appendReceipt(boundary, name, args, result, startedAt) {
   const body = { sequence: records.length + 1, previous: records.at(-1)?.hash || null,
     policySha256: boundary.policySha256, tool: name, argsSha256: sha256(canonicalJson(args)), resultSha256: sha256(canonicalJson(result)),
     outputSha256: result.outputSha256 || sha256(result.output || ''), status: result.status, exitCode: result.exitCode ?? null,
+    ...(result.executionState === 'NOT_STARTED' ? { executionState: 'NOT_STARTED' } : {}),
     startedAt, endedAt: new Date().toISOString() }
   const record = { ...body, hash: sha256(canonicalJson(body)) }
   const fd = fs.openSync(boundary.receiptPath, fs.constants.O_WRONLY | fs.constants.O_APPEND | (fs.constants.O_NOFOLLOW || 0))
@@ -293,6 +333,7 @@ function appendReceipt(boundary, name, args, result, startedAt) {
   return record
 }
 async function probeCommandSandbox() {
+  if (process.platform === 'win32') return require('../agents/codex/workflow/windows-appcontainer-probe.js').probeWindowsAppContainer()
   if (process.platform !== 'linux') return { supported: false, backend: 'bubblewrap', code: 'COMMAND_SANDBOX_UNSUPPORTED' }
   const result = cp.spawnSync('/usr/bin/bwrap', ['--die-with-parent', '--unshare-net', '--unshare-pid', '--ro-bind', '/usr', '/usr', '--symlink', 'usr/bin', '/bin', '--symlink', 'usr/lib', '/lib', '--symlink', 'usr/lib64', '/lib64', '--', '/bin/true'], { env: safeEnvironment(), encoding: 'utf8', timeout: 10000, shell: false })
   return { supported: !result.error && result.status === 0, backend: 'bubblewrap',

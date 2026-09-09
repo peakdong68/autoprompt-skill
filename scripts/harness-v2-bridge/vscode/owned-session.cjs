@@ -34,8 +34,9 @@ function wireMessages(vscode, messages) {
     return [{ role, content: text.join(''), ...(calls.length ? { tool_calls: calls } : {}) }]
   })
 }
-function registerProvider(context, vscode, connection) {
+function registerProvider(context, vscode, connection, outputSchema) {
   const receipts = new Map()
+  const listeners = new Map()
   const provider = {
     provideLanguageModelChatInformation() {
       return [{ id: connection.model, name: `Autoprompt ${connection.model}`, family: connection.model, version: '1', maxInputTokens: 131072, maxOutputTokens: connection.maxTokens, capabilities: { toolCalling: true } }]
@@ -59,7 +60,8 @@ function registerProvider(context, vscode, connection) {
           method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` }, signal: abort.signal,
           body: JSON.stringify({ model: connection.model, messages: wireMessages(vscode, messages), stream: false, max_tokens: connection.maxTokens,
             ...(tools.length ? { tools, tool_choice: options.toolMode === vscode.LanguageModelChatToolMode.Required ? 'required' : 'auto' } : {}),
-            ...(connection.reasoningEffort ? { reasoning: { effort: connection.reasoningEffort } } : {}) }),
+            ...(connection.reasoningEffort ? { reasoning: { effort: connection.reasoningEffort } } : {}),
+            ...(outputSchema ? { response_format: { type: 'json_schema', json_schema: { name: 'autoprompt_result', strict: true, schema: outputSchema } } } : {}) }),
         })
         if (!response.ok) fail('CHILD_RUNTIME_FAILURE', `Owned BYOK provider returned HTTP ${response.status}`)
         const chunks = []; let size = 0
@@ -71,9 +73,14 @@ function registerProvider(context, vscode, connection) {
         const bytes = Buffer.concat(chunks)
         const body = JSON.parse(bytes)
         const receipt = usageReceipt(body)
+        receipts.set(nonce, receipt)
+        // The host can reject sendRequest or its returned stream after the
+        // provider has already obtained a complete billed response. Deliver
+        // that validated receipt directly to the owned session first; progress
+        // remains only the normal-path presentation channel.
+        listeners.get(nonce)?.(receipt)
         const choice = body.choices?.[0]
         if (!choice || body.choices.length !== 1 || !['stop', 'tool_calls'].includes(choice.finish_reason)) fail('CHILD_RUNTIME_FAILURE', 'Owned model did not finish a complete response')
-        receipts.set(nonce, receipt)
         progress.report(vscode.LanguageModelDataPart.json(receipt, MIME))
         if (choice.message.content) progress.report(new vscode.LanguageModelTextPart(choice.message.content))
         for (const call of choice.message.tool_calls || []) {
@@ -86,7 +93,11 @@ function registerProvider(context, vscode, connection) {
     },
   }
   context.subscriptions.push(vscode.lm.registerLanguageModelChatProvider('autoprompt-owned', provider))
-  return receipts
+  return { receipts, subscribe(nonce, listener) {
+    if (typeof listener !== 'function' || listeners.has(nonce)) fail('PROFILE_INVALID', 'Owned receipt listener is invalid')
+    listeners.set(nonce, listener)
+    return () => listeners.delete(nonce)
+  } }
 }
 function deserialize(vscode, message) {
   const content = message.parts.map(part => {
@@ -104,10 +115,10 @@ function activateOwned(context, vscode) {
   if (sha256(bytes) !== process.env.AUTOPROMPT_VSCODE_OWNED_REQUEST_SHA256) fail('PROFILE_INVALID', 'Owned VS Code request changed before launch')
   const request = JSON.parse(bytes)
   const connection = sanitize(request.connection)
-  if (request.version !== 1 || !connection.model || !path.isAbsolute(request.sessionRoot || '') || !path.isAbsolute(request.targetPath || '')) fail('PROFILE_INVALID', 'Owned VS Code request is incomplete')
+  if (request.version !== 1 || !connection.model || !path.isAbsolute(request.sessionRoot || '') || !path.isAbsolute(request.targetPath || '') || request.outputSchema !== undefined && (!connection.supportsStructuredOutput || !request.outputSchema || typeof request.outputSchema !== 'object' || Array.isArray(request.outputSchema))) fail('PROFILE_INVALID', 'Owned VS Code request is incomplete')
   const prepared = boundary.loadBoundary(request.policyPath, request.policySha256)
   controlled.load(prepared, 'vscode')
-  const receipts = registerProvider(context, vscode, connection)
+  const receipts = registerProvider(context, vscode, connection, request.outputSchema)
   return { runOwnedSession: emit => runSession(vscode, request, connection, prepared, receipts, emit) }
 }
 async function runSession(vscode, request, connection, prepared, receipts, emit) {
@@ -119,7 +130,7 @@ async function runSession(vscode, request, connection, prepared, receipts, emit)
   let lockFd
   try { lockFd = fs.openSync(lock, 'wx', 0o600) } catch { fail('SESSION_BUSY', 'Owned conversation has an active or interrupted reservation') }
   const stateFile = path.join(root, 'conversation.json')
-  const binding = { targetPath: request.targetPath, model: connection.model, baseUrl: connection.baseUrl }
+  const binding = { targetPath: request.targetPath, model: connection.model, baseUrl: request.connectionIdentityBaseUrl || connection.baseUrl }
   const persist = state => { const temp = path.join(root, `${crypto.randomUUID()}.tmp`); writePrivate(temp, JSON.stringify(state)); fs.renameSync(temp, stateFile) }
   const cancellation = new vscode.CancellationTokenSource()
   const abort = new AbortController()
@@ -141,29 +152,35 @@ async function runSession(vscode, request, connection, prepared, receipts, emit)
     emit({ type: 'owned.session', sessionId, contextKind: 'autoprompt-extension', extensionHostVersion: vscode.version })
     const models = await vscode.lm.selectChatModels({ vendor: 'autoprompt-owned', id: connection.model })
     if (models.length !== 1) fail('PROVIDER_UNSUPPORTED', 'Owned LM provider was not registered in the actual extension host')
-    const tools = boundary.TOOLS.map(tool => ({ name: controlled.toolName('vscode', tool.name), description: tool.description, inputSchema: tool.inputSchema }))
+    const tools = (prepared.policy.toolFree === true ? [] : boundary.TOOLS).map(tool => ({ name: controlled.toolName('vscode', tool.name), description: tool.description, inputSchema: tool.inputSchema }))
     for (let step = 0; step < connection.maxSteps; step++) {
       if (abort.signal.aborted) fail('CHILD_CANCELLED', 'Owned conversation cancelled')
       const nonce = crypto.randomUUID()
-      const response = await models[0].sendRequest(state.messages.map(message => deserialize(vscode, message)), { tools, modelOptions: { autopromptRequest: nonce } }, cancellation.token)
       const parts = []; let receipt
-      for await (const part of response.stream) {
-        if (part instanceof vscode.LanguageModelDataPart && part.mimeType === MIME) {
-          if (receipt) fail('PROVIDER_USAGE_UNKNOWN', 'Duplicate owned usage receipt')
-          receipt = JSON.parse(Buffer.from(part.data).toString('utf8'))
-          if (JSON.stringify(receipt) !== JSON.stringify(receipts.get(nonce))) fail('PROVIDER_USAGE_UNKNOWN', 'LM receipt differs from the actual provider response')
-          emit({ type: 'owned.usage', ...receipt })
-        } else if (part instanceof vscode.LanguageModelTextPart) parts.push({ type: 'text', text: part.value })
-        else if (part instanceof vscode.LanguageModelToolCallPart) parts.push({ type: 'call', id: part.callId, name: part.name, args: part.input })
-        else fail('TRANSPORT_INVALID', 'Owned LM returned an unsupported stream part')
+      const acceptReceipt = candidate => {
+        if (receipt && JSON.stringify(receipt) !== JSON.stringify(candidate)) fail('PROVIDER_USAGE_UNKNOWN', 'Duplicate owned usage receipt')
+        if (!receipt) { receipt = candidate; emit({ type: 'owned.usage', ...receipt }) }
       }
-      if (!receipt) fail('PROVIDER_USAGE_UNKNOWN', 'LM API omitted the exact owned usage receipt')
-      receipts.delete(nonce)
+      const unsubscribe = receipts.subscribe(nonce, acceptReceipt)
+      try {
+        const response = await models[0].sendRequest(state.messages.map(message => deserialize(vscode, message)), { tools, modelOptions: { autopromptRequest: nonce } }, cancellation.token)
+        for await (const part of response.stream) {
+          if (part instanceof vscode.LanguageModelDataPart && part.mimeType === MIME) {
+            const streamed = JSON.parse(Buffer.from(part.data).toString('utf8'))
+            if (JSON.stringify(streamed) !== JSON.stringify(receipts.receipts.get(nonce))) fail('PROVIDER_USAGE_UNKNOWN', 'LM receipt differs from the actual provider response')
+            acceptReceipt(streamed)
+          } else if (part instanceof vscode.LanguageModelTextPart) parts.push({ type: 'text', text: part.value })
+          else if (part instanceof vscode.LanguageModelToolCallPart) parts.push({ type: 'call', id: part.callId, name: part.name, args: part.input })
+          else fail('TRANSPORT_INVALID', 'Owned LM returned an unsupported stream part')
+        }
+        if (!receipt) fail('PROVIDER_USAGE_UNKNOWN', 'LM API omitted the exact owned usage receipt')
+      } finally { unsubscribe(); receipts.receipts.delete(nonce) }
       state.messages.push({ role: 'assistant', parts }); persist(state)
       const calls = parts.filter(part => part.type === 'call')
       if (!calls.length) {
         const text = parts.filter(part => part.type === 'text').map(part => part.text).join('')
-        const output = JSON.parse(text)
+        let output
+        try { output = JSON.parse(text) } catch { fail('CHILD_RESULT_INVALID', 'Owned terminal must be exactly one JSON object') }
         if (!output || typeof output !== 'object' || Array.isArray(output)) fail('CHILD_RESULT_INVALID', 'Owned terminal must be one JSON object')
         state.status = 'complete'; persist(state)
         emit({ type: 'owned.result', output })
@@ -176,7 +193,7 @@ async function runSession(vscode, request, connection, prepared, receipts, emit)
         emit({ type: 'owned.tool.start', id: call.id, name: call.name, args: call.args })
         const started = new Date().toISOString()
         let result
-        try { result = await boundary.executeTool(boundary.loadBoundary(prepared.policyPath, prepared.policySha256).policy, name, call.args, { signal: abort.signal }) }
+        try { const current = boundary.loadBoundary(prepared.policyPath, prepared.policySha256); result = await boundary.executeTool(current.policy, name, call.args, { signal: abort.signal, controlRoot: current.root }) }
         catch (error) { const output = `${error.code || 'TOOL_FAILED'}: ${error.message}`; result = { tool: name, status: 'failed', exitCode: null, output, outputSha256: sha256(output), code: error.code || 'TOOL_FAILED' } }
         boundary.appendReceipt(prepared, name, call.args, result, started)
         const text = JSON.stringify(result)

@@ -21,6 +21,52 @@ function parseArguments(argv) {
 
 function start(options) {
   const state = boundary.loadBoundary(options.boundary.policyPath, options.boundary.policySha256)
+  // Hermes does not expose structured native tool lifecycle records.  Its
+  // fixed plugin invokes this controller directly, so commit a second, sealed
+  // projection record here, at the same authority boundary as the execution
+  // receipt.  The wrapper may relay it, but transport still matches every
+  // field to this receipt before it becomes a command/file observation.
+  const projectionPath = process.env.AUTOPROMPT_HERMES_TOOL_PROJECTIONS
+  let projection = null
+  if (projectionPath !== undefined) {
+    const expected = path.join(state.root, 'hermes-projections.jsonl')
+    if (state.policy.provider !== 'hermes' || projectionPath !== expected) {
+      throw new boundary.BoundaryError('TOOL_POLICY_INVALID', 'Hermes tool projection path is not controller-owned')
+    }
+    const stat = fs.lstatSync(projectionPath)
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size > 32 * 2 * 1024 * 1024) {
+      throw new boundary.BoundaryError('TOOL_POLICY_INVALID', 'Hermes tool projection journal is invalid')
+    }
+    const lines = fs.readFileSync(projectionPath, 'utf8').split('\n').filter(Boolean)
+    let previous = null
+    for (const [index, line] of lines.entries()) {
+      let record
+      try { record = JSON.parse(line) } catch { throw new boundary.BoundaryError('TOOL_POLICY_INVALID', 'Hermes tool projection journal is invalid') }
+      const { hash, ...body } = record || {}
+      if (!record || Object.keys(record).length !== 7 || body.sequence !== index + 1 || body.previous !== previous ||
+          !/^[a-f0-9]{64}$/.test(body.receiptHash || '') || typeof body.name !== 'string' ||
+          !body.args || typeof body.args !== 'object' || Array.isArray(body.args) || typeof body.output !== 'string' ||
+          hash !== boundary.sha256(boundary.canonicalJson(body))) {
+        throw new boundary.BoundaryError('TOOL_POLICY_INVALID', 'Hermes tool projection journal is invalid')
+      }
+      previous = hash
+    }
+    projection = { path: projectionPath, sequence: lines.length, previous }
+  }
+  const appendProjection = (receipt, name, args, result) => {
+    if (!projection) return
+    const body = { sequence: projection.sequence + 1, previous: projection.previous,
+      receiptHash: receipt.hash, name, args, output: JSON.stringify(result) }
+    const record = { ...body, hash: boundary.sha256(boundary.canonicalJson(body)) }
+    const bytes = Buffer.from(`${JSON.stringify(record)}\n`)
+    const fd = fs.openSync(projection.path, fs.constants.O_WRONLY | fs.constants.O_APPEND | (fs.constants.O_NOFOLLOW || 0))
+    try {
+      const stat = fs.fstatSync(fd)
+      if (!stat.isFile() || stat.nlink !== 1) throw new boundary.BoundaryError('TOOL_RECEIPT_INVALID', 'Hermes tool projection journal changed')
+      fs.writeSync(fd, bytes); fs.fsyncSync(fd)
+    } finally { fs.closeSync(fd) }
+    projection.sequence = body.sequence; projection.previous = record.hash
+  }
   const input = options.input || process.stdin, output = options.output || process.stdout
   const lockPath = path.join(state.root, 'server.lock')
   const lockBytes = JSON.stringify({ pid: process.pid, nonce: crypto.randomUUID(), policySha256: state.policySha256 })
@@ -67,7 +113,7 @@ function start(options) {
     if (request.method === 'ping') { send({ jsonrpc: '2.0', id, result: {} }); return }
     if (request.method === 'tools/list') {
       if (request.params?.cursor !== undefined) { error(id, -32602, 'This bounded tool inventory has no pagination'); return }
-      send({ jsonrpc: '2.0', id, result: { tools: boundary.TOOLS.map(tool => ({ ...tool,
+      send({ jsonrpc: '2.0', id, result: { tools: (state.policy.toolFree === true ? [] : boundary.TOOLS).map(tool => ({ ...tool,
         annotations: { readOnlyHint: ['read', 'list', 'search'].includes(tool.name), openWorldHint: false },
       })) } }); return
     }
@@ -81,7 +127,7 @@ function start(options) {
     let result
     try {
       const current = boundary.loadBoundary(state.policyPath, state.policySha256)
-      result = await boundary.executeTool(current.policy, name, args, { signal: controller.signal })
+      result = await boundary.executeTool(current.policy, name, args, { signal: controller.signal, controlRoot: current.root })
     } catch (failure) {
       const text = `${failure.code || 'TOOL_FAILED'}: ${failure.message}`
       result = { tool: name, status: 'failed', exitCode: null, output: text,
@@ -91,6 +137,7 @@ function start(options) {
     // A failed append cannot be converted into a successful tool response.
     try {
       const receipt = boundary.appendReceipt(state, name, args, result, startedAt)
+      appendProjection(receipt, name, args, result)
       send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(result) }],
         structuredContent: result, isError: result.status !== 'completed',
         _meta: { 'autoprompt/receipt': receipt.hash, 'autoprompt/policy': state.policySha256 } } })

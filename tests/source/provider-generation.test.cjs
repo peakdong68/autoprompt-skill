@@ -636,7 +636,7 @@ test('Codex generation ignores the legacy contract and fails closed on a stale v
 test('provider projection stays Codex-first, capability-gated, and plain-language checked', () => {
   const contracts = loadCodexV2Contracts(ROOT)
   const packageRegistry = loadCodexPackageRegistry(ROOT)
-  assert.equal(contracts.projectionPlan.length, 9)
+  assert.equal(contracts.projectionPlan.length, contracts.providers.providers.length)
   const codex = contracts.projectionPlan.find(decision => decision.provider === 'codex')
   assert.deepEqual(codex, {
     provider: 'codex',
@@ -725,7 +725,7 @@ test('all providers expose the same framework set', () => {
   const expected = contract.frameworks.map(framework => `${framework.id}.md`).sort()
 
   for (const provider of [
-    'claude', 'codex', 'opencode', 'kilo', 'vscode', 'omp', 'deepseek', 'reasonix',
+    'claude', 'codex', 'opencode', 'kilo', 'vscode', 'omp', 'deepseek', 'hermes', 'grok', 'reasonix',
   ]) {
     const actual = fs.readdirSync(path.join(ROOT, 'agents', provider, 'frameworks'))
       .filter(name => name.endsWith('.md'))

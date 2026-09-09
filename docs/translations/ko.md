@@ -1,3 +1,5 @@
+> 이 문서는 v1 릴리스의 설명을 보존합니다. v2 브랜치의 설치, 모델 선택 및 실행 검증 요건은 [현재 영어 문서](../../README.md)와 [v2 검증 가이드](../guides/harness-v2-verification.md)를 참고하세요. 아래의 v1 검증 결과는 v2 검증을 의미하지 않습니다.
+
 <p align="center">
   <img src="../../assets/banner.svg" alt="Autoprompt Skill: 분홍색 구름과 날아가는 기러기" width="1000"/>
 </p>
