@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1672 941" role="img" aria-labelledby="title desc">
   <title id="title">Terminal-Bench 2.1의 OpenCode 1.18.7</title>
-  <desc id="desc">Autoprompt 벤치마크에서 기준선은 89개 작업 중 60개, Autoprompt 사용 시 73개를 해결했습니다.</desc>
+  <desc id="desc">Autoprompt · 버전 1 벤치마크에서 기준선은 89개 작업 중 60개, Autoprompt 사용 시 73개를 해결했습니다.</desc>
   <defs>
     <style>
       text { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "Malgun Gothic", "Noto Sans Arabic", sans-serif; }
@@ -18,7 +18,7 @@
     </style>
   </defs>
   <rect width="1672" height="941" fill="#ffffff"/>
-  <text x="78" y="66" class="eyebrow">Autoprompt 벤치마크</text>
+  <text x="78" y="66" class="eyebrow">Autoprompt · 버전 1 벤치마크</text>
   <text x="78" y="126" class="title">Terminal-Bench 2.1의 OpenCode 1.18.7</text>
   <g class="grid">
     <line x1="170" y1="250" x2="1590" y2="250"/><line x1="170" y1="362" x2="1590" y2="362"/>

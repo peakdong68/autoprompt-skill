@@ -6,17 +6,17 @@
 
 <p align="center">
   <a href="#benchmarks"><img src="https://img.shields.io/badge/Terminal--Bench%202.1-%2B14.61%20points-965477?style=flat-square&labelColor=302335" alt="Terminal-Bench 2.1: plus 14.61 points"/></a>
-  <a href="https://github.com/Spielewoy/autoprompt-skill/releases/latest"><img src="https://img.shields.io/github/v/release/Spielewoy/autoprompt-skill?style=flat-square&label=version&color=965477&labelColor=302335" alt="Version 1.0.4"/></a>
-  <a href="#install"><img src="https://img.shields.io/badge/support-9%20supported%20providers-965477?style=flat-square&labelColor=302335" alt="Nine supported providers"/></a>
+  <a href="https://github.com/Spielewoy/autoprompt-skill/releases/latest"><img src="https://img.shields.io/github/v/release/Spielewoy/autoprompt-skill?style=flat-square&label=version&color=965477&labelColor=302335" alt="Latest release"/></a>
+  <a href="#install"><img src="https://img.shields.io/badge/support-11%20supported%20providers-965477?style=flat-square&labelColor=302335" alt="Eleven supported providers"/></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-965477?style=flat-square&labelColor=302335" alt="License MIT"/></a>
 </p>
 
 <p align="center">
   <a href="README.md"><b>English</b></a> |
-  <a href="https://github.com/Spielewoy/autoprompt-skill/blob/main/docs/translations/zh.md">中文</a> |
-  <a href="https://github.com/Spielewoy/autoprompt-skill/blob/main/docs/translations/ko.md">한국어</a> |
-  <a href="https://github.com/Spielewoy/autoprompt-skill/blob/main/docs/translations/es.md">Español</a> |
-  <a href="https://github.com/Spielewoy/autoprompt-skill/blob/main/docs/translations/ar.md">العربية</a>
+  <a href="docs/translations/zh.md">中文</a> |
+  <a href="docs/translations/ko.md">한국어</a> |
+  <a href="docs/translations/es.md">Español</a> |
+  <a href="docs/translations/ar.md">العربية</a>
 </p>
 
 ## Contents
@@ -25,7 +25,9 @@
 
 ## Install
 
-Use the CLI below, or download an installer from [GitHub Releases](https://github.com/Spielewoy/autoprompt-skill/releases/tag/v1.0.4).
+Use the CLI below, or download an installer from [GitHub Releases](https://github.com/Spielewoy/autoprompt-skill/releases/latest).
+
+For this v2 beta, use **Install from source** below.
 
 ### 1. Install the CLI
 
@@ -49,7 +51,7 @@ For another CLI or IDE, choose `Custom coding agent` and use the [compatibility 
 <summary><strong>Install from source</strong></summary>
 
 ```bash
-git clone https://github.com/Spielewoy/autoprompt-skill
+git clone --branch codex/v2-final-merge https://github.com/Spielewoy/autoprompt-skill
 cd autoprompt-skill
 npm install -g .
 autoprompt
@@ -60,23 +62,27 @@ autoprompt
 ### Requirements
 
 - [Node.js 20+](https://nodejs.org/en/download)
-- [Python 3.11+](https://www.python.org/downloads/) exposed as `python`, with [PyYAML](https://pypi.org/project/PyYAML/)
+- [Python 3.11+](https://www.python.org/downloads/) available as `python3` or `python`, with [PyYAML](https://pypi.org/project/PyYAML/)
 - [Bash 4.3+](https://www.gnu.org/software/bash/) on macOS or Linux
 - [Git](https://git-scm.com/downloads) only for the GitHub checkout method
 
 ### Support
 
-| Status | Coding agent | Audited requirement | Key |
+| Status | Coding agent | Tested version | Key |
 |---|---|---|---|
-| Working | [Claude Code](https://code.claude.com/docs/en/setup) | 2.1.219+; audited 2.1.233 | `claude` |
-| Working | [Codex](https://github.com/openai/codex) | Subagent-capable build; audited 0.148.0 | `codex` |
-| Working | [OpenCode](https://opencode.ai/docs/agents) | 1.18.7+; audited 1.18.18 | `opencode` |
-| Working | [Kilo Code](https://kilo.ai/docs/customize/custom-subagents) | 7.4.22+; audited 7.4.22 | `kilo` |
-| Working | [VS Code](https://code.visualstudio.com/docs/agents/subagents) | 1.133+; audited 1.133.0 with Copilot 0.61.0 | `vscode` |
-| Working | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) | 0.7.2; audited 0.7.2; native package adapter | `prime` |
-| Working | [Oh My Pi](https://omp.sh/) | 17.4.0+; adapter contract, install lifecycle, and native role payload verified for 17.4.0 | `omp` |
-| Working | [DeepSeek Harness](https://deepseek.com/harness/en/) | 0.1.0-rc.7+; adapter contract, install lifecycle, and native role payload verified for 0.1.0-rc.7 | `deepseek` |
-| Working | [Reasonix](https://reasonix.io/docs/) | 1.30.0+; adapter contract, install lifecycle, and native role payload verified for 1.30.0 | `reasonix` |
+| Working | [Claude Code](https://code.claude.com/docs/en/setup) | 2.1.263 | `claude` |
+| Working | [Codex](https://github.com/openai/codex) | 0.148.0 | `codex` |
+| Working | [OpenCode](https://opencode.ai/docs/agents) | 1.18.29 | `opencode` |
+| Working | [Kilo Code](https://kilo.ai/docs/customize/custom-subagents) | 7.5.15 | `kilo` |
+| Working | [VS Code](https://code.visualstudio.com/docs/agents/subagents) | 1.136.1 | `vscode` |
+| Working | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) | 0.7.2 | `prime` |
+| Working | [Oh My Pi](https://omp.sh/) | 18.1.14 | `omp` |
+| Working | [DeepSeek Harness](https://deepseek.com/harness/en/) | 0.1.2-rc.1 | `deepseek` |
+| Working | [Reasonix](https://reasonix.io/docs/) | 1.30.0 | `reasonix` |
+| Working | [Hermes Agent](https://github.com/NousResearch/hermes-agent) | 0.21.1 | `hermes` |
+| Working | [Grok Build](https://docs.x.ai/build/overview) | 1.0.13 | `grok` |
+
+These versions passed Linux runs. Model and platform availability varies by provider.
 
 See [support and audit notes](docs/faq/which-coding-agents-are-supported.md).
 
@@ -125,39 +131,41 @@ Timing and token logs were not retained, so these are planning estimates based o
 
 ## Anatomy of an invocation
 
-```text
-/autoprompt mode=custom max_subs=4 agents=auto <goal>
+```bash
+autoprompt activate PROVIDER --target /absolute/project -- "<goal>"
 ```
 
 | Part | What it does |
 |---|---|
-| `/autoprompt` | Starts the skill with your request. |
-| `mode=custom` | Lets you set concurrency; `tokensaver` and `wide` are also available. |
-| `max_subs=4` | Allows up to four subagents to run at once. |
-| `agents=auto` | Selects models where supported. Use `off` to inherit the current model, or supply a model list. |
-| `<goal>` | Describes the result you want, constraints, and how to check success. |
-| `path=` | Chooses `auto`, `direct`, `light`, or `roadmap`. See [work paths](docs/faq/work-paths.md). |
-
-In Codex, pass the optional path as a separate argument before the quoted request:
+| `PROVIDER` | A key from the support table, such as `claude`, `codex`, or `grok`. |
+| `--target` | The project to work on. Omit it to use the current directory. |
+| `--` | Separates launcher options from the request. |
+| `<goal>` | The result you want, constraints, and how to check success. |
+| `path=` | Optional `auto`, `direct`, `light`, or `roadmap`, before the quoted goal. See [work paths](docs/faq/work-paths.md). |
 
 ```bash
 autoprompt activate codex -- path=light "add retries and test the edge cases"
 ```
 
-To set Codex concurrency, use separate arguments and leave route selection automatic:
-
-```bash
-autoprompt activate codex -- --concurrency custom --max-subs 4 "add retries and test the edge cases"
-```
-
 ## Run controls
 
-Use `mode=` to set concurrency. Use `agents=` to route models where the host supports it. [Custom model setup](docs/faq/how-to-add-custom-models.md)
+The same controls apply to all eleven providers. [Custom model setup](docs/faq/how-to-add-custom-models.md)
 
-| Control | Claude Code | Codex | OpenCode | Kilo | VS Code | Prime Agent | Oh My Pi | DeepSeek Harness | Reasonix |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| `mode=` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Custom `agents=` routing | ✓ | ✓ | ✕ Not available - inherits active model | ✕ Not available - inherits active model | ✕ Not available - inherits active model | ✕ Not available - inherits selected parent model | ✕ Not available - inherits selected parent model | ✕ Not available - inherits selected parent model | ✕ Not available - inherits selected parent model |
+| Control | What it does |
+|---|---|
+| `--concurrency tokensaver` | Runs at most six subagents at once. |
+| `--concurrency wide` | Starts ready, independent work up to the host limit. |
+| `--concurrency custom --max-subs N` | Sets your own concurrency limit. |
+| `configure PROVIDER --agents off` | Uses the provider's configured model. |
+| `configure PROVIDER --agents MODEL` | Selects one model. Add `--effort LEVEL` where supported. |
+| `configure PROVIDER --agents auto --model-map FILE` | Chooses from a measured model registry. A comma-separated model list also requires `--model-map`. |
+
+Pass concurrency controls after `--`, before the quoted goal:
+
+```bash
+autoprompt activate codex -- --concurrency custom --max-subs 4 "add retries and tests"
+autoprompt configure claude --agents provider/model --effort low
+```
 
 ## How it works
 
@@ -175,12 +183,12 @@ Use `mode=` to set concurrency. Use `agents=` to route models where the host sup
 
 | Goal | Prompt |
 |---|---|
-| Fix | `/autoprompt fix the registration race and add a regression test` |
-| Build | `/autoprompt mode=wide build the booking flow from API to checkout` |
-| Research | `/autoprompt compare job queues against this codebase and recommend one` |
-| Limit parallel work | `/autoprompt mode=custom max_subs=4 migrate every model` |
+| Fix | `autoprompt activate claude -- "fix the registration race and add a regression test"` |
+| Build | `autoprompt activate codex -- --concurrency wide "build the booking flow from API to checkout"` |
+| Research | `autoprompt activate hermes -- "compare job queues against this codebase and recommend one"` |
+| Limit parallel work | `autoprompt activate grok -- --concurrency custom --max-subs 4 "migrate every model"` |
 
-In Codex, use `autoprompt activate codex -- "<goal>"`. In Oh My Pi, use `/skill:autoprompt`.
+Run these commands from your project, or supply `--target /absolute/project` before `--`.
 
 ## FAQ
 
@@ -213,16 +221,16 @@ The layers separate coordination, management, execution, and independent judgmen
 </details>
 
 <details>
-<summary><strong>What do `mode`, `max_subs`, `agents`, and `path` do?</strong></summary>
+<summary><strong>What do concurrency, models, and paths control?</strong></summary>
 
-`mode=tokensaver` caps active subagents at six. `mode=wide` opens every ready lane. `mode=custom max_subs=N` sets your own ceiling. `agents` controls model routing where the host supports it, and `path` controls how the work is planned and coordinated. [Details](docs/faq/tokensaver-vs-wide-vs-custom.md)
+`--concurrency` and `--max-subs` set parallel work limits. `configure --agents` selects models, and `path=` selects how work is planned and coordinated. [Details](docs/faq/tokensaver-vs-wide-vs-custom.md)
 
 </details>
 
 <details>
 <summary><strong>Why does Autoprompt not start in the background?</strong></summary>
 
-Because it changes cost, time, and workflow. Start it explicitly with `/autoprompt <goal>`, or `autoprompt activate codex -- "<goal>"` in Codex.
+Because it changes cost, time, and workflow. Start it explicitly with `autoprompt activate PROVIDER -- "<goal>"`.
 
 </details>
 
@@ -230,4 +238,4 @@ Because it changes cost, time, and workflow. Start it explicitly with `/autoprom
 
 [MIT](LICENSE). Copyright 2026 [Spielewoy](https://github.com/Spielewoy).
 
-Community: [Contributing](docs/CONTRIBUTING.md), [Code of Conduct](docs/CODE_OF_CONDUCT.md), [Security](docs/SECURITY.md), and [Support](docs/SUPPORT.md).
+Community: [Contributors](docs/CONTRIBUTORS.md), [Contributing](docs/CONTRIBUTING.md), [Code of Conduct](docs/CODE_OF_CONDUCT.md), [Security](docs/SECURITY.md), and [Support](docs/SUPPORT.md).

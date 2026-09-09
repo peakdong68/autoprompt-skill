@@ -24,7 +24,7 @@ autoprompt activate codex -- path=roadmap "migrate authentication across the API
 
 An explicit path bypasses automatic route selection; it does not remove authorization, capability, budget, or verification requirements. Invalid or incompatible choices stop with an error instead of silently selecting another path.
 
-`path=` controls planning and coordination. [`mode`, `max_subs`, and `agents`](tokensaver-vs-wide-vs-custom.md) control concurrency and model choice. A larger concurrency limit does not force a larger path or more workers.
+`path=` controls planning and coordination. [`--concurrency`, `--max-subs`, and `configure --agents`](tokensaver-vs-wide-vs-custom.md) control concurrency and model choice. A larger concurrency limit does not force a larger path or more workers.
 
 For Codex, custom concurrency uses `--concurrency custom --max-subs N` after the
 launcher's `--`, with automatic route selection. An exact path cannot be combined
