@@ -1,12 +1,25 @@
-# OMP package
+# Oh My Pi v2 package
 
-This package targets OMP 17.4.0.
+This generated package projects the canonical v2 routes, role policy, checks, modes, procedures, and framework instructions. Codex and Reasonix use the same canonical base.
 
-- [`SKILL.md`](SKILL.md): L0 conductor prompt
-- [`agents`](agents/): 25 generated role definitions
-- [`frameworks`](frameworks/): 18 task and gate workflows
-- [`GATES.md`](GATES.md), [`MODES.md`](MODES.md), and [`PLAYBOOKS.md`](PLAYBOOKS.md): execution contracts
+- [Entry](SKILL.md): explicit activation and route instructions.
+- [Internal roles](agents/): 32 physical profiles, including inactive compatibility aliases.
+- [Frameworks](frameworks/): 18 compiled procedure projections.
+- [Role policy](role-policy.json): exact parents, allowed children, resources, modes, authority, and alias restrictions.
+- [Native projection](native-projection.json): private profile paths and provider tool mapping.
 
-OMP discovers the installed skill and `ap-*` agent files from its agent directory. The native `spawns` lists enforce canonical child edges and OMP enforces the recursion ceiling.
+```bash
+autoprompt activate omp --target <absolute-project> -- <request>
+```
 
-Every role inherits the selected parent model. Custom `agents=` model routing is not available.
+The installer must expose only one public manual launcher. Full instructions and internal profiles remain in the immutable private bundle and are loaded only for a validated explicit activation.
+
+All physical child launches belong to the external controller. Coordinators return only permitted assignments; leaves and retired aliases cannot dispatch. DIRECT and LIGHT have no mandatory coordinator. Model and effort settings are resolved before launch and do not select the task route.
+
+Read-only native profiles omit production write and shell tools. Executable checking requires a separately admitted isolated-checking transport. Native tool restrictions alone do not prove filesystem isolation, resource ownership, identity, continuation, cancellation, usage accounting, or result capture.
+
+Generation parity is not runtime conformance. The provider capability registry and current independent evidence govern runtime admission. Missing required capabilities produce PROVIDER_UNSUPPORTED; there is no unverified fallback advertised as full v2.
+
+OMP profiles omit the task tool and disable native prewalk and advisor handoffs. An empty spawns list alone does not close delegation in the native parser. OMP may add its yield control tool; the admitted transport must account for the effective tool set.
+
+Native format reference: [Oh My Pi documentation](https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/task/agents.ts).

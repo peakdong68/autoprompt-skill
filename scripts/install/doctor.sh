@@ -5,13 +5,33 @@
 # questions, each from the library's own verdict (no guessing):
 #   detected?  detect_client      (CLI on PATH + a readable version)
 #   installed? receipt presence   (an install receipt under the client's config-root)
-#   verifies?  verify_install     (landed file EXISTS, PARSES, sits AT the load path)
+#   verifies?  verify_install     (plus static Codex activation prerequisites)
+# Dynamic Codex sandbox/network capability is still re-proved at activation time.
 #
 # It writes NOTHING and edits NOTHING. Usage: doctor.sh   (no arguments).
 # HOME / XDG_CONFIG_HOME are honored if set, so it inspects the same tree an
 # isolated install used.
 
 set -u
+
+# macOS ships Bash 3.2, while install-lib.sh requires Bash 4.3 features.
+# Re-exec before sourcing it; this block itself stays Bash 3.2 compatible.
+if [[ "$(uname -s 2>/dev/null || true)" == Darwin ]] && (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 3) )); then
+  autoprompt_modern_bash=''
+  for autoprompt_bash_candidate in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+    if [[ -x "$autoprompt_bash_candidate" ]] && "$autoprompt_bash_candidate" -c '(( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 3) ))' >/dev/null 2>&1; then
+      autoprompt_modern_bash="$autoprompt_bash_candidate"; break
+    fi
+  done
+  if [[ -z "$autoprompt_modern_bash" ]] && command -v brew >/dev/null 2>&1; then
+    autoprompt_bash_prefix="$(brew --prefix bash 2>/dev/null || true)"
+    autoprompt_bash_candidate="$autoprompt_bash_prefix/bin/bash"
+    if [[ -x "$autoprompt_bash_candidate" ]] && "$autoprompt_bash_candidate" -c '(( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 3) ))' >/dev/null 2>&1; then autoprompt_modern_bash="$autoprompt_bash_candidate"; fi
+  fi
+  if [[ -n "$autoprompt_modern_bash" ]]; then exec "$autoprompt_modern_bash" "$0" "$@"; fi
+  printf 'Error: Bash 4.3 or newer is required on macOS. Install it with: brew install bash\n' >&2
+  exit 1
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB="$SCRIPT_DIR/lib/install-lib.sh"
@@ -23,8 +43,10 @@ if [ ! -f "$LIB" ]; then
 fi
 # shellcheck source=/dev/null
 . "$LIB"
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/harness-v2.sh"
 
-CLIENTS_ALL=(claude codex opencode kilo vscode prime omp deepseek reasonix)
+CLIENTS_ALL=(claude codex opencode kilo vscode prime omp deepseek hermes grok reasonix)
 
 config_root() {
   local client="$1"
@@ -363,6 +385,20 @@ legacy_codex_installed() {
 # extras completeness (full runtime set for claude/codex).
 probe_client() {
   local client="$1"
+  if is_harness_v2 "$client"; then probe_harness_v2 "$client"; return; fi
+  if [ "$client" = reasonix ]; then
+    local root detected=no installed=no verifies=no version=- reason=not-installed extras=missing
+    root="$(config_root reasonix)"
+    local det
+    if det="$(detect_client reasonix 2>/dev/null)"; then detected=yes; version="${det##*version=}"; fi
+    if [ -f "$root/.autoprompt-reasonix-v2.json" ]; then
+      installed=yes
+      if node "$REPO_ROOT/scripts/reasonix-package.cjs" verify --root "$root" >/dev/null 2>&1; then verifies=yes; reason=-; extras=complete
+      else reason=payload-invalid; fi
+    fi
+    printf '%s %s %s version=%s reason=%s extras=%s activation=attestation-required' "$detected" "$installed" "$verifies" "$version" "$reason" "$extras"
+    return 0
+  fi
   if [ "$client" = prime ]; then
     local root helper det_rec version="-" detected="no" installed="no"
     local verifies="no" reason="-" extras="invalid:prime-lifecycle" output rc prime_cli=""
@@ -444,10 +480,30 @@ probe_client() {
     [ -z "$reason" ] && reason="-"
   fi
 
+  local activation=""
+  if [ "$client" = codex ] && [ "$verifies" = yes ]; then
+    local helper="$REPO_ROOT/scripts/codex-configure.cjs" output rc
+    if ! command -v node >/dev/null 2>&1 || [ ! -f "$helper" ]; then
+      verifies="no"
+      reason="diagnostic-helper-missing"
+      activation=" activation=unavailable"
+    else
+      output="$(node "$helper" --doctor-activation-prerequisites 2>&1)"; rc=$?
+      if [ "$rc" -eq 0 ]; then
+        activation=" activation=static-ready;dynamic-preflight-required"
+      else
+        verifies="no"
+        reason="$(printf '%s' "$output" | sed -n 's/.*reason=\([^[:space:]]*\).*/\1/p' | head -n 1)"
+        [ -n "$reason" ] || reason="codex-activation-prerequisite-invalid"
+        activation=" activation=unavailable"
+      fi
+    fi
+  fi
+
   local extras; extras="$(check_extras "$client")"
 
-  printf '%s %s %s version=%s reason=%s extras=%s' \
-    "$detected" "$installed" "$verifies" "$version" "$reason" "$extras"
+  printf '%s %s %s version=%s reason=%s extras=%s%s' \
+    "$detected" "$installed" "$verifies" "$version" "$reason" "$extras" "$activation"
 }
 
 main() {
@@ -465,6 +521,19 @@ main() {
     esac
     shift
   done
+
+  if [ "$target" = isolation ]; then
+    test_autoprompt_install_root_contract codex || return 2
+    local helper="$REPO_ROOT/scripts/codex-configure.cjs" output code
+    if ! command -v node >/dev/null 2>&1 || [ ! -f "$helper" ]; then
+      printf '%s\n' \
+        'Autoprompt doctor isolation: PROVIDER_UNSUPPORTED provider=codex reason=diagnostic-helper-missing' >&2
+      return 1
+    fi
+    output="$(node "$helper" --doctor-isolation 2>&1)"; code=$?
+    printf '%s\n' "$output"
+    return "$code"
+  fi
 
   test_autoprompt_install_root_contract "$target" || return 2
 

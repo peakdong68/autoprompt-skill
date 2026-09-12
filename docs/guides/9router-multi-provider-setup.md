@@ -1,130 +1,35 @@
-# Route Autoprompt through 9Router
+# Connect a router to Autoprompt v2
 
-[9Router](https://github.com/decolua/9router) gives Claude Code one endpoint for models from different providers. Autoprompt chooses the model string. 9Router decides where that string runs.
+A router can expose models from several upstream providers through one endpoint. Configure the router and verify its model identifiers with the native harness before configuring Autoprompt. The endpoint must speak the protocol expected by that harness: a Chat Completions endpoint alone is not an Anthropic Messages endpoint.
 
-![Autoprompt model routing through one 9Router endpoint](9router-routing.png)
+This guide replaces the v1 shell-supervisor and Opus/Sonnet/Haiku alias-casting instructions. Those commands are not the v2 activation path.
 
-> Autoprompt never creates providers, models, or aliases in 9Router. Configure those routes first, then copy their exact names into the Autoprompt registry.
+## Configure the native connection
 
-## 1. Start 9Router
+For Claude Code, the controlled adapter reads `ANTHROPIC_BASE_URL` and the supported private native credential environment, including `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`. Set the base URL to the router's actual Anthropic-compatible endpoint. Keep the credential outside the repository.
 
-```bash
-npm install -g 9router
-9router
+Other providers have their own connection formats and protocol requirements. OpenCode and Kilo use their private provider/model configuration; an explicit reasoning variant for a custom model must declare the matching `reasoningEffort`. Prime and Oh My Pi use their model registries. Use the [verification guide](harness-v2-verification.md) for adapter restrictions and evidence requirements.
+
+Autoprompt does not create router aliases or infer compatibility from an endpoint URL. The exact configured model identifier must exist upstream, and the requested effort must be supported by both the model and native adapter.
+
+## Select and activate
+
+After installation and connection setup, select an exact model:
+
+```sh
+autoprompt configure claude --agents router-model-id --effort low
+autoprompt doctor claude --strict
 ```
 
-| Check | Local address |
-|---|---|
-| Dashboard | `http://localhost:20128/dashboard` |
-| API | `http://localhost:20128/v1` |
-| Health | `http://localhost:20128/api/health` |
+For a custom installation, add the same `--root /absolute/provider-config` to each command. Multiple models and automatic routing require a fresh measured receipt; see [custom model configuration](../faq/how-to-add-custom-models.md).
 
-In the dashboard:
+Once the installed runtime and native executable have the required conformance admission, launch through the public command:
 
-1. Connect the providers you want to use.
-2. Pick at most three target models.
-3. Give them stable aliases such as `autoprompt-strong`, `autoprompt-balanced`, and `autoprompt-fast`.
-4. Create or copy the endpoint token.
-
-Set that token as `AUTOPROMPT_ROUTER_TOKEN` in your shell or secret manager. Do not put its value in JSON, commands, screenshots, or logs.
-
-## 2. Create the model registry
-
-Save this as `~/.claude/autoprompt-models.json`:
-
-```json
-[
-  {
-    "name": "Strong",
-    "provider": "9router",
-    "modelString": "autoprompt-strong",
-    "baseUrl": "http://localhost:20128/v1",
-    "apiKeyEnv": "AUTOPROMPT_ROUTER_TOKEN",
-    "effortHint": "max"
-  },
-  {
-    "name": "Balanced",
-    "provider": "9router",
-    "modelString": "autoprompt-balanced",
-    "baseUrl": "http://localhost:20128/v1",
-    "apiKeyEnv": "AUTOPROMPT_ROUTER_TOKEN",
-    "effortHint": "high"
-  },
-  {
-    "name": "Fast",
-    "provider": "9router",
-    "modelString": "autoprompt-fast",
-    "baseUrl": "http://localhost:20128/v1",
-    "apiKeyEnv": "AUTOPROMPT_ROUTER_TOKEN",
-    "effortHint": "low"
-  }
-]
+```sh
+autoprompt activate claude --target /absolute/project -- \
+  "fix the smallest failing test and verify the result"
 ```
 
-The three selected entries must use the same `baseUrl` and `apiKeyEnv`. The registry stores the environment variable name, never the token itself.
+An installer or doctor result alone is not admission. `PROVIDER_UNSUPPORTED` means the runtime cannot establish the required capability evidence; use the documented independent review and import process rather than changing trust records to suppress the error.
 
-## 3. Launch Autoprompt
-
-macOS and Linux:
-
-```bash
-agents/claude/workflow/supervisor.sh \
-  --agents "Strong,Balanced,Fast" \
-  --model-registry "$HOME/.claude/autoprompt-models.json" \
-  --cmd "claude -p" \
-  "fix the smallest failing test"
-```
-
-PowerShell:
-
-```powershell
-powershell -File agents/claude/workflow/supervisor.ps1 `
-  --agents "Strong,Balanced,Fast" `
-  --model-registry "$HOME\.claude\autoprompt-models.json" `
-  --cmd "claude -p" `
-  "fix the smallest failing test"
-```
-
-Selection is predictable:
-
-| Selected models | Claude Code aliases |
-|---|---|
-| One | Opus, Sonnet, and Haiku use that model |
-| Two | Opus and Sonnet use the first; Haiku uses the second |
-| Three | Opus, Sonnet, and Haiku use the first, second, and third |
-
-Autoprompt maps R1 to Opus, R2 to Sonnet, R3 to Sonnet, R4 to Haiku, and R5 to Haiku. A fourth custom model is rejected. `agents=auto` ranks the registry by `effortHint`; an explicit list keeps your order.
-
-## Verify
-
-1. Check the router:
-
-   ```bash
-   curl --fail --silent --show-error http://localhost:20128/api/health
-   ```
-
-   Expected response: `{"ok":true}`
-
-2. Validate the registry without sending a provider request:
-
-   ```bash
-   node agents/claude/workflow/model-casting.js \
-     --selector "Strong,Balanced,Fast" \
-     --registry "$HOME/.claude/autoprompt-models.json"
-   ```
-
-3. Run the bounded launch above. Confirm `BRIEF.md` records the three selected names and the Opus, Sonnet, and Haiku bindings.
-4. Check redacted 9Router telemetry to confirm that each alias reached its intended target. Never copy authorization headers or tokens into an issue.
-
-## Troubleshooting
-
-| Symptom | Fix |
-|---|---|
-| `Model ... is not present in the registry` | Match the registry `name` exactly. Names are case-sensitive. |
-| Endpoint-compatible pool error | Give every selected entry the same `baseUrl` and `apiKeyEnv`. |
-| Missing credential variable | Set `AUTOPROMPT_ROUTER_TOKEN` before starting the supervisor. |
-| More than three models rejected | Select one, two, or three models. Claude Code exposes three casting aliases. |
-| Model pin conflict | Unset `CLAUDE_CODE_SUBAGENT_MODEL` and do not use `AUTOPROMPT_KEEP_MODEL_PIN=1` with casting enabled. |
-| Provider request fails | Test the target in 9Router, then inspect redacted router logs for quota or provider errors. |
-
-The exact registry contract lives in [`agents/claude/autoprompt-models.schema.md`](../../agents/claude/autoprompt-models.schema.md).
+Verify a real run using its owned tool receipts, native session identity, exact model and effort, usage records, and checker outcome. Router telemetry can corroborate upstream routing. Keep private session histories and credentials out of published reports.

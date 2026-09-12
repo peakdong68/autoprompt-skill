@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "reasonix-live-conformance-evidence.v1",
+  "providerId": "reasonix",
+  "status": "awaiting-independent-conformance",
+  "activationNonce": null,
+  "attestation": null,
+  "note": "Native wire tests are development evidence. They do not authorize production activation or claim full behavioral conformance."
+}

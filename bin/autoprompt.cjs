@@ -30,6 +30,8 @@ const PROVIDERS = Object.freeze([
   Object.freeze({ id: 'prime', label: 'Prime Agent' }),
   Object.freeze({ id: 'omp', label: 'Oh My Pi' }),
   Object.freeze({ id: 'deepseek', label: 'DeepSeek Harness' }),
+  Object.freeze({ id: 'hermes', label: 'Hermes Agent' }),
+  Object.freeze({ id: 'grok', label: 'Grok Build' }),
   Object.freeze({ id: 'reasonix', label: 'Reasonix' }),
 ])
 const PUBLIC_PROVIDER_IDS = new Set(PROVIDERS.map(provider => provider.id))
@@ -50,8 +52,31 @@ const HELP_TEXT = [
   '  autoprompt version',
   '  autoprompt install <client|all> [--root <absolute-path>]',
   '  autoprompt doctor [client] [--strict] [--root <absolute-path>]',
+  '  autoprompt doctor isolation [--strict] [--root <absolute-path>]',
   '  autoprompt uninstall [client|all] [--root <absolute-path>]',
-  '  autoprompt configure codex --agents <off|auto|model,...> [--model-map <absolute-json>] [--root <absolute-path>]',
+  '  autoprompt configure codex --agents <off|auto|model,...> [--model-map <absolute-json>] [--effort <low|medium|high|xhigh>] [--root <absolute-path>]',
+  '  autoprompt activate codex [--target <absolute-path>] [--ttl <seconds>] [--resume <activation-id>] [--root <absolute-path> | --vm-root <private-state> | --wsl-root <private-state>] -- <mission>',
+  '  autoprompt activate reasonix [--target <absolute-path>] [--ttl <seconds>] [--resume <activation-id>] [--root <absolute-path>] -- <mission>',
+  '  autoprompt configure reasonix --agents <off|auto|model[,model...]> [--model-map <path>] [--effort <low|medium|high|max>] [--root <absolute-path>]',
+  '  autoprompt activate <provider> [--target <absolute-path>] [--ttl <seconds>] [--resume <activation-id>] [--root <absolute-path> | --vm-root <private-state> | --wsl-root <private-state>] -- <request>',
+  '  autoprompt runtime setup <provider> --root <absolute-path> --python <absolute-path> [--refresh]',
+  '  autoprompt runtime vm setup --root <private-state> --target <project> --provider <provider> --endpoint <https-url> --connection <private-native-config> --credential <private-json> --toolchain <pinned-node-root> --native <provider-native-root> --lima <limactl> --archive <package.tgz> --vm-type <qemu|vz> [--model-selection <private-json>] [--qemu-root <toolchain>] [--arch <x86_64|aarch64>] [--resume]',
+  '  autoprompt runtime vm status --root <private-state> [--request-id <32hex>]',
+  '  autoprompt runtime vm cancel --root <private-state> --request-id <32hex>',
+  '  autoprompt runtime vm exec --root <private-state> [--request-id <32hex>] -- <autoprompt arguments>',
+  '  autoprompt runtime closure prepare omp --source <installed-linux-root> --bun <baseline-bun> --output <new-private-closure> --arch <x86_64|aarch64> [--archive <new-tar>]',
+  '  autoprompt runtime closure prepare hermes --venv <installed-linux-venv> --source <reviewed-source> --python <linux-python> --output <new-private-closure> --arch <x86_64|aarch64> [--archive <new-tar>]',
+  '  autoprompt runtime wsl setup --root <private-state> --target <project> --provider <provider> --endpoint <https-url> --connection <private-native-config> --credential <private-json> --toolchain-archive <linux-node.tar.xz> --toolchain-sha256 <64hex> --native-archive <provider-native.tar> --native-sha256 <64hex> --wsl <wsl.exe> --rootfs <rootfs.tar.xz> --rootfs-sha256 <64hex> --archive <package.tgz> [--model-selection <private-json>] [--arch <x86_64|aarch64>] [--resume]',
+  '  autoprompt runtime wsl status --root <private-state> [--request-id <32hex>]',
+  '  autoprompt runtime wsl cancel --root <private-state> --request-id <32hex>',
+  '  autoprompt runtime wsl exec --root <private-state> [--request-id <32hex>] -- <autoprompt arguments>',
+  '  autoprompt configure <provider> --agents <off|auto|model[,model...]> [--model-map <path>] [--effort <native-name>] [--root <absolute-path>]',
+  '  Claude accepts --effort <low|medium|high|xhigh|max>. DeepSeek explicitly accepts <off|low|high|max>; automatic policy records medium→high and xhigh→max.',
+  '  OpenCode and Kilo accept <low|medium|high|xhigh|max> only for a selected model with that declared native variant; custom providers require variants.<effort>.reasoningEffort.',
+  '  Prime and OMP accept --effort <off|minimal|low|medium|high|xhigh|max>.',
+  '  VS Code owned BYOK accepts --effort <none|minimal|low|medium|high|xhigh>, subject to the selected model.',
+  '  autoprompt conformance [provider|all] [--native-tests] [--integration-tests] [--output <new-absolute-directory>]',
+  '  autoprompt admission <request|import> <provider> --root <absolute-path> --executable <absolute-path> --report <absolute-path> --live-report <absolute-path> [--output <new-absolute-json> | --request <absolute-json> --evidence <absolute-json> --keys <absolute-json>]',
   '  autoprompt update',
   '  autoprompt repo',
   '  autoprompt support',
@@ -60,7 +85,10 @@ const HELP_TEXT = [
   '  -h, --help       Show this help.',
   '  -v, --version    Print the package version.',
   '',
-  'Interactive providers: claude, codex, opencode, kilo, vscode, prime, omp, deepseek, reasonix.',
+  'Interactive providers: claude, codex, opencode, kilo, vscode, prime, omp, deepseek, hermes, grok, reasonix.',
+  'Activation and configuration accept the same eleven providers; native capability admission is checked before work starts.',
+  'Conformance records local diagnostic evidence. It does not turn missing native capabilities into verified support.',
+  'Admission imports an explicitly reviewed, authority-signed live-conformance certificate into the private provider root.',
   '',
   'Launch `autoprompt` to check for CLI updates and open the installer.',
   'It scans detected roots and lets you install, update, or repair a provider.',
@@ -131,6 +159,75 @@ function parseLifecycle(command, rest, doctor = false) {
   return parsed
 }
 
+function parseCodexActivation(rest, alias = false) {
+  if (!alias && !PUBLIC_PROVIDER_IDS.has(rest[0])) usageError('Activate requires one supported provider.')
+  const provider = alias ? 'codex' : rest[0]
+  const args = alias ? rest : rest.slice(1)
+  let root = ''
+  let vmRoot = ''
+  let wslRoot = ''
+  let target = ''
+  let ttlSeconds
+  let resume = ''
+  const mission = []
+  let missionMode = false
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index]
+    if (missionMode) {
+      mission.push(argument)
+      continue
+    }
+    if (argument === '--') {
+      missionMode = true
+      continue
+    }
+    if (['--root', '--vm-root', '--wsl-root', '--target', '--ttl', '--resume'].includes(argument)) {
+      const value = args[index + 1]
+      if (value === undefined || value.startsWith('--')) usageError(`${argument} requires a value.`)
+      index += 1
+      if (argument === '--root') {
+        if (root) usageError('--root may be provided only once.')
+        root = validateLifecycleRoot(value)
+      } else if (argument === '--vm-root') {
+        if (vmRoot) usageError('--vm-root may be provided only once.')
+        vmRoot = validateLifecycleRoot(value)
+      } else if (argument === '--wsl-root') {
+        if (wslRoot) usageError('--wsl-root may be provided only once.')
+        wslRoot = validateLifecycleRoot(value)
+      } else if (argument === '--target') {
+        if (target) usageError('--target may be provided only once.')
+        target = validateLifecycleRoot(value)
+      } else if (argument === '--ttl') {
+        if (ttlSeconds !== undefined) usageError('--ttl may be provided only once.')
+        if (!/^[0-9]+$/.test(value)) usageError('--ttl requires integer seconds.')
+        ttlSeconds = Number(value)
+        if (!Number.isSafeInteger(ttlSeconds) || ttlSeconds < 1 || ttlSeconds > 604800) usageError('--ttl requires 1 to 604800 seconds.')
+      } else {
+        if (resume) usageError('--resume may be provided only once.')
+        if (!/^apv2-[a-f0-9]{32}$/.test(value)) usageError('--resume requires an Autoprompt v2 activation id.')
+        resume = value
+      }
+      continue
+    }
+    if (argument.startsWith('-')) usageError(`Unknown activate flag: ${argument}`)
+    usageError(`Activate ${provider} requires \`--\` before the mission.`)
+  }
+  if (!missionMode || mission.length === 0) usageError(`Activate ${provider} requires at least one mission argv after \`--\`.`)
+  if ([root, vmRoot, wslRoot].filter(Boolean).length > 1 || ((vmRoot || wslRoot) && target)) usageError('Guest runtime roots supply the configured provider root and target and are mutually exclusive.')
+  return {
+    command: 'activate',
+    provider,
+    missionArgs: mission,
+    ...(root ? { root } : {}),
+    ...(vmRoot ? { vmRoot } : {}),
+    ...(wslRoot ? { wslRoot } : {}),
+    ...(target ? { target } : {}),
+    ...(ttlSeconds !== undefined ? { ttlSeconds } : {}),
+    ...(resume ? { resume } : {}),
+    compatibilityAlias: alias,
+  }
+}
+
 function parseArgs(argv) {
   if (!Array.isArray(argv) || argv.some(argument => typeof argument !== 'string')) {
     usageError('Arguments must be strings.')
@@ -157,16 +254,170 @@ function parseArgs(argv) {
     return parseLifecycle(command, rest)
   }
   if (command === 'doctor') {
+    if (rest[0] === 'isolation') {
+      const parsed = parseLifecycle(command, ['codex', ...rest.slice(1)], true)
+      parsed.isolation = true
+      return parsed
+    }
     return parseLifecycle(command, rest, true)
   }
+  if (command === 'runtime') {
+    if (rest[0] === 'closure') {
+      const [action, provider, ...flags] = rest.slice(1)
+      if (action !== 'prepare' || !['omp', 'hermes'].includes(provider)) {
+        usageError('Runtime closure supports `prepare omp` and `prepare hermes`.')
+      }
+      const supported = provider === 'omp' ? ['--source', '--bun', '--output', '--archive', '--arch'] : ['--venv', '--source', '--python', '--output', '--archive', '--arch']
+      const required = provider === 'omp' ? ['--source', '--bun', '--output', '--arch'] : ['--venv', '--source', '--python', '--output', '--arch']
+      const values = {}
+      for (let index = 0; index < flags.length; index += 2) {
+        const flag = flags[index], value = flags[index + 1]
+        if (!supported.includes(flag) ||
+            value === undefined || value.startsWith('--') || Object.hasOwn(values, flag)) {
+          usageError(`Runtime closure prepare ${provider} requires unique ${required.join(', ')} and optional --archive values.`)
+        }
+        if (flag === '--arch') {
+          if (!['x86_64', 'aarch64'].includes(value)) usageError('Runtime closure --arch must be x86_64 or aarch64.')
+        } else if (!path.isAbsolute(value) || value.split(/[\\/]/).includes('..') || /[\u0000-\u001f\u007f]/.test(value)) {
+          usageError(`${flag} requires an absolute path without traversal or control characters.`)
+        }
+        values[flag] = value
+      }
+      for (const flag of required) {
+        if (!values[flag]) usageError(`Runtime closure prepare requires ${flag}.`)
+      }
+      return { command: 'runtime-closure', provider, action, source: values['--source'], output: values['--output'], arch: values['--arch'],
+        ...(provider === 'omp' ? { bun: values['--bun'] } : { venv: values['--venv'], python: values['--python'] }), ...(values['--archive'] ? { archive: values['--archive'] } : {}) }
+    }
+    if (rest[0] === 'vm' || rest[0] === 'wsl') {
+      const backend = rest[0]
+      const action = rest[1]
+      if (!['setup', 'status', 'exec', 'cancel'].includes(action)) usageError(`Runtime ${backend} requires setup, status, exec, or cancel.`)
+      const values = {}
+      let argv = null
+      for (let index = 2; index < rest.length; index += 2) {
+        const flag = rest[index]
+        if (flag === '--' && action === 'exec') { argv = rest.slice(index + 1); break }
+        if (flag === '--resume' && action === 'setup') {
+          if (values[flag]) usageError(`Runtime ${backend} setup accepts --resume only once.`)
+          values[flag] = true
+          index -= 1
+          continue
+        }
+        const allowed = action === 'setup'
+          ? backend === 'vm'
+            ? ['--root', '--target', '--provider', '--endpoint', '--connection', '--credential', '--model-selection', '--toolchain', '--native', '--lima', '--archive', '--vm-type', '--qemu-root', '--arch']
+            : ['--root', '--target', '--provider', '--endpoint', '--connection', '--credential', '--model-selection', '--toolchain-archive', '--toolchain-sha256', '--native-archive', '--native-sha256', '--wsl', '--rootfs', '--rootfs-sha256', '--archive', '--arch']
+          : ['--root', '--request-id']
+        if (!allowed.includes(flag) || Object.hasOwn(values, flag)) usageError(`Runtime ${backend} options must be explicit and unique.`)
+        const value = rest[index + 1]
+        if (typeof value !== 'string' || !value || value.startsWith('--')) usageError(`${flag} requires a value.`)
+        if (flag === '--request-id') {
+          if (!/^[a-f0-9]{32}$/.test(value)) usageError('Request ID must contain exactly 32 lowercase hexadecimal characters.')
+        } else if (flag === '--provider') {
+          validateProvider(value)
+        } else if (flag === '--endpoint') {
+          try {
+            const endpoint = new URL(value)
+            if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) usageError('--endpoint requires an HTTP(S) URL without credentials, query, or fragment.')
+          } catch { usageError('--endpoint requires an HTTP(S) URL without credentials, query, or fragment.') }
+        } else if (['--toolchain-sha256', '--native-sha256', '--rootfs-sha256'].includes(flag)) {
+          if (!/^[a-f0-9]{64}$/.test(value)) usageError(`${flag} requires exactly 64 lowercase hexadecimal characters.`)
+        } else if (flag === '--vm-type') {
+          if (!['qemu', 'vz'].includes(value)) usageError('VM type must be qemu or vz.')
+        } else if (flag === '--arch') {
+          if (!['x86_64', 'aarch64'].includes(value)) usageError('VM architecture must be x86_64 or aarch64.')
+        } else if (!path.isAbsolute(value) || value.split(/[\\/]/).includes('..') || /[\u0000-\u001f\u007f,]/.test(value)) {
+          usageError(`${flag} requires an absolute path without traversal, control characters, or commas.`)
+        }
+        values[flag] = value
+      }
+      if (!values['--root']) usageError(`Runtime ${backend} requires --root.`)
+      if (action === 'setup') {
+        const required = backend === 'vm'
+          ? ['--target', '--provider', '--endpoint', '--connection', '--credential', '--toolchain', '--native', '--lima', '--archive', '--vm-type']
+          : ['--target', '--provider', '--endpoint', '--connection', '--credential', '--toolchain-archive', '--toolchain-sha256', '--native-archive', '--native-sha256', '--wsl', '--rootfs', '--rootfs-sha256', '--archive']
+        for (const flag of required) if (!values[flag]) usageError(`Runtime ${backend} setup requires ${flag}.`)
+        if (backend === 'vm' && (values['--vm-type'] === 'qemu') !== Boolean(values['--qemu-root'])) usageError('Only the qemu backend requires --qemu-root.')
+      }
+      if (action === 'exec' && (!argv || !argv.length || argv.some(arg => arg.includes('\0')))) usageError(`Runtime ${backend} exec requires command arguments after --.`)
+      if (action === 'cancel' && !values['--request-id']) usageError(`Runtime ${backend} cancel requires --request-id.`)
+      return { command: `runtime-${backend}`, action, root: validateLifecycleRoot(values['--root']),
+        ...(action === 'setup' ? backend === 'vm'
+          ? { target: values['--target'], provider: values['--provider'], endpoint: values['--endpoint'], connection: values['--connection'], credential: values['--credential'], toolchain: values['--toolchain'], native: values['--native'], limactl: values['--lima'], archive: values['--archive'], vmType: values['--vm-type'], ...(values['--model-selection'] ? { modelSelection: values['--model-selection'] } : {}), arch: values['--arch'] || (process.arch === 'arm64' ? 'aarch64' : 'x86_64'), ...(values['--qemu-root'] ? { qemuRoot: values['--qemu-root'] } : {}), ...(values['--resume'] ? { resume: true } : {}) }
+          : { target: values['--target'], provider: values['--provider'], endpoint: values['--endpoint'], connection: values['--connection'], credential: values['--credential'], toolchainArchive: values['--toolchain-archive'], toolchainSha256: values['--toolchain-sha256'], nativeArchive: values['--native-archive'], nativeSha256: values['--native-sha256'], wsl: values['--wsl'], rootfs: values['--rootfs'], rootfsSha256: values['--rootfs-sha256'], archive: values['--archive'], arch: values['--arch'] || (process.arch === 'arm64' ? 'aarch64' : 'x86_64'), ...(values['--model-selection'] ? { modelSelection: values['--model-selection'] } : {}), ...(values['--resume'] ? { resume: true } : {}) }
+          : {}),
+        ...(values['--request-id'] ? { requestId: values['--request-id'] } : {}),
+        ...(argv ? { argv } : {}) }
+    }
+    if (rest[0] !== 'setup') usageError('Runtime requires setup and one provider.')
+    const provider = validateProvider(rest[1])
+    const values = {}
+    for (let i = 2; i < rest.length; i += 2) {
+      const flag = rest[i]
+      if (flag === '--refresh') {
+        if (values[flag]) usageError('Runtime setup accepts --refresh only once.')
+        values[flag] = true
+        i -= 1
+        continue
+      }
+      if (!['--root', '--python'].includes(flag) || Object.hasOwn(values, flag)) usageError('Runtime setup accepts --root and --python exactly once.')
+      const value = rest[i + 1]
+      if (typeof value !== 'string' || !path.isAbsolute(value) || /[\u0000-\u001f\u007f"]/.test(value) || value.split(/[\\/]/).includes('..')) usageError(`${flag} requires an absolute path without traversal or control characters.`)
+      values[flag] = value
+    }
+    if (!values['--root'] || !values['--python']) usageError('Runtime setup requires --root and --python.')
+    return { command: 'runtime-setup', provider, root: validateLifecycleRoot(values['--root']), python: values['--python'], ...(values['--refresh'] ? { refresh: true } : {}) }
+  }
+  if (command === 'activate') return parseCodexActivation(rest)
+  if (command === 'codex') return parseCodexActivation(rest, true)
+  if (command === 'conformance') {
+    let provider = 'all'
+    let explicitProvider = false
+    let output = ''
+    let nativeTests = false
+    let integrationTests = false
+    for (let index = 0; index < rest.length; index += 1) {
+      const argument = rest[index]
+      if (argument === '--native-tests' && !nativeTests) nativeTests = true
+      else if (argument === '--integration-tests' && !integrationTests) integrationTests = true
+      else if (argument === '--output' && !output) {
+        const value = rest[++index]
+        if (!value || value.startsWith('--')) usageError('--output requires a new absolute directory.')
+        output = validateLifecycleRoot(value)
+      } else if (!argument.startsWith('-') && !explicitProvider) {
+        provider = validateProvider(argument, true)
+        explicitProvider = true
+      } else usageError(`Unknown or duplicate conformance argument: ${argument}`)
+    }
+    return { command, provider, nativeTests, integrationTests, ...(output ? { output } : {}) }
+  }
+  if (command === 'admission') {
+    const [action, provider, ...flags] = rest
+    if (!['request', 'import'].includes(action) || !PUBLIC_PROVIDER_IDS.has(provider)) usageError('Admission requires request or import and one supported provider.')
+    const values = {}
+    const allowed = new Set(['--root', '--executable', '--report', '--live-report', '--output', '--request', '--evidence', '--keys'])
+    for (let index = 0; index < flags.length; index += 2) {
+      const flag = flags[index], value = flags[index + 1]
+      if (!allowed.has(flag) || value === undefined || value.startsWith('--') || values[flag]) usageError(`Invalid admission argument: ${String(flag)}`)
+      values[flag] = validateLifecycleRoot(value)
+    }
+    for (const flag of ['--root', '--executable', '--report', '--live-report']) if (!values[flag]) usageError(`Admission ${action} requires ${flag}.`)
+    if (action === 'request' && !values['--output']) usageError('Admission request requires --output.')
+    if (action === 'import') for (const flag of ['--request', '--evidence', '--keys']) if (!values[flag]) usageError(`Admission import requires ${flag}.`)
+    return { command, action, provider, root: values['--root'], executable: values['--executable'], report: values['--report'],
+      liveReport: values['--live-report'], output: values['--output'], request: values['--request'], evidence: values['--evidence'], keys: values['--keys'] }
+  }
   if (command === 'configure') {
-    if (rest[0] !== 'codex') usageError('Configure currently supports only codex.')
+    if (!PUBLIC_PROVIDER_IDS.has(rest[0])) usageError('Configure requires one supported provider.')
+    const provider = rest[0]
     let selector = ''
     let modelMap = ''
+    let effort
     let root = ''
     for (let index = 1; index < rest.length; index += 1) {
       const flag = rest[index]
-      if (!['--agents', '--model-map', '--root'].includes(flag)) usageError(`Unknown configure flag: ${flag}`)
+      if (!['--agents', '--model-map', '--effort', '--root'].includes(flag)) usageError(`Unknown configure flag: ${flag}`)
       const value = rest[index + 1]
       if (value === undefined || value.startsWith('--')) usageError(`${flag} requires a value.`)
       index += 1
@@ -176,13 +427,22 @@ function parseArgs(argv) {
       } else if (flag === '--model-map') {
         if (modelMap) usageError('--model-map may be provided only once.')
         modelMap = value
+      } else if (flag === '--effort') {
+        if (effort !== undefined) usageError('--effort may be provided only once.')
+        const efforts = provider === 'reasonix' ? ['low', 'medium', 'high', 'max']
+          : provider === 'codex' ? ['low', 'medium', 'high', 'xhigh'] : null
+        if (efforts && !efforts.includes(value)) usageError(`--effort requires ${efforts.join(', ')}.`)
+        if (!efforts && !/^[a-z][a-z0-9-]{0,31}$/.test(value)) usageError('--effort requires a native provider effort name.')
+        effort = value
       } else {
         if (root) usageError('--root may be provided only once.')
         root = validateLifecycleRoot(value)
       }
     }
-    if (!selector) usageError('Configure codex requires --agents.')
-    const parsed = { command: 'configure', provider: 'codex', selector, modelMap }
+    if (!selector) usageError(`Configure ${provider} requires --agents.`)
+    if (effort !== undefined && selector.trim().toLowerCase() === 'off') usageError('--effort requires enabled agents.')
+    const parsed = { command: 'configure', provider, selector, modelMap }
+    if (effort !== undefined) parsed.effort = effort
     if (root) parsed.root = root
     return parsed
   }
@@ -241,64 +501,30 @@ function providerInstallLocations(client, locationOptions = {}) {
   const env = locationOptions.env || process.env
   const platform = locationOptions.platform || process.platform
   const home = configuredHome(env, locationOptions.homeDirectory)
-  const xdg = env.XDG_CONFIG_HOME || path.join(home, '.config')
   const singleRoot = installPath => ({
     roots: [{ label: 'Install directory', path: installPath }],
   })
 
-  if (client === 'claude') return singleRoot(path.join(home, '.claude'))
+  if (['claude', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek', 'hermes', 'grok'].includes(client)) {
+    const defaults = { ...env, HOME: home }
+    delete defaults.AUTOPROMPT_INSTALL_ROOT
+    return singleRoot(require('../scripts/harness-v2-package.cjs').rootCandidate(client, defaults, locationOptions.cwd || process.cwd()))
+  }
+
   if (client === 'codex') return singleRoot(env.CODEX_HOME || path.join(home, '.codex'))
-  if (client === 'opencode') return singleRoot(path.join(xdg, 'opencode'))
-  if (client === 'prime') {
-    return singleRoot(env.PRIME_AGENT_CODING_AGENT_DIR || path.join(home, '.prime', 'agent'))
-  }
-  if (client === 'omp') {
-    const installRoot = ompInstallRoot(env, home)
-    const nativeRoot = ompNativeTaskAgentRoot(env, home)
-    if (nativeRoot === installRoot) return singleRoot(installRoot)
-    return {
-      roots: [
-        { label: 'Install directory', path: installRoot },
-        { label: 'Native task-agent root', path: nativeRoot },
-      ],
-    }
-  }
-  if (client === 'deepseek') {
-    return singleRoot(env.DSH_HOME || path.join(home, '.dsh'))
-  }
   if (client === 'reasonix') {
     const root = env.REASONIX_HOME || (platform === 'win32'
       ? path.join(env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'reasonix')
       : path.join(home, '.reasonix'))
     return singleRoot(root)
   }
-  if (client === 'kilo') {
-    return {
-      roots: [
-        { label: 'Skill root', path: path.join(home, '.kilo') },
-        { label: 'Native root', path: path.join(xdg, 'kilo') },
-      ],
-    }
-  }
-  if (client === 'vscode') {
-    let settings = env.AUTOPROMPT_VSCODE_SETTINGS_PATH
-    if (!settings && platform === 'win32') {
-      settings = path.join(env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Code', 'User', 'settings.json')
-    } else if (!settings && platform === 'darwin') {
-      settings = path.join(home, 'Library', 'Application Support', 'Code', 'User', 'settings.json')
-    } else if (!settings) {
-      settings = path.join(xdg, 'Code', 'User', 'settings.json')
-    }
-    return {
-      ...singleRoot(path.join(home, '.copilot')),
-      settings,
-    }
-  }
   throw new Error(`Unknown provider: ${String(client)}`)
 }
 
 class InputClosedError extends Error {}
 class BackNavigationError extends Error {}
+
+const STDIN_RETRY_WAIT = new Int32Array(new SharedArrayBuffer(4))
 
 function readLineSync(stdin, stdout) {
   const descriptor = Number.isInteger(stdin.fd) ? stdin.fd : 0
@@ -314,6 +540,10 @@ function readLineSync(stdin, stdout) {
         count = fs.readSync(descriptor, byte, 0, 1, null)
       } catch (error) {
         if (error && error.code === 'EINTR') continue
+        if (error && (error.code === 'EAGAIN' || error.code === 'EWOULDBLOCK')) {
+          Atomics.wait(STDIN_RETRY_WAIT, 0, 0, 10)
+          continue
+        }
         throw error
       }
       if (count === 0) return bytes.length === 0 ? null : Buffer.from(bytes).toString('utf8')
@@ -354,6 +584,19 @@ function providerInstallState(
   currentVersion = PACKAGE_JSON.version,
   packageRoot = PACKAGE_ROOT,
 ) {
+  if (client !== 'codex' && PUBLIC_PROVIDER_IDS.has(client)) {
+    const v2Receipt = path.join(root, `.autoprompt-${client}-v2.json`)
+    if (fs.existsSync(v2Receipt)) {
+      try {
+        const packaging = require(path.join(packageRoot, 'scripts', client === 'reasonix' ? 'reasonix-package.cjs' : 'harness-v2-package.cjs'))
+        const installed = client === 'reasonix' ? packaging.verify(root) : packaging.verify(client, root)
+        const source = client === 'reasonix' ? packaging.sourceInventory(packageRoot) : packaging.sourceInventory(client, packageRoot)
+        return { installed: true, version: installed.contractVersion, current: installed.payloadDigest === source.payloadDigest, contractVersion: installed.contractVersion }
+      } catch {
+        return { installed: true, version: '', current: false, corrupted: true }
+      }
+    }
+  }
   const receipt = path.join(
     root,
     client === 'prime' ? '.autoprompt-prime-install.json' : '.autoprompt-install-receipt.json',
@@ -386,6 +629,7 @@ function providerInstallState(
 }
 
 function stateLabel(state) {
+  if (state.corrupted) return 'installed v2 payload requires inspection; receipt verification failed'
   if (state.legacy) return `legacy install detected, update available: ${PACKAGE_JSON.version}`
   if (!state.installed) return 'not installed'
   if (state.current) return `installed ${state.version}, current`
@@ -530,7 +774,8 @@ function scriptArguments(command) {
   if (command.command === 'install') return [command.client]
   if (command.command === 'uninstall') return [command.client]
   const args = []
-  if (command.client !== null) args.push(command.client)
+  if (command.isolation) args.push('isolation')
+  else if (command.client !== null) args.push(command.client)
   if (command.strict) args.push('--strict')
   return args
 }
@@ -591,8 +836,10 @@ function npmEnvironment(env) {
 }
 
 function normalizeVersion(value) {
-  const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?$/.exec(String(value || '').trim())
-  return match ? `${Number(match[1])}.${Number(match[2])}.${Number(match[3])}` : ''
+  const raw = String(value || '').trim().replace(/^v/, '')
+  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/.exec(raw)
+  if (!match || match[4]?.split('.').some(part => /^\d+$/.test(part) && part.length > 1 && part.startsWith('0'))) return ''
+  return raw
 }
 
 function versionFromOutput(stdout) {
@@ -607,11 +854,26 @@ function versionFromOutput(stdout) {
 }
 
 function compareVersions(left, right) {
-  const leftParts = normalizeVersion(left).split('.').map(Number)
-  const rightParts = normalizeVersion(right).split('.').map(Number)
-  if (leftParts.length !== 3 || rightParts.length !== 3) return 0
-  for (let index = 0; index < 3; index += 1) {
-    if (leftParts[index] !== rightParts[index]) return leftParts[index] - rightParts[index]
+  const split = value => {
+    const normalized = normalizeVersion(value)
+    if (!normalized) return null
+    const [core, ...suffix] = normalized.split('+')[0].split('-')
+    return { core: core.split('.').map(BigInt), pre: suffix.length ? suffix.join('-').split('.') : [] }
+  }
+  const a = split(left), b = split(right)
+  if (!a || !b) return 0
+  for (let index = 0; index < 3; index++) {
+    if (a.core[index] !== b.core[index]) return a.core[index] > b.core[index] ? 1 : -1
+  }
+  if (!a.pre.length || !b.pre.length) return a.pre.length === b.pre.length ? 0 : a.pre.length ? -1 : 1
+  for (let index = 0; index < Math.max(a.pre.length, b.pre.length); index++) {
+    const x = a.pre[index], y = b.pre[index]
+    if (x === y) continue
+    if (x === undefined || y === undefined) return x === undefined ? -1 : 1
+    const xn = /^\d+$/.test(x), yn = /^\d+$/.test(y)
+    if (xn && yn) return BigInt(x) > BigInt(y) ? 1 : -1
+    if (xn !== yn) return xn ? -1 : 1
+    return x > y ? 1 : -1
   }
   return 0
 }
@@ -724,6 +986,14 @@ function resolveInteractiveUpdateStatus(options, latestVersion, latestGitHubRevi
   const state = readUpdateState(options)
   const comparison = latest ? compareVersions(latest, PACKAGE_JSON.version) : 0
   const packagedInstall = isPackagedInstall(options.packageRoot)
+  if (packagedInstall && latest && comparison < 0) {
+    return {
+      action: 'none',
+      message: `Installed Autoprompt ${PACKAGE_JSON.version} is newer than release ${latest}; keeping this build.`,
+      latestGitHubRevision: revision,
+      latestVersion: latest,
+    }
+  }
   if (packagedInstall && comparison > 0) {
     return {
       action: 'registry-first',
@@ -734,21 +1004,13 @@ function resolveInteractiveUpdateStatus(options, latestVersion, latestGitHubRevi
   }
 
   if (packagedInstall &&
+      state.installedGitHubRevision &&
       revision &&
       (revision !== state.installedGitHubRevision ||
         (latest && latest !== PACKAGE_JSON.version))) {
     return {
       action: 'github-main',
       message: `New Autoprompt build available on GitHub main (installed ${PACKAGE_JSON.version}). Updating...`,
-      latestGitHubRevision: revision,
-      latestVersion: latest,
-    }
-  }
-
-  if (packagedInstall && latest && comparison < 0) {
-    return {
-      action: 'registry-first',
-      message: `Installed Autoprompt ${PACKAGE_JSON.version} does not match current release ${latest}. Updating...`,
       latestGitHubRevision: revision,
       latestVersion: latest,
     }
@@ -844,9 +1106,9 @@ function runPowerShell(command, options) {
   return childStatus(powerShellCore, options.stderr, 'pwsh')
 }
 
-function bashVersion(options) {
+function bashVersion(options, executable = 'bash') {
   const result = options.spawnSync(
-    'bash',
+    executable,
     ['-c', 'printf "%s" "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"'],
     {
       cwd: options.cwd,
@@ -873,8 +1135,12 @@ function writeBashGuidance(options) {
 }
 
 function runBash(command, options) {
-  const version = bashVersion(options)
-  if (!bashIsCurrent(version)) {
+  // Homebrew does not replace /bin/bash. Resolve its installed shell explicitly
+  // on macOS so an otherwise valid installation need not rewrite the user's PATH.
+  const candidates = options.platform === 'darwin'
+    ? ['bash', '/opt/homebrew/bin/bash', '/usr/local/bin/bash'] : ['bash']
+  const executable = candidates.find(candidate => bashIsCurrent(bashVersion(options, candidate)))
+  if (!executable) {
     writeBashGuidance(options)
     return 1
   }
@@ -882,8 +1148,8 @@ function runBash(command, options) {
     scriptPath(options.packageRoot, command.command, 'sh'),
     ...scriptArguments(command),
   ]
-  const result = options.spawnSync('bash', args, spawnOptions(options))
-  return childStatus(result, options.stderr, 'bash')
+  const result = options.spawnSync(executable, args, spawnOptions(options))
+  return childStatus(result, options.stderr, executable)
 }
 
 function runScript(command, options) {
@@ -1276,6 +1542,44 @@ function run(argv, overrides = {}) {
     return 0
   }
   if (command.command === 'update') return runUpdate(options)
+  if (command.command === 'conformance') {
+    try {
+      const diagnostic = require(path.join(options.packageRoot, 'scripts', 'harness-v2-conformance.cjs'))
+      const report = diagnostic.run({
+        providers: command.provider === 'all' ? PROVIDERS.map(provider => provider.id) : [command.provider],
+        env: options.env,
+        nativeTests: command.nativeTests,
+        integrationTests: command.integrationTests,
+        ...(command.output ? { output: command.output } : {}),
+      })
+      for (const item of report.providers) {
+        options.stdout.write(`${item.provider}: native-interface=${item.nativeInterface.status} native-tests=${item.nativeTests.status} production-admission=${item.productionAdmission.status}\n`)
+      }
+      options.stdout.write(`Diagnostic evidence: ${path.join(report.evidenceDirectory, 'report.json')}\n`)
+      options.stdout.write('Diagnostic results do not grant production admission.\n')
+      return report.providers.some(item => item.nativeTests.status === 'unsupported') ? 1 : 0
+    } catch (error) {
+      options.stderr.write(`Autoprompt conformance: ${error.code || 'DIAGNOSTIC_FAILED'}: ${error.message}\n`)
+      return 1
+    }
+  }
+  if (command.command === 'admission') {
+    try {
+      if (command.provider === 'codex') usageError('Admission is not implemented for codex.')
+      const localAdmission = require(path.join(options.packageRoot, 'scripts', 'harness-v2-local-admission.cjs'))
+      const input = { provider: command.provider, root: command.root, executable: command.executable, report: command.report,
+        liveReport: command.liveReport, env: options.env }
+      if (command.action === 'request') {
+        const result = localAdmission.createRequest(input)
+        fs.writeFileSync(command.output, `${JSON.stringify(result.request, null, 2)}\n`, { flag: 'wx', mode: 0o600 })
+        options.stdout.write(`Autoprompt admission request: ${command.output} sha256=${result.requestSha256}\n`)
+      } else {
+        const result = localAdmission.importAdmission({ ...input, request: command.request, evidence: command.evidence, keys: command.keys })
+        options.stdout.write(`Autoprompt admission import (${result.provider}): ${result.trustDirectory}\n`)
+      }
+      return 0
+    } catch (error) { options.stderr.write(`Autoprompt admission (${command.provider}): ${error.code || 'ADMISSION_FAILED'}: ${error.message}\n`); return 1 }
+  }
   if (command.command === 'uninstall' && command.client === null) {
     if (!options.interactive) {
       options.stderr.write(`Interactive uninstall requires a terminal.\n\n${HELP_TEXT}\n`)
@@ -1283,18 +1587,126 @@ function run(argv, overrides = {}) {
     }
     return runInteractiveUninstall(options)
   }
+  if (command.command === 'runtime-setup') {
+    try {
+      const runtimeSetup = require(path.join(options.packageRoot, 'scripts', 'darwin-runtime-setup.cjs'))
+      const finish = () => { options.stdout.write(`Autoprompt runtime setup (${command.provider}): exact runtime binding saved.\n`); return 0 }
+      const failed = error => { options.stderr.write(`Autoprompt runtime setup: ${error.code || 'RUNTIME_SETUP_FAILED'}: ${error.message}\n`); return 1 }
+      const result = runtimeSetup.setup({ provider: command.provider, root: command.root, python: command.python, packageRoot: options.packageRoot, ...(command.refresh ? { refresh: true } : {}) })
+      return result && typeof result.then === 'function' ? result.then(finish, failed) : finish()
+    } catch (error) { options.stderr.write(`Autoprompt runtime setup: ${error.code || 'RUNTIME_SETUP_FAILED'}: ${error.message}\n`); return 1 }
+  }
+  if (command.command === 'runtime-closure') {
+    try {
+      const closure = require(path.join(options.packageRoot, 'scripts', command.provider === 'hermes' ? 'hermes-runtime-closure.cjs' : 'provider-closure.cjs'))
+      const result = command.provider === 'hermes'
+        ? closure.prepare({ output: command.output, venv: command.venv, source: command.source, python: command.python, arch: command.arch, archive: command.archive })
+        : closure.prepareOmpClosure(command)
+      options.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
+      return 0
+    } catch (error) {
+      options.stderr.write(`Autoprompt runtime closure: ${error.code || (command.provider === 'hermes' ? 'HERMES_CLOSURE_FAILED' : 'PROVIDER_CLOSURE_FAILED')}: ${error.message}\n`)
+      return 1
+    }
+  }
+  if (command.command === 'runtime-vm' || command.command === 'runtime-wsl') {
+    try {
+      const backendName = command.command === 'runtime-wsl' ? 'wsl' : 'vm'
+      const backend = require(path.join(options.packageRoot, 'scripts', backendName === 'wsl' ? 'wsl-runtime.cjs' : 'lima-runtime.cjs'))
+      const result = backend[command.action]({ ...command, onRequest: requestId => {
+        options.stderr.write(`Autoprompt ${backendName.toUpperCase()} request: ${requestId}\n`)
+      } })
+      const finish = value => {
+        options.stdout.write(`${JSON.stringify(value, null, 2)}\n`)
+        // A Lima shell completing only proves that the bridge returned.  Keep
+        // its durable record visible and make terminal command failure or an
+        // unproved transport state a CLI failure as well.
+        const record = value && typeof value === 'object' && value.record && typeof value.record === 'object'
+          ? value.record : value
+        if (record?.status === 'UNKNOWN' || record?.status === 'FAILED') return 1
+        if (record?.status === 'ACTIVATION_TERMINAL' && record.exitCode !== 0) return 1
+        return 0
+      }
+      const failed = error => { options.stderr.write(`Autoprompt runtime ${backendName}: ${error.code || `${backendName.toUpperCase()}_BACKEND_FAILED`}: ${error.message}\n`); return 1 }
+      return result && typeof result.then === 'function' ? result.then(finish, failed) : finish(result)
+    } catch (error) { const backendName = command.command === 'runtime-wsl' ? 'wsl' : 'vm'; options.stderr.write(`Autoprompt runtime ${backendName}: ${error.code || `${backendName.toUpperCase()}_BACKEND_FAILED`}: ${error.message}\n`); return 1 }
+  }
   if (command.command === 'configure') {
-    const configure = require(path.join(options.packageRoot, 'scripts', 'codex-configure.cjs'))
+    if (command.provider !== 'codex') {
+      try {
+        const configure = require(path.join(options.packageRoot, 'scripts', command.provider === 'reasonix' ? 'reasonix-configure.cjs' : 'harness-v2-configure.cjs'))
+        configure.configure({ provider: command.provider, env: command.root ? { ...options.env, AUTOPROMPT_INSTALL_ROOT: command.root } : options.env,
+          selector: command.selector, effort: command.effort, modelMap: command.modelMap })
+        options.stdout.write(`Autoprompt configure (${command.provider}): model selection saved.\n`)
+        return 0
+      } catch (error) { options.stderr.write(`Autoprompt configure (${command.provider}): ${error.code || 'CONFIGURATION_FAILED'}: ${error.message}\n`); return 1 }
+    }
+    const configure = require(path.join(options.packageRoot, 'scripts', `${command.provider}-configure.cjs`))
     return configure.run({
       env: command.root
         ? { ...options.env, AUTOPROMPT_INSTALL_ROOT: command.root }
         : options.env,
       modelMap: command.modelMap,
+      ...(command.effort !== undefined ? { effort: command.effort } : {}),
       packageRoot: options.packageRoot,
       selector: command.selector,
       stderr: options.stderr,
       stdout: options.stdout,
     })
+  }
+  if (command.command === 'activate') {
+    if (command.vmRoot || command.wslRoot) {
+      try {
+        const backendName = command.wslRoot ? 'WSL' : 'VM'
+        const backend = require(path.join(options.packageRoot, 'scripts', command.wslRoot ? 'wsl-runtime.cjs' : 'lima-runtime.cjs'))
+        const vmArgv = ['activate', command.provider,
+          ...(command.ttlSeconds === undefined ? [] : ['--ttl', String(command.ttlSeconds)]),
+          ...(command.resume ? ['--resume', command.resume] : []),
+          '--', ...command.missionArgs]
+        const finishVm = value => {
+          options.stdout.write(`${JSON.stringify(value, null, 2)}\n`)
+          const record = value && typeof value === 'object' && value.record && typeof value.record === 'object' ? value.record : value
+          return record?.status === 'ACTIVATION_TERMINAL' && record.exitCode === 0 ? 0 : 1
+        }
+        const failedVm = error => { options.stderr.write(`Autoprompt activate (${command.provider}) ${backendName}: ${error.code || `${backendName}_BACKEND_FAILED`}: ${error.message}\n`); return 1 }
+        const result = backend.exec({ root: command.wslRoot || command.vmRoot, argv: vmArgv, onRequest: requestId => options.stderr.write(`Autoprompt ${backendName} request: ${requestId}\n`) })
+        return result && typeof result.then === 'function' ? result.then(finishVm, failedVm) : finishVm(result)
+      } catch (error) { const backendName = command.wslRoot ? 'WSL' : 'VM'; options.stderr.write(`Autoprompt activate (${command.provider}) ${backendName}: ${error.code || `${backendName}_BACKEND_FAILED`}: ${error.message}\n`); return 1 }
+    }
+    const reportActivation = result => {
+      let revoked = result.revoked === true
+      // Codex returns the durable record path rather than a revoked flag. Its
+      // launch-time record can precede finalization, so reopen the saved state.
+      if (command.provider === 'codex' && typeof result.recordPath === 'string') {
+        const saved = JSON.parse(fs.readFileSync(result.recordPath, 'utf8'))
+        revoked = saved.activationId === result.activationId && saved.status === 'revoked' &&
+          saved.capability?.status === 'revoked'
+      }
+      options.stdout.write(`Autoprompt activation ${result.activationId}: status=${result.status} revoked=${revoked}\n`)
+      return result.status
+    }
+    const reportFailure = error => {
+      options.stderr.write(`Autoprompt activate (${command.provider}): ${error.code || 'ACTIVATION_FAILED'}: ${error.message}\n`)
+      return 1
+    }
+    try {
+      const configure = require(path.join(options.packageRoot, 'scripts', ['codex', 'reasonix'].includes(command.provider) ? `${command.provider}-configure.cjs` : 'harness-v2-configure.cjs'))
+      const result = configure.launchActivation({
+        provider: command.provider,
+        env: command.root
+          ? { ...options.env, AUTOPROMPT_INSTALL_ROOT: command.root }
+          : options.env,
+        missionArgs: command.missionArgs,
+        compatibilityAlias: command.compatibilityAlias,
+        now: overrides.now,
+        resume: command.resume,
+        ...(overrides.spawnSync ? { spawnSync: options.spawnSync } : {}),
+        stdio: 'inherit',
+        target: command.target || options.cwd,
+        ttlSeconds: command.ttlSeconds,
+      })
+      return result && typeof result.then === 'function' ? result.then(reportActivation, reportFailure) : reportActivation(result)
+    } catch (error) { return reportFailure(error) }
   }
 
   const lifecycleOptions = command.root
@@ -1303,9 +1715,15 @@ function run(argv, overrides = {}) {
   return runScript(command, lifecycleOptions)
 }
 
-if (require.main === module) process.exitCode = run(process.argv.slice(2))
+if (require.main === module) {
+  const result = run(process.argv.slice(2))
+  if (result && typeof result.then === 'function') result.then(code => { process.exitCode = code }, error => { process.stderr.write(`Autoprompt: ${error.message}\n`); process.exitCode = 1 })
+  else process.exitCode = result
+}
 
 module.exports = {
+  compareVersions,
+  normalizeVersion,
   HELP_TEXT,
   PROVIDERS,
   isSupportedNodeVersion,
@@ -1314,6 +1732,7 @@ module.exports = {
   providerInstallState,
   queryLatestVersion,
   queryLatestGitHubRevision,
+  readLineSync,
   resolveInteractiveUpdateStatus,
   run,
 }

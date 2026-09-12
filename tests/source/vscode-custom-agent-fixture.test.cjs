@@ -138,7 +138,7 @@ test('the schema accepts only the VS Code forms Autoprompt needs', () => {
   assert.notDeepEqual(validate(acceptedAgent({ disableModelInvocation: false }), schema), [])
 })
 
-test('the minimal agent chain proves allowlisted nested invocation and a closed leaf', () => {
+test('historic schema fixture describes nested invocation and a closed leaf (not native execution)', () => {
   const schema = JSON.parse(fs.readFileSync(SCHEMA_PATH, 'utf8'))
   const files = fs.readdirSync(AGENTS_ROOT).filter(file => file.endsWith('.agent.md')).sort()
   assert.deepEqual(files, [
@@ -181,15 +181,15 @@ test('the minimal agent chain proves allowlisted nested invocation and a closed 
   })
 })
 
-test('all 25 shipped VS Code agents validate against the pinned 1.133 schema', () => {
+test('all 32 private VS Code profiles validate against the pinned 1.133 schema', () => {
   const schema = JSON.parse(fs.readFileSync(SCHEMA_PATH, 'utf8'))
-  const contract = JSON.parse(fs.readFileSync(CONTRACT_PATH, 'utf8'))
-  const expected = contract.personas.map(persona => `${persona.id}.agent.md`).sort()
+  const policy = require('../../agents/codex/agents/role-policy.json')
+  const expected = Object.keys(policy.physical_roles).map(role => `${role}.agent.md`).sort()
   const files = fs.readdirSync(PACKAGE_AGENTS_ROOT)
     .filter(file => file.endsWith('.agent.md'))
     .sort()
 
-  assert.equal(expected.length, 25)
+  assert.equal(expected.length, 32)
   assert.deepEqual(files, expected)
 
   for (const file of files) {
@@ -198,7 +198,14 @@ test('all 25 shipped VS Code agents validate against the pinned 1.133 schema', (
     const agent = parseFrontmatterSource(source, file)
     assert.deepEqual(validate(agent.header, schema), [], file)
     assert.equal(agent.header.name, file.replace(/\.agent\.md$/, ''), file)
+    assert.deepEqual(agent.header.agents, [], `${file} cannot delegate natively`)
+    assert.equal(agent.header['user-invocable'], false, file)
+    assert.equal(agent.header['disable-model-invocation'], true, file)
+    assert.ok(!agent.header.tools.includes('agent'), file)
     assert.equal(Object.hasOwn(agent.header, 'model'), false, `${file} must inherit the selected model`)
     assert.ok(agent.body.trim().length > 0, `${file} must contain instructions`)
+    assert.deepEqual(agent.header.agents, [], `${file} must not bypass controller-owned dispatch`)
+    assert.equal(agent.header['user-invocable'], false)
+    assert.equal(agent.header['disable-model-invocation'], true)
   }
 })

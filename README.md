@@ -1,22 +1,22 @@
 <p align="center">
-  <img src="assets/banner.svg" alt="Autoprompt Skill with 45% fewer failures on agentic coding tasks" width="760"/>
+  <img src="assets/banner.svg" alt="Autoprompt Skill: pink clouds and flying geese" width="1000"/>
 </p>
 
-<p align="center">Autoprompt is a coding-agent skill that cuts failures by 45% on agentic coding tasks.</p>
+<p align="center">Autoprompt is a coding-agent workflow that cuts failures by 45% by reviewing, fixing, and rechecking its work.</p>
 
 <p align="center">
-  <a href="#benchmarks"><img src="https://img.shields.io/badge/Terminal--Bench%202.1-%2B14.61%20points-255C60?style=flat-square&labelColor=14101F" alt="Terminal-Bench 2.1: plus 14.61 points"/></a>
-  <a href="https://github.com/Spielewoy/autoprompt-skill/releases/latest"><img src="https://img.shields.io/github/v/release/Spielewoy/autoprompt-skill?style=flat-square&label=version&color=255C60&labelColor=14101F" alt="Version 1.0.4"/></a>
-  <a href="#install"><img src="https://img.shields.io/badge/support-9%20supported%20providers-255C60?style=flat-square&labelColor=14101F" alt="Nine supported providers"/></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-255C60?style=flat-square&labelColor=14101F" alt="License MIT"/></a>
+  <a href="#benchmarks"><img src="https://img.shields.io/badge/Terminal--Bench%202.1-%2B14.61%20points-965477?style=flat-square&labelColor=302335" alt="Terminal-Bench 2.1: plus 14.61 points"/></a>
+  <a href="https://github.com/Spielewoy/autoprompt-skill/releases/latest"><img src="https://img.shields.io/github/v/release/Spielewoy/autoprompt-skill?style=flat-square&label=version&color=965477&labelColor=302335" alt="Latest release"/></a>
+  <a href="#install"><img src="https://img.shields.io/badge/support-11%20supported%20providers-965477?style=flat-square&labelColor=302335" alt="Eleven supported providers"/></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-965477?style=flat-square&labelColor=302335" alt="License MIT"/></a>
 </p>
 
 <p align="center">
   <a href="README.md"><b>English</b></a> |
-  <a href="https://github.com/Spielewoy/autoprompt-skill/blob/main/docs/translations/zh.md">中文</a> |
-  <a href="https://github.com/Spielewoy/autoprompt-skill/blob/main/docs/translations/ko.md">한국어</a> |
-  <a href="https://github.com/Spielewoy/autoprompt-skill/blob/main/docs/translations/es.md">Español</a> |
-  <a href="https://github.com/Spielewoy/autoprompt-skill/blob/main/docs/translations/ar.md">العربية</a>
+  <a href="docs/translations/zh.md">中文</a> |
+  <a href="docs/translations/ko.md">한국어</a> |
+  <a href="docs/translations/es.md">Español</a> |
+  <a href="docs/translations/ar.md">العربية</a>
 </p>
 
 ## Contents
@@ -25,12 +25,12 @@
 
 ## Install
 
-Use the CLI below, or download an installer from [GitHub Releases](https://github.com/Spielewoy/autoprompt-skill/releases/tag/v1.0.4).
+Use the CLI below, or download an installer from [GitHub Releases](https://github.com/Spielewoy/autoprompt-skill/releases/latest).
 
 ### 1. Install the CLI
 
 ```bash
-npm install -g autoprompt-skill
+npm install -g https://github.com/Spielewoy/autoprompt-skill/releases/download/v2.0.0/autoprompt-skill-2.0.0.tgz
 ```
 
 ### 2. Launch the installer
@@ -60,23 +60,27 @@ autoprompt
 ### Requirements
 
 - [Node.js 20+](https://nodejs.org/en/download)
-- [Python 3.11+](https://www.python.org/downloads/) exposed as `python`, with [PyYAML](https://pypi.org/project/PyYAML/)
+- [Python 3.11+](https://www.python.org/downloads/) available as `python3` or `python`, with [PyYAML](https://pypi.org/project/PyYAML/)
 - [Bash 4.3+](https://www.gnu.org/software/bash/) on macOS or Linux
 - [Git](https://git-scm.com/downloads) only for the GitHub checkout method
 
 ### Support
 
-| Status | Coding agent | Audited requirement | Key |
+| Status | Coding agent | Tested version | Key |
 |---|---|---|---|
-| Working | [Claude Code](https://code.claude.com/docs/en/setup) | 2.1.219+; audited 2.1.233 | `claude` |
-| Working | [Codex](https://github.com/openai/codex) | Subagent-capable build; audited 0.147.0 | `codex` |
-| Working | [OpenCode](https://opencode.ai/docs/agents) | 1.18.7+; audited 1.18.18 | `opencode` |
-| Working | [Kilo Code](https://kilo.ai/docs/customize/custom-subagents) | 7.4.22+; audited 7.4.22 | `kilo` |
-| Working | [VS Code](https://code.visualstudio.com/docs/agents/subagents) | 1.133+; audited 1.133.0 with Copilot 0.61.0 | `vscode` |
-| Working | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) | 0.7.2; audited 0.7.2; native package adapter | `prime` |
-| Working | [Oh My Pi](https://omp.sh/) | 17.4.0+; adapter contract, install lifecycle, and native role payload verified for 17.4.0 | `omp` |
-| Working | [DeepSeek Harness](https://deepseek.com/harness/en/) | 0.1.0-rc.7+; adapter contract, install lifecycle, and native role payload verified for 0.1.0-rc.7 | `deepseek` |
-| Working | [Reasonix](https://reasonix.io/docs/) | 1.30.0+; adapter contract, install lifecycle, and native role payload verified for 1.30.0 | `reasonix` |
+| Working | [Claude Code](https://code.claude.com/docs/en/setup) | 2.1.263 | `claude` |
+| Working | [Codex](https://github.com/openai/codex) | 0.148.0 | `codex` |
+| Working | [OpenCode](https://opencode.ai/docs/agents) | 1.18.29 | `opencode` |
+| Working | [Kilo Code](https://kilo.ai/docs/customize/custom-subagents) | 7.5.15 | `kilo` |
+| Working | [VS Code](https://code.visualstudio.com/docs/agents/subagents) | 1.136.1 | `vscode` |
+| Working | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) | 0.7.2 | `prime` |
+| Working | [Oh My Pi](https://omp.sh/) | 18.1.14 | `omp` |
+| Working | [DeepSeek Harness](https://deepseek.com/harness/en/) | 0.1.2-rc.1 | `deepseek` |
+| Working | [Reasonix](https://reasonix.io/docs/) | 1.30.0 | `reasonix` |
+| Working | [Hermes Agent](https://github.com/NousResearch/hermes-agent) | 0.21.1 | `hermes` |
+| Working | [Grok Build](https://docs.x.ai/build/overview) | 1.0.13 | `grok` |
+
+These versions passed Linux runs. Model and platform availability varies by provider.
 
 See [support and audit notes](docs/faq/which-coding-agents-are-supported.md).
 
@@ -92,6 +96,8 @@ See [support and audit notes](docs/faq/which-coding-agents-are-supported.md).
 Replace `PROVIDER` with a key from the support table, such as `claude`, `codex`, or `prime`.
 
 ## Benchmarks
+
+These are **version 1 benchmarks**. Version 2 benchmarks will follow.
 
 <p align="center">
   <img src="assets/terminal-bench-2.1-leaderboard.svg" width="1000" alt="Terminal-Bench 2.1 leaderboard with 18 Artificial Analysis reference scores and measured DeepSeek V4 Flash 0731 scores with and without Autoprompt."/>
@@ -112,52 +118,75 @@ Replace `PROVIDER` with a key from the support table, such as `claude`, `codex`,
 
 </details>
 
-DeepSeek's 82.7% used its own test setup, so it is a reference point, not a comparable third run. Read the [setup and evidence boundaries](docs/benchmarks/terminal-bench-2.1.md), or [request another benchmark](https://github.com/Spielewoy/autoprompt-skill/issues/new?template=benchmark_request.md).
+DeepSeek's 82.7% used its own test setup, so it is a reference point, not a comparable third run. Read the [setup and evidence boundaries](docs/benchmarks/terminal-bench-2.1.md), or [request another benchmark](https://github.com/Spielewoy/autoprompt-skill/issues/new).
 
 <details>
 <summary><strong>Expected trade-off:</strong> about 3x the time and 2x the tokens.</summary>
 
-Timing and token logs were not retained, so these are planning estimates based on user experience reports, not measured benchmark results. The measured result was 29 to 16 failures (45% fewer) in this run, which translates to about 2x fewer mistakes. Note: for very small tasks, this may differ heavily.
+Timing and token logs were not retained, so these are planning estimates based on user experience reports, not measured benchmark results. The measured result was 29 to 16 failures (45% fewer) in this run, which translates to about 2x fewer mistakes. Note: for very small tasks, this may differ significantly.
 
 </details>
 
 ## Anatomy of an invocation
 
-<p align="center">
-  <a href="assets/anatomy.svg"><img src="assets/anatomy.svg" alt="Anatomy of an Autoprompt invocation: trigger, concurrency mode, agent cap, model routing, and goal" width="1000"/></a>
-</p>
+```bash
+autoprompt activate PROVIDER --target /absolute/project -- "<goal>"
+```
+
+| Part | What it does |
+|---|---|
+| `PROVIDER` | A key from the support table, such as `claude`, `codex`, or `grok`. |
+| `--target` | The project to work on. Omit it to use the current directory. |
+| `--` | Separates launcher options from the request. |
+| `<goal>` | The result you want, constraints, and how to check success. |
+| `path=` | Optional `auto`, `direct`, `light`, or `roadmap`, before the quoted goal. See [work paths](docs/faq/work-paths.md). |
+
+```bash
+autoprompt activate codex -- path=light "add retries and test the edge cases"
+```
 
 ## Run controls
 
-Use `mode=` to set concurrency. Use `agents=` to route models where the host supports it. [Custom model setup](docs/faq/how-to-add-custom-models.md)
+The same controls apply to all eleven providers. [Custom model setup](docs/faq/how-to-add-custom-models.md)
 
-| Control | Claude Code | Codex | OpenCode | Kilo | VS Code | Prime Agent | Oh My Pi | DeepSeek Harness | Reasonix |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| `mode=` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Custom `agents=` routing | ✓ | ✓ | ✕ Not available - inherits active model | ✕ Not available - inherits active model | ✕ Not available - inherits active model | ✕ Not available - inherits selected parent model | ✕ Not available - inherits selected parent model | ✕ Not available - inherits selected parent model | ✕ Not available - inherits selected parent model |
+| Control | What it does |
+|---|---|
+| `--concurrency tokensaver` | Runs at most six subagents at once. |
+| `--concurrency wide` | Starts ready, independent work up to the host limit. |
+| `--concurrency custom --max-subs N` | Sets your own concurrency limit. |
+| `configure PROVIDER --agents off` | Uses the provider's configured model. |
+| `configure PROVIDER --agents MODEL` | Selects one model. Add `--effort LEVEL` where supported. |
+| `configure PROVIDER --agents auto --model-map FILE` | Chooses from a measured model registry. A comma-separated model list also requires `--model-map`. |
+
+Pass concurrency controls after `--`, before the quoted goal:
+
+```bash
+autoprompt activate codex -- --concurrency custom --max-subs 4 "add retries and tests"
+autoprompt configure claude --agents provider/model --effort low
+```
 
 ## How it works
 
 <p align="center">
-  <img src="assets/how-it-works-loop.svg" alt="Autoprompt workflow from prompt through planning, build, review, tests, sign-off, and sweep" width="1100"/>
+  <a href="assets/how-it-works-loop.svg"><img src="assets/how-it-works-loop.svg" alt="Autoprompt workflow: choose a route, plan, build, check, and finish" width="1100"/></a>
 </p>
 
 ## The agents
 
 <p align="center">
-  <img src="assets/how-it-works-hierarchy.svg" alt="Autoprompt agent hierarchy from prompt to coordinators, manager, execution lanes, and independent checks" width="1100"/>
+  <a href="assets/how-it-works-hierarchy.svg"><img src="assets/how-it-works-hierarchy.svg" alt="Autoprompt agents: run coordinator, workers, independent checkers, and coordinators for larger jobs" width="1100"/></a>
 </p>
 
 ## Examples
 
 | Goal | Prompt |
 |---|---|
-| Fix | `/autoprompt fix the registration race and add a regression test` |
-| Build | `/autoprompt mode=wide build the booking flow from API to checkout` |
-| Research | `/autoprompt compare job queues against this codebase and recommend one` |
-| Limit parallel work | `/autoprompt mode=custom max_subs=4 migrate every model` |
+| Fix | `autoprompt activate claude -- "fix the registration race and add a regression test"` |
+| Build | `autoprompt activate codex -- --concurrency wide "build the booking flow from API to checkout"` |
+| Research | `autoprompt activate hermes -- "compare job queues against this codebase and recommend one"` |
+| Limit parallel work | `autoprompt activate grok -- --concurrency custom --max-subs 4 "migrate every model"` |
 
-Use `$autoprompt` instead of `/autoprompt` in Codex. In Oh My Pi, use `/skill:autoprompt`.
+Run these commands from your project, or supply `--target /absolute/project` before `--`.
 
 ## FAQ
 
@@ -183,16 +212,23 @@ The layers separate coordination, management, execution, and independent judgmen
 </details>
 
 <details>
-<summary><strong>What do `mode`, `max_subs`, and `agents` do?</strong></summary>
+<summary><strong>What are the paths?</strong></summary>
 
-`mode=tokensaver` caps active subagents at six. `mode=wide` opens every ready lane. `mode=custom max_subs=N` sets your own ceiling. `agents` controls model routing where the host supports it. [Details](docs/faq/tokensaver-vs-wide-vs-custom.md)
+`path=auto` selects a route for the task. `direct` starts focused work, `light` adds a short plan, and `roadmap` organizes dependent work before execution. Every path includes independent verification. [Details](docs/faq/work-paths.md)
+
+</details>
+
+<details>
+<summary><strong>What do concurrency, models, and paths control?</strong></summary>
+
+`--concurrency` and `--max-subs` set parallel work limits. `configure --agents` selects models, and `path=` selects how work is planned and coordinated. [Details](docs/faq/tokensaver-vs-wide-vs-custom.md)
 
 </details>
 
 <details>
 <summary><strong>Why does Autoprompt not start in the background?</strong></summary>
 
-Because it changes cost, time, and workflow. Start it explicitly with `/autoprompt <goal>`, or `$autoprompt` in Codex.
+Because it changes cost, time, and workflow. Start it explicitly with `autoprompt activate PROVIDER -- "<goal>"`.
 
 </details>
 
@@ -200,4 +236,8 @@ Because it changes cost, time, and workflow. Start it explicitly with `/autoprom
 
 [MIT](LICENSE). Copyright 2026 [Spielewoy](https://github.com/Spielewoy).
 
-Community: [Contributing](docs/CONTRIBUTING.md), [Code of Conduct](docs/CODE_OF_CONDUCT.md), [Security](docs/SECURITY.md), and [Support](docs/SUPPORT.md).
+Community: [Contributors](docs/CONTRIBUTORS.md), [Contributing](docs/CONTRIBUTING.md), [Code of Conduct](docs/CODE_OF_CONDUCT.md), [Security](docs/SECURITY.md), and [Support](docs/SUPPORT.md).
+
+### Contributors
+
+[johnatag](https://github.com/johnatag) · [rollingdice](https://github.com/rollingdice) · [AincradBot](https://github.com/AincradBot) · [lunar-me](https://github.com/lunar-me) · [fatinghenji](https://github.com/fatinghenji) · [c8dhjp4tyv-bit](https://github.com/c8dhjp4tyv-bit) · [Alexis-Fiolleau-LaPoste-BGPN](https://github.com/Alexis-Fiolleau-LaPoste-BGPN)

@@ -1,50 +1,50 @@
 # Autoprompt source
 
-This folder contains the complete Autoprompt product. The prompts, custom agents, gates, frameworks, and runtime harness are published here as readable source files.
+All eleven harnesses project the same v2 routes, 32 physical roles (seven active roles and 25 inactive compatibility aliases), checks, modes, playbooks, and 18 frameworks. Generated source parity and runtime admission are separate: current provider capability evidence determines whether a run can start.
 
 ## Provider packages
 
-| Package | Entry | Custom agents | Frameworks | Transport |
-|---|---|---:|---:|---|
-| [Claude Code](claude/) | [`SKILL.md`](claude/SKILL.md) | [25 Markdown personas](claude/agents/) | [18 workflows](claude/frameworks/) | Recursive, with a [runtime harness](claude/workflow/) |
-| [Codex](codex/) | [`SKILL.md`](codex/SKILL.md) | [25 TOML agents](codex/agents/) | [18 workflows](codex/frameworks/) | Recursive, with a [runtime harness](codex/workflow/) |
-| [OpenCode](opencode/) | [`SKILL.md`](opencode/SKILL.md) | [25 Markdown agents](opencode/agents/) | [18 workflows](opencode/frameworks/) | Recursive, with a guarded activation profile |
-| [Kilo](kilo/) | [`SKILL.md`](kilo/SKILL.md) | [25 Markdown agents](kilo/agents/) | [18 workflows](kilo/frameworks/) | Kilo uses recursive dispatch with a guarded profile |
-| [VS Code](vscode/) | [`SKILL.md`](vscode/SKILL.md) | [25 `.agent.md` agents](vscode/agents/) | [18 workflows](vscode/frameworks/) | VS Code uses recursive dispatch when its required setting is enabled |
-| [Prime Agent](prime/) | [Package adapter](prime/package.json) and [skill](prime/skills/autoprompt/SKILL.md) | [25 persona prompts](prime/personas/) | [18 workflows](prime/prompts/frameworks/) | Recursive through the native package adapter |
-| [Oh My Pi](omp/) | [`SKILL.md`](omp/SKILL.md) | [25 Markdown agents](omp/agents/) | [18 workflows](omp/frameworks/) | Recursive through native `task` dispatch and `spawns` allowlists |
-| [DeepSeek Harness](deepseek/) | [`SKILL.md`](deepseek/SKILL.md) | [25 fixed-persona tools](deepseek/agents/) | [18 workflows](deepseek/frameworks/) | Recursive through the user preset or headless patch |
-| [Reasonix](reasonix/) | [`SKILL.md`](reasonix/SKILL.md) | [25 native profiles](reasonix/skills/) | [18 workflows](reasonix/frameworks/) | Recursive through native subagent profiles |
+| Package | Private entry | Native internal roles | Frameworks |
+|---|---|---|---|
+| [Claude Code](claude/) | [SKILL.md](claude/SKILL.md) | [32 Markdown profiles](claude/agents/) | [18 procedures](claude/frameworks/) |
+| [Codex](codex/) | [SKILL.md](codex/SKILL.md) | [32 TOML profiles](codex/agents/) | [18 procedures](codex/frameworks/) |
+| [OpenCode](opencode/) | [SKILL.md](opencode/SKILL.md) | [32 permission-scoped profiles](opencode/agents/) | [18 procedures](opencode/frameworks/) |
+| [Kilo](kilo/) | [SKILL.md](kilo/SKILL.md) | [32 permission-scoped profiles](kilo/agents/) | [18 procedures](kilo/frameworks/) |
+| [VS Code](vscode/) | [SKILL.md](vscode/SKILL.md) | [32 private `.agent.md` profiles](vscode/agents/) | [18 procedures](vscode/frameworks/) |
+| [Prime Agent](prime/) | [SKILL.md](prime/skills/autoprompt/SKILL.md) | [32 private persona prompts](prime/personas/) | [18 procedures](prime/prompts/frameworks/) |
+| [Oh My Pi](omp/) | [SKILL.md](omp/SKILL.md) | [32 Markdown task profiles](omp/agents/) | [18 procedures](omp/frameworks/) |
+| [DeepSeek Harness](deepseek/) | [SKILL.md](deepseek/SKILL.md) | [32 fixed-persona profiles](deepseek/agents/) | [18 procedures](deepseek/frameworks/) |
+| [Hermes Agent](hermes/) | [SKILL.md](hermes/SKILL.md) | [32 private prompts](hermes/agents/) | [18 procedures](hermes/frameworks/) |
+| [Grok Build](grok/) | [SKILL.md](grok/SKILL.md) | [32 private prompts](grok/agents/) | [18 procedures](grok/frameworks/) |
+| [Reasonix](reasonix/) | [SKILL.md](reasonix/SKILL.md) | [32 manual subagent profiles](reasonix/skills/) | [18 procedures](reasonix/frameworks/) |
 
-Installer floors and audited releases are tracked in the [support matrix](../docs/faq/which-coding-agents-are-supported.md). Every shipped package above is pinned by a runtime manifest and generated from the same 25-persona, 18-framework contract.
+The public installation surface is one manual launcher per selected harness. Full entry instructions and all internal profiles belong in the private bundle. Loading source text or naming a role does not create or resume a run.
 
-## The five levels
+```text
+autoprompt activate PROVIDER --target <absolute-project> -- <request>
+```
 
-L0 is the active provider skill. L1 to L4 are named custom agents generated from the shared persona contract.
+## Work structures
 
-| Level | Roles | Source |
-|---|---|---|
-| L0 | Conductor | [Claude](claude/SKILL.md), [Codex](codex/SKILL.md), [OpenCode](opencode/SKILL.md), [Kilo](kilo/SKILL.md), [VS Code](vscode/SKILL.md), [Prime Agent](prime/skills/autoprompt/SKILL.md), [Oh My Pi](omp/SKILL.md), [DeepSeek Harness](deepseek/SKILL.md), [Reasonix](reasonix/SKILL.md) |
-| L1 | Scope, feature, and sweep coordinators | [`ap-scope-coordinator`](contracts/personas/ap-scope-coordinator.md), [`ap-feature-coordinator`](contracts/personas/ap-feature-coordinator.md), [`ap-sweep-coordinator`](contracts/personas/ap-sweep-coordinator.md) |
-| L2 | Optional manager for multi-lane work | [`ap-manager`](contracts/personas/ap-manager.md) |
-| L3 | Scope, research, planning, build, review, verification, and sweep executors | [Persona directory](contracts/personas/) |
-| L4 | Fresh verification, jury, goal check, arbitration, recording, and cleanup leaves | [Persona directory](contracts/personas/) |
+There is no default route. DIRECT and LIGHT do not require coordinators or managers. ROADMAP can use the run coordinator and work-group manager only when the canonical policy admits them. The run owner retains route selection and the final response; the controller enforces physical launches, assignment ownership, independent checking, and recovery.
 
-All nine public packages use the same logical roles, gates, and recursive level links.
+The nine additional native projections route every permitted child assignment through the controller. Their read-only profiles omit write and shell tools. Executable checking requires a separately admitted isolated transport. Leaves and compatibility aliases cannot dispatch; aliases remain read-only redirects and cannot take new v2 work.
+
+Native visibility flags, tool lists, prompt rules, installation checks, and fixture tests do not establish full runtime conformance. Missing required capability evidence must block admission without an unrestricted native fallback. See the [provider capability contract](contracts/providers.json) and each package's README for the source/runtime boundary.
+
+The generation check validates the final translated route examples and every framework check graph against the canonical hashes. Native YAML serialization is tested separately, including DeepSeek's embedded fixed personas. OMP profiles disable prewalk and advisor handoffs and omit the task tool: its parser can infer unrestricted spawning from that tool even when an empty child list is present.
 
 ## Source of truth
 
-- [`contracts/autoprompt.contract.json`](contracts/autoprompt.contract.json) defines the exact persona and framework inventory.
-- [`contracts/personas`](contracts/personas/) contains all 25 canonical role prompts.
-- [`contracts/frameworks`](contracts/frameworks/) contains all 18 gate workflows.
-- [`scripts/generate-provider-contracts.cjs`](../scripts/generate-provider-contracts.cjs) produces the provider-native files.
-- [`manifests`](manifests/) pins every installable runtime file by SHA-256.
-
-Check the published source with:
+- [Product](contracts/product.json), [routes](contracts/routes.json), [state machine](contracts/state-machine.json), [roles](contracts/roles.json), [checks](contracts/gates.json), [providers](contracts/providers.json), and [plain language](contracts/plain-language.json) are the seven authoritative v2 contracts.
+- [Physical role policy](codex/agents/role-policy.json) defines exact parent/child edges, modes, schemas, resources, and compatibility restrictions.
+- [Package registry](../scripts/install/codex-package-registry.json) locates canonical instruction sources and framework route mappings.
+- [Generator](../scripts/generate-provider-contracts.cjs) exposes `renderCodexOutputs()`, `renderReasonixOutputs()`, and `renderHarnessV2Outputs(provider, root)`. Normal generation opens all eleven projections without promoting runtime admission.
+- [Manifests](manifests/) pin installable payloads and are regenerated separately after source changes.
 
 ```text
 node scripts/generate-provider-contracts.cjs --check
+node scripts/generate-provider-contracts.cjs --opencode-only --check
+node --test tests/source/provider-generation.test.cjs tests/source/harness-v2-generation.test.cjs
 node scripts/runtime-payload.cjs --check
 ```
-
-Use the [root installer](../README.md#install) to install the complete package.
