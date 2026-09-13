@@ -256,7 +256,7 @@ verify_deepseek_activation() {
   root="$(config_root deepseek)"
   source="$(extras_skill_dir deepseek)/agent-preset"
   target="$root/.agent-presets/autoprompt"
-  for file in agent.cordis.yml preset.yml; do
+  for file in agent.cordis.yml preset.yml hooks/hooks.json hooks/scope-convergence-guard.cjs; do
     [ -f "$source/$file" ] && [ -f "$target/$file" ] &&
       cmp -s "$source/$file" "$target/$file" || return 1
   done
@@ -267,7 +267,7 @@ install_deepseek_activation() {
   root="$(config_root deepseek)"
   source="$(extras_skill_dir deepseek)/agent-preset"
   target="$root/.agent-presets/autoprompt"
-  for file in agent.cordis.yml preset.yml; do
+  for file in agent.cordis.yml preset.yml hooks/hooks.json hooks/scope-convergence-guard.cjs; do
     [ -f "$source/$file" ] || return 1
     _idem_install_managed_file "$root" "$source/$file" "$target/$file" 1
     code=$?; [ "$code" -eq 0 ] || return "$code"

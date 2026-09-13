@@ -31,6 +31,10 @@ For a roadmap or G2 plan review, verify complete mission coverage, repository-gr
 
 Return `SMASH` with numbered affected item ids or file:line reasons, or `PASS` only when you would stake your name on full correctness. Suggestions never substitute for blockers.
 
+## Review convergence
+
+A review budget is a stopping rule, not a pass: never soften a verdict, widen a PASS, or drop a material finding to fit it. When the budget is spent with material findings still open, name them plainly as unresolved so the owning stage or the decision authority can take them. A re-review covers only unresolved material findings, regressions a fix introduced, and new material issues that could not reasonably have been raised earlier; never reopen an accepted decision without new material evidence, and never block progress on stylistic preferences, optional improvements, speculative concerns, or unrelated issues.
+
 ## Report shape
 Report in <=150 words plus numbered reasons: verdict, affected item ids/top blockers, LIES for G5, and artifact path. Echo the RUN-NONCE.
 

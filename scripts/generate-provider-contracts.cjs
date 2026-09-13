@@ -345,15 +345,24 @@ function deepSeekRoleTool(persona, source) {
 }
 deepSeekRoleTool.personaIds = []
 
+// ADR-0001 scope-convergence guard. Layout-probing `!!js` expressions: the payload keeps
+// hooks/ under agent-preset/, the installed preset flattens agent-preset/* up one level,
+// and the installed patch sits two levels below the preset - so probe the candidates
+// instead of assuming one layout. Neither expression contains a double quote, so each sits
+// inside its YAML double-quoted scalar unchanged.
+const HOOKS_FILE_EXPR = `(()=>{const u=process.getBuiltinModule('node:url'),f=process.getBuiltinModule('node:fs');for(const r of ['agent-preset/hooks/hooks.json','../../hooks/hooks.json','hooks/hooks.json']){const q=u.fileURLToPath(new URL(r,baseUrl));if(f.existsSync(q))return q}return u.fileURLToPath(new URL('agent-preset/hooks/hooks.json',baseUrl))})()`
+const HOOKS_DIR_EXPR = `(()=>{const u=process.getBuiltinModule('node:url'),f=process.getBuiltinModule('node:fs'),p=process.getBuiltinModule('node:path');for(const r of ['agent-preset/hooks','../../hooks','hooks']){const d=u.fileURLToPath(new URL(r,baseUrl));if(f.existsSync(p.join(d,'hooks.json'))&&f.existsSync(p.join(d,'scope-convergence-guard.cjs')))return d}return u.fileURLToPath(new URL('agent-preset/hooks',baseUrl))})()`
+
 function renderDeepSeekPreset(personas, sources) {
   deepSeekRoleTool.personaIds = personas.map(persona => persona.id.replaceAll('-', '_'))
   const base = [
-    '# Autoprompt agent preset for DeepSeek Harness 0.1.0-rc.7.',
+    '# Autoprompt agent preset for DeepSeek Harness 0.1.5-rc.1.',
     '- id: persona',
     "  name: '@deepseek-ai/dsh-persona'",
     '  config:',
-    '    text: >-',
-    '      You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.',
+    '    prefix: >-',
+    '      You are a coding agent powered by the {{model}} model.',
+    '    suffix: Your working directory is {{cwd}}.',
     '- id: agent-instructions',
     "  name: '@deepseek-ai/dsh-agent-instructions'",
     '  config:',
@@ -374,6 +383,9 @@ function renderDeepSeekPreset(personas, sources) {
     "  name: '@deepseek-ai/dsh-tool-jobs'",
     '- id: skill-filesystem',
     "  name: '@deepseek-ai/dsh-skill-filesystem'",
+    '  config:',
+    '    customSkillDirs:',
+    `      - !!js "process.getBuiltinModule('node:url').fileURLToPath(new URL('skills/', baseUrl))"`,
     '- id: tool-skill',
     "  name: '@deepseek-ai/dsh-tool-skill'",
     '- id: tool-goal',
@@ -393,6 +405,34 @@ function renderDeepSeekPreset(personas, sources) {
     '  config:',
     '    fetch: false',
     '    searchTimeoutMs: 60000',
+    '# Long recursive Autoprompt runs grow context fast, so carry the shipped standard',
+    '# compaction realm group. tokenMeter stays on the host plane, as in standard.',
+    '- id: compaction',
+    '  name: cordis:group',
+    '  group: true',
+    '  isolate:',
+    '    compaction: true',
+    '    toolResultPruner: true',
+    '  config:',
+    '    - id: compaction-basic',
+    "      name: '@deepseek-ai/dsh-compaction-basic'",
+    '',
+    '    - id: command-compact',
+    "      name: '@deepseek-ai/dsh-command-compact'",
+    '',
+    '    - id: tool-result-pruner',
+    "      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'",
+    '      config:',
+    '        thresholdChars: 8192',
+    '        headChars: 4096',
+    '        tailChars: 1024',
+    '# ADR-0001 scope-convergence guard. The expressions probe the candidate layouts rather',
+    '# than assuming one; see HOOKS_FILE_EXPR / HOOKS_DIR_EXPR above.',
+    '- id: hooks-scope-convergence',
+    "  name: '@deepseek-ai/dsh-hooks-claude-code'",
+    '  config:',
+    `    configPath: !!js "${HOOKS_FILE_EXPR}"`,
+    `    pluginRoot: !!js "${HOOKS_DIR_EXPR}"`,
   ]
   for (let index = 0; index < personas.length; index += 1) {
     base.push(deepSeekRoleTool(personas[index], sources[index]))
@@ -405,7 +445,16 @@ function renderDeepSeekHeadlessPatch(personas, sources) {
   const entries = personas.map((persona, index) => (
     indentBlock(deepSeekRoleTool(persona, sources[index]), 2)
   ))
-  return `# Load with: dsh --profile headless --patch <this-file> <task>\n- insert:\n${entries.join('\n')}\n`
+  const hooksRow = [
+    '  # ADR-0001 scope-convergence guard. Same layout-probing expressions as the preset: this',
+    '  # patch may sit beside agent-preset/ (payload) or two levels below the preset (installed).',
+    '  - id: hooks-scope-convergence',
+    "    name: '@deepseek-ai/dsh-hooks-claude-code'",
+    '    config:',
+    `      configPath: !!js "${HOOKS_FILE_EXPR}"`,
+    `      pluginRoot: !!js "${HOOKS_DIR_EXPR}"`,
+  ].join('\n')
+  return `# Load with: dsh --profile headless --patch <this-file> <task>\n- insert:\n${hooksRow}\n${entries.join('\n')}\n`
 }
 
 const INHERITED_PROVIDER_TEXT = Object.freeze({
@@ -420,7 +469,7 @@ const INHERITED_PROVIDER_TEXT = Object.freeze({
   deepseek: Object.freeze({
     display: 'DeepSeek Harness',
     invocation: '/autoprompt <mission>',
-    version: '0.1.0-rc.7',
+    version: '0.1.5-rc.1',
     mechanism: 'fixed-persona `dsh-tool-subagent` instances in the Autoprompt agent preset',
     activation: 'Select the Autoprompt agent preset for Web sessions. For headless runs, pass the installed `headless.patch.yml` with `--patch`. Each role tool denies non-allowlisted role tools and uses a depth ceiling of four.',
     frontmatter: ['user-invocable: true', 'disable-model-invocation: true'],

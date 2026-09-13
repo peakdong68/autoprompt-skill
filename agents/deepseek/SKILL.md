@@ -36,9 +36,13 @@ Without a trusted attestation, the first useful roadmap author proves RUN, READ,
 
 Scope produces one canonical `ROADMAP.md`.
 
-- **bounded:** roadmap author, then independent reviewer and blind fresh verifier concurrently - **3 agents, 2 rounds**, target under one minute;
-- **multi-surface:** **exactly 5 agents, 3 rounds**, target under five minutes; retain the complete author roadmap and evidence, add exactly two complementary scouts, then concurrent reviewer plus fresh verifier without a redundant synthesis dispatch;
+- **bounded:** roadmap author, then independent reviewer and blind fresh verifier concurrently - **3 agents on a clean pass**;
+- **multi-surface:** **5 agents on a clean pass**; retain the complete author roadmap and evidence, add exactly two complementary scouts, then concurrent reviewer plus fresh verifier without a redundant synthesis dispatch;
 - **unusually-large:** may exceed the 6-agent ordinary budget only with a concrete recorded escalation reason.
+
+Rounds are not preset. Convergence is bounded by **one complete repair cycle** - a repair round plus its re-verification - and never by a fixed round count. The assurance round - independent review plus blind fresh verification - is what makes a roadmap APPROVED; it is never dropped, merged, or deferred to fit that budget.
+
+The budget is a stopping rule, not a pass. If material findings remain once it is spent, stop autonomous review and return the unresolved item to the owning stage or the decision authority - reaching the limit never makes a roadmap APPROVED. While the budget lasts, a later round pursues only unresolved material findings, regressions its own fixes introduced, or new material issues that could not reasonably have been raised earlier; never reopen an accepted decision without new material evidence, and never block progress on stylistic preferences, optional improvements, speculative concerns, or unrelated issues.
 
 External research runs only when current external facts are required. On rejection, retain accepted evidence and repair only named items. Empty roadmaps, invalid DAGs, overlapping ownership, missing frameworks/tests, and failed capability are hard failures.
 

@@ -12,9 +12,13 @@ The category defines ownership, the tag changes how planning or verification is 
 
 There is no separate intake round trip on a new run. The first useful roadmap author proves RUN/READ/WRITE when no trusted launch attestation exists, inspects the repository, classifies scope, selects frameworks, and writes the executable `ROADMAP.md`.
 
-- **Bounded:** one roadmap author, then independent reviewer and blind fresh verifier concurrently: 3 agents, 2 rounds.
-- **Multi-surface:** retain the author's complete roadmap and evidence, run exactly two complementary scouts concurrently, then run reviewer and fresh verifier concurrently: exactly 5 agents, 3 rounds, with no redundant ordinary synthesis dispatch.
+- **Bounded:** one roadmap author, then independent reviewer and blind fresh verifier concurrently: 3 agents on a clean pass.
+- **Multi-surface:** retain the author's complete roadmap and evidence, run exactly two complementary scouts concurrently, then run reviewer and fresh verifier concurrently: 5 agents on a clean pass, with no redundant ordinary synthesis dispatch.
 - **Unusually large:** may exceed 6 agents only when `ROADMAP.md` records a concrete escalation reason.
+
+Rounds are not preset. Convergence is bounded by **one complete repair cycle** - a repair round plus its re-verification - and never by a fixed round count. The assurance round is what makes a roadmap APPROVED; it is never dropped, merged, or deferred to fit that budget.
+
+The budget is a stopping rule, not a pass. If material findings remain once it is spent, stop autonomous review and return the unresolved item to the owning stage or the decision authority - reaching the limit never makes a roadmap APPROVED. While the budget lasts, a later round pursues only unresolved material findings, regressions its own fixes introduced, or new material issues that could not reasonably have been raised earlier; never reopen an accepted decision without new material evidence, and never block progress on stylistic preferences, optional improvements, speculative concerns, or unrelated issues.
 
 The accounting covers useful scope workers. Runtime orchestration does not add dedicated preflight, intake, or scope-coordinator round trips.
 

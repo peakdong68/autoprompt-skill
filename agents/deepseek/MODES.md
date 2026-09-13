@@ -15,14 +15,28 @@ continues directly into repository inspection. Failure hard-stops before build.
 
 Scope produces one canonical, executable `ROADMAP.md`:
 
-- **bounded scope = 3 agents, 2 rounds**, target **under one minute**: roadmap
-  author, then concurrent independent reviewer and blind fresh verifier;
-- **multi-surface scope = exactly 5 agents, 3 rounds**, target **under five
-  minutes**: retain the complete author roadmap and evidence, add exactly two
-  complementary scouts, then run the reviewer and blind fresh verifier
-  concurrently without a redundant ordinary synthesis dispatch;
+- **bounded scope = 3 agents on a clean pass**: roadmap author, then concurrent
+  independent reviewer and blind fresh verifier;
+- **multi-surface scope = 5 agents on a clean pass**: retain the complete author
+  roadmap and evidence, add exactly two complementary scouts, then run the
+  reviewer and blind fresh verifier concurrently without a redundant ordinary
+  synthesis dispatch;
 - **unusually-large scope:** exceed the 6-agent ordinary scope budget only for a
   concrete reason recorded in `GATELOG.md`.
+
+Rounds are not preset. Convergence is bounded by **one complete repair cycle** - a
+repair round plus its re-verification - and never by a fixed round count. The
+assurance round is what makes a roadmap APPROVED; it is never dropped, merged, or
+deferred to fit that budget.
+
+The budget is a stopping rule, not a pass. If material findings remain once it is
+spent, stop autonomous review and return the unresolved item to the owning stage or
+the decision authority - reaching the limit never makes a roadmap APPROVED. While the
+budget lasts, a later round pursues only unresolved material findings, regressions its
+own fixes introduced, or new material issues that could not reasonably have been
+raised earlier; never reopen an accepted decision without new material evidence, and
+never block progress on stylistic preferences, optional improvements, speculative
+concerns, or unrelated issues.
 
 On rejection, preserve accepted evidence and repair only named defects. The
 approved roadmap owns scope, stable item ids, dependency edges, launch groups,

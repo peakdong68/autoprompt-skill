@@ -33,9 +33,13 @@ Every gate uses a fresh context and writes substantive evidence before reporting
 
 Scope produces one canonical `ROADMAP.md`.
 
-- **bounded:** one roadmap author, then an independent reviewer and blind fresh verifier concurrently - **3 agents, 2 rounds**;
-- **multi-surface:** **exactly 5 agents, 3 rounds**; retain the complete author roadmap and evidence, add exactly two complementary scouts, then concurrent independent reviewer and blind fresh verifier without a redundant ordinary synthesis dispatch;
+- **bounded:** one roadmap author, then an independent reviewer and blind fresh verifier concurrently - **3 agents on a clean pass**;
+- **multi-surface:** **5 agents on a clean pass**; retain the complete author roadmap and evidence, add exactly two complementary scouts, then concurrent independent reviewer and blind fresh verifier without a redundant ordinary synthesis dispatch;
 - **unusually-large:** exceed the 6-agent ordinary scope budget only with a concrete reason recorded in `GATELOG.md`.
+
+Rounds are not preset. Convergence is bounded by **one complete repair cycle** - a repair round plus its re-verification - and never by a fixed round count. The assurance round is what makes a roadmap APPROVED; it is never dropped, merged, or deferred to fit that budget.
+
+The budget is a stopping rule, not a pass. If material findings remain once it is spent, stop autonomous review and return the unresolved item to the owning stage or the decision authority - reaching the limit never makes a roadmap APPROVED. While the budget lasts, a later round pursues only unresolved material findings, regressions its own fixes introduced, or new material issues that could not reasonably have been raised earlier; never reopen an accepted decision without new material evidence, and never block progress on stylistic preferences, optional improvements, speculative concerns, or unrelated issues.
 
 External research runs only when current external facts are required. On rejection, retain accepted evidence and repair only named defects; do not restart accepted scope work.
 

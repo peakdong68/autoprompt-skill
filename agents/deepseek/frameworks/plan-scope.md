@@ -8,7 +8,9 @@ writes one executable `ROADMAP.md`. Goal: turn a mission into a dependency-order
 the WHOLE deliverable at 100%. Also owns pure documentation output
 (README/quickstart/onboarding). Owns no production code.
 
-GATE PATH: bounded scope uses exactly 3 agents, 2 rounds: AUTHOR → REVIEW + FRESH-VERIFY(default-FAIL) → DONE. Multi-surface scope uses exactly 5 agents, 3 rounds: AUTHOR → TWO SCOUTS(concurrent) → REVIEW + FRESH-VERIFY(concurrent) → DONE. Unusually-large scope may add themed scouts or synthesis only with a concrete recorded escalation reason.
+GATE PATH: bounded scope uses 3 agents on a clean pass: AUTHOR → REVIEW + FRESH-VERIFY(default-FAIL) → DONE. Multi-surface scope uses 5 agents on a clean pass: AUTHOR → TWO SCOUTS(concurrent) → REVIEW + FRESH-VERIFY(concurrent) → DONE. Rounds are not preset; convergence is bounded by one complete repair cycle - a repair round plus its re-verification - and never by a fixed round count, and the assurance round is never dropped, merged, or deferred to fit that budget. Unusually-large scope may add themed scouts or synthesis only with a concrete recorded escalation reason.
+
+The budget is a stopping rule, not a pass. If material findings remain once it is spent, stop autonomous review and return the unresolved item to the owning stage or the decision authority - reaching the limit never makes a roadmap APPROVED. While the budget lasts, a later round pursues only unresolved material findings, regressions its own fixes introduced, or new material issues that could not reasonably have been raised earlier; never reopen an accepted decision without new material evidence, and never block progress on stylistic preferences, optional improvements, speculative concerns, or unrelated issues.
 
 ## Layer flow
 - **You (L1):** dispatch the roadmap author first; dispatch no scout before the author

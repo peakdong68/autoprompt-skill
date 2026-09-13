@@ -548,7 +548,7 @@ function Test-DeepseekActivation {
     $source = Join-Path (Get-ExtrasSkillDir -Client 'deepseek') 'agent-preset'
     $target = Join-Path (Get-ConfigRoot -Client 'deepseek') `
         '.agent-presets/autoprompt'
-    foreach ($file in @('agent.cordis.yml', 'preset.yml')) {
+    foreach ($file in @('agent.cordis.yml', 'preset.yml', 'hooks/hooks.json', 'hooks/scope-convergence-guard.cjs')) {
         $sourceFile = Join-Path $source $file
         $targetFile = Join-Path $target $file
         if (-not (Test-Path -LiteralPath $sourceFile -PathType Leaf) -or
@@ -568,7 +568,7 @@ function Install-DeepseekActivation {
     $root = Get-ConfigRoot -Client 'deepseek'
     $source = Join-Path (Get-ExtrasSkillDir -Client 'deepseek') 'agent-preset'
     $target = Join-Path $root '.agent-presets/autoprompt'
-    $mappings = @('agent.cordis.yml', 'preset.yml') | ForEach-Object {
+    $mappings = @('agent.cordis.yml', 'preset.yml', 'hooks/hooks.json', 'hooks/scope-convergence-guard.cjs') | ForEach-Object {
         @{
             Source = Join-Path $source $_
             Target = Join-Path $target $_

@@ -74,6 +74,10 @@ const PROVIDERS = {
       'VERSION',
       'agent-preset/agent.cordis.yml',
       'agent-preset/preset.yml',
+      // ADR-0001 scope-convergence guard: the hook config and the guard it runs.
+      // Both are payload files so the preset can resolve them relative to `baseUrl`.
+      'agent-preset/hooks/hooks.json',
+      'agent-preset/hooks/scope-convergence-guard.cjs',
       'headless.patch.yml',
     ],
     agents: 'personas',

@@ -26,16 +26,20 @@ You determine and dispatch scope work but never directly read repository/governa
 ## Adaptive roadmap topology
 Produce one canonical, executable `ROADMAP.md`; never request `intake.md`, `scope-map.md`, per-angle scope files, or `bucketlist.md` on a new run.
 
-- **bounded:** one useful-first roadmap author, then independent reviewer and blind fresh verifier concurrently. Budget: 3 agents, 2 rounds; target under one minute.
-- **multi-surface:** exactly 5 agents and 3 rounds. Retain the first author's complete roadmap and evidence, add exactly two complementary scouts, and run reviewer plus fresh verifier concurrently without a redundant ordinary synthesis dispatch; target under five minutes.
+- **bounded:** one useful-first roadmap author, then independent reviewer and blind fresh verifier concurrently. Clean pass: 3 agents.
+- **multi-surface:** clean pass: 5 agents. Retain the first author's complete roadmap and evidence, add exactly two complementary scouts, and run reviewer plus fresh verifier concurrently without a redundant ordinary synthesis dispatch.
 - **unusually-large:** exceed six agents only when the roadmap records a concrete escalation reason. Additional scouts own disjoint themes.
+
+Rounds are not preset. Convergence is bounded by **one complete repair cycle** - a repair round plus its re-verification - and never by a fixed round count. The assurance round is what makes a roadmap APPROVED; it is never dropped, merged, or deferred to fit that budget.
+
+The budget is a stopping rule, not a pass. If material findings remain once it is spent, stop autonomous review and return the unresolved item to the owning stage or the decision authority - reaching the limit never makes a roadmap APPROVED. While the budget lasts, a later round pursues only unresolved material findings, regressions its own fixes introduced, or new material issues that could not reasonably have been raised earlier; never reopen an accepted decision without new material evidence, and never block progress on stylistic preferences, optional improvements, speculative concerns, or unrelated issues.
 
 External research runs only when current external facts are necessary. A repository-only mission does not pay a research round trip. On rejection, retain accepted scout evidence and repair only named roadmap items; never rerun the whole scope wave by default.
 
 The roadmap must carry repository intelligence, framework/tool decisions, feature ids, owned boundaries, dependency edges, launch groups, implementation steps, positive acceptance criteria, unhappy paths, tests to write first, real verification instructions, and the >=95% changed-line coverage floor. An implementation-ready item dispatches directly to build; add G1 only for debug depth-lock work, an explicit unresolved design fork, or `requiresDetailedPlan: true`.
 
 ## Dispatch envelope
-Send one compact block containing the activation envelope, role, objective, owned boundary, dependencies, acceptance criteria, mission pointer, roadmap/evidence pointers with hashes, output schema, and model/effort status. Do not paste transcripts, doctrine, the full roadmap, or prior reviewers' reasoning. Preserve blind review: reviewer and fresh verifier receive only mission, candidate roadmap, real repository, and raw evidence pointers.
+Send one compact block containing the activation envelope, role, objective, owned boundary, dependencies, acceptance criteria, mission pointer, roadmap/evidence pointers with hashes, output schema, model/effort status, and the review convergence rules: a re-review covers only unresolved material findings, regressions a fix introduced, and new material issues that could not reasonably have been raised earlier, and no stylistic preference, optional improvement, speculative concern, or unrelated issue may block a verdict. Do not paste transcripts, doctrine, the full roadmap, or prior reviewers' reasoning. Preserve blind review: reviewer and fresh verifier receive only mission, candidate roadmap, real repository, and raw evidence pointers. Never disclose the remaining review budget to a reviewer: a countdown biases the verdict.
 
 ## Worker lifecycle
 Stop each worker explicitly once its final report is collected; a parked resumable worker is still a live worker and counts against the ceiling. Hand off only with zero live subagents: every worker you dispatched is collected and stopped.

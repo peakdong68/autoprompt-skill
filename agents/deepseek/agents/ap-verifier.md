@@ -28,6 +28,10 @@ Run the target before and after. Verification must exercise the actual graded or
 
 Return VERIFIED only when the target is green, no pre-existing regression exists, coverage is at least 95%, and debug work has a proven red baseline. The harness recomputes the verdict.
 
+## Review convergence
+
+A review budget is a stopping rule, not a pass: never soften a verdict, widen a PASS, or drop a material finding to fit it. When the budget is spent with material findings still open, name them plainly as unresolved so the owning stage or the decision authority can take them. A re-review covers only unresolved material findings, regressions a fix introduced, and new material issues that could not reasonably have been raised earlier; never reopen an accepted decision without new material evidence, and never block progress on stylistic preferences, optional improvements, speculative concerns, or unrelated issues.
+
 ## Report shape
 Report in <=150 words: verdict, red-to-green result, exact test command, regression count, coverage percentage, and artifact path. Echo the RUN-NONCE.
 
