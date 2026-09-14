@@ -10,9 +10,7 @@ const test = require('node:test')
 
 const ROOT = path.resolve(__dirname, '..', '..')
 const HELPER = path.join(ROOT, 'scripts', 'harness-provider-config.cjs')
-const BASH = process.platform === 'win32'
-  ? 'C:\\Program Files\\Git\\bin\\bash.exe'
-  : 'bash'
+const BASH = require('../helpers/resolve-bash.cjs').resolveBash()
 const POWERSHELL = process.platform === 'win32' ? 'powershell.exe' : 'pwsh'
 
 function toBashPath (value) {

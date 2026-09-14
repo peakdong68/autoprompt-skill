@@ -1,0 +1,13 @@
+{
+  "sourceCommit": "163c19c12c1c5881f6dfab7467e272545cf22692",
+  "files": {
+    "agents/claude/SKILL.md": "4debfd8573864436c18698e36fddb9db5f82938ef8adfbbbf694f09a2677caa8",
+    "agents/claude/agents/ap-manager.md": "9d996efcf1202bfa06691d07a3ffa987788049660beb1bafeda16d8db5c95afa",
+    "agents/opencode/agents/ap-manager.md": "7188fe6d4161af57bfa05853e253c7e6fcc5c4e6f69cc420e0f8a797572026d9",
+    "agents/kilo/agents/ap-manager.md": "7188fe6d4161af57bfa05853e253c7e6fcc5c4e6f69cc420e0f8a797572026d9",
+    "agents/omp/agents/ap-manager.md": "b0b551fb2a8124d78fdb5f050b2d01e3811640a24b5d65e0858956a7fb32e55e",
+    "agents/vscode/agents/ap-manager.agent.md": "27ec127155d150e8363cd881b29ac5d04a2f7bd6a6132ab2bfdbd385abe60928",
+    "agents/prime/personas/ap-manager.md": "b88f3a6b39a6c6a72ca6e0793c99c8d6e1a67f15ce769d5d5e96c072ec93cb3f",
+    "agents/deepseek/agent-preset/agent.cordis.yml": "f42da9ddbece6c9451a4969fd10a8787f11b9b2a724f2eff7d5a4c1f30d3a86a"
+  }
+}

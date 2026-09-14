@@ -90,8 +90,8 @@ function escapeRegExp(value) {
 }
 
 function nextPatchVersion(version) {
-  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(String(version))
-  assert.ok(match, `expected simple semver, got ${version}`)
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.exec(String(version))
+  assert.ok(match, `expected semver, got ${version}`)
   return `${match[1]}.${match[2]}.${Number(match[3]) + 1}`
 }
 
@@ -314,7 +314,7 @@ test('no arguments print help without probing or spawning', () => {
 })
 
 test('interactive no-argument launch numbers every install provider plus the custom guide option', () => {
-  const home = path.join('test home', 'person')
+  const home = path.resolve('test home', 'person')
   const codexHome = path.join(home, 'state', 'codex')
   const result = invoke([], {
     answers: ['2', 'yes'],
@@ -335,13 +335,13 @@ test('interactive no-argument launch numbers every install provider plus the cus
   for (const [index, provider] of PROVIDERS.entries()) {
     assert.match(result.stdout, new RegExp(`${index + 1}\\) ${provider.label}`))
   }
-  assert.match(result.stdout, /10\) Custom coding agent/)
-  assert.match(result.stdout, /Provider \[1-10, Esc\]: /)
+  assert.ok(result.stdout.includes(`${PROVIDERS.length + 1}) Custom coding agent`))
+  assert.ok(result.stdout.includes(`Provider [1-${PROVIDERS.length + 1}, Esc]: `))
   assert.deepEqual(
     PROVIDERS.map(provider => provider.id),
     [
       'claude', 'codex', 'opencode', 'kilo', 'vscode', 'prime',
-      'omp', 'deepseek', 'reasonix',
+      'omp', 'deepseek', 'hermes', 'grok', 'reasonix',
     ],
   )
   assert.equal(PROVIDERS.some(provider => provider.id === 'vibe'), false)
@@ -395,8 +395,13 @@ test('interactive launch offers a newer CLI release before provider selection', 
   assert.equal(result.calls[1].options.env.AUTOPROMPT_UPDATED_HANDOFF, '1')
 })
 
-test('interactive launch auto-updates a packaged install when GitHub main differs even if semver does not', () => {
+test('interactive launch auto-updates an opted-in GitHub install when its revision changes', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-github-channel-'))
+  writeJson(path.join(home, '.autoprompt', 'cli-update.json'), {
+    installedGitHubRevision: 'abcdefabcdefabcdefabcdefabcdefabcdefabcd',
+  })
   const result = invoke([], {
+    env: { HOME: home },
     checkLatestGitHubRevision: () => '0123456789abcdef0123456789abcdef01234567',
     checkLatestVersion: () => PACKAGE_VERSION,
     interactive: true,
@@ -423,6 +428,9 @@ test('interactive launch auto-updates a packaged install when GitHub main differ
 test('successful startup update records the GitHub revision and does not reinstall it next launch', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-update-state-'))
   const env = { AUTOPROMPT_CLI_TEST: '1', HOME: home }
+  writeJson(path.join(home, '.autoprompt', 'cli-update.json'), {
+    installedGitHubRevision: 'abcdefabcdefabcdefabcdefabcdefabcdefabcd',
+  })
   const revision = '0123456789abcdef0123456789abcdef01234567'
   const packageRoot = path.join(
     'C:',
@@ -572,7 +580,12 @@ test('GitHub revision discovery falls back to authenticated gh for a private rep
 })
 
 test('interactive launch offers a GitHub main build when the version stays the same', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-github-channel-'))
+  writeJson(path.join(home, '.autoprompt', 'cli-update.json'), {
+    installedGitHubRevision: '0123456789abcdef0123456789abcdef01234567',
+  })
   const result = invoke([], {
+    env: { HOME: home },
     checkLatestGitHubRevision: () => 'abcdefabcdefabcdefabcdefabcdefabcdefabcd',
     interactive: true,
     packageRoot: path.join('C:', 'Users', 'person', 'AppData', 'Roaming', 'npm', 'node_modules', 'autoprompt-skill'),
@@ -623,19 +636,31 @@ test('updated installer handoff forwards the refreshed CLI exit status', () => {
   assert.doesNotMatch(result.stdout, /Pick a coding agent:/)
 })
 
-test('interactive update resolver refreshes a mismatched installed version', () => {
+test('interactive update resolver preserves a build newer than the release even when main differs', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-cli-state-'))
   try {
     const resolved = resolveInteractiveUpdateStatus({
       env: { HOME: home },
       homeDirectory: home,
       packageRoot: path.join(home, 'node_modules', 'autoprompt-skill'),
-    }, '0.9.9', '')
-    assert.equal(resolved.action, 'registry-first')
-    assert.match(resolved.message, /does not match current release 0\.9\.9\. Updating\.\.\./)
+    }, '0.9.9', 'abcdefabcdefabcdefabcdefabcdefabcdefabcd')
+    assert.equal(resolved.action, 'none')
+    assert.match(resolved.message, /newer than release 0\.9\.9; keeping this build/)
   } finally {
     fs.rmSync(home, { recursive: true, force: true })
   }
+})
+
+test('a packed registry or local artifact does not silently switch to GitHub main', () => {
+  const result = invoke([], {
+    answers: ['\u001b'],
+    checkLatestGitHubRevision: () => 'abcdefabcdefabcdefabcdefabcdefabcdefabcd',
+    interactive: true,
+  })
+  assert.equal(result.status, 0)
+  assert.deepEqual(result.calls, [])
+  assert.match(result.stdout, /Pick a coding agent:/)
+  assert.doesNotMatch(result.stdout, /Updating/)
 })
 
 test('interactive launch from a repo checkout does not self-install a same-version GitHub build', () => {
@@ -679,7 +704,7 @@ test('interactive launch from a repo checkout does not self-install a newer regi
 
 test('interactive custom coding agent option exits safely with the compatibility guide URL', () => {
   const result = invoke([], {
-    answers: ['10'],
+    answers: [String(PROVIDERS.length + 1)],
     interactive: true,
   })
 
@@ -772,7 +797,7 @@ test('a raw Escape key closes provider selection without waiting for Enter', () 
 
 test('interactive strong custom-root match reuses the lifecycle installer through an isolated override', () => {
   const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-cli-opencode-root-'))
-  const originalEnv = { HOME: path.join('test home', 'person'), EXISTING: 'preserved' }
+  const originalEnv = { HOME: path.resolve('test home', 'person'), EXISTING: 'preserved' }
   const cwd = path.join('caller', 'working directory')
   const requested = path.join('custom root with spaces', 'opencode')
   const expectedRoot = path.resolve(cwd, requested)
@@ -803,13 +828,13 @@ test('interactive strong custom-root match reuses the lifecycle installer throug
   }
 })
 
-test('every supported provider has an unambiguous strong custom-root layout', () => {
+test('existing v1 providers have unambiguous legacy custom-root layouts', () => {
   const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-cli-provider-layouts-'))
   const compat = createProviderRootCompat(Object.fromEntries(
     PROVIDERS.map(provider => [provider.id, provider.label]),
   ))
   try {
-    for (const provider of PROVIDERS) {
+    for (const provider of PROVIDERS.filter(provider => !['hermes', 'grok'].includes(provider.id))) {
       const root = path.join(sandbox, provider.id)
       writeStrongCustomRoot(root, provider.id)
       const result = compat.inspect(root, provider.id)
@@ -825,23 +850,14 @@ test('every supported provider has an unambiguous strong custom-root layout', ()
   }
 })
 
-test('OMP custom-root evidence is the real invocable skill plus native agents, without README', () => {
+test('legacy OMP migration recognizes only a complete manual skill and 25-role layout', () => {
   const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-cli-omp-layout-'))
   const compat = createProviderRootCompat(Object.fromEntries(
     PROVIDERS.map(provider => [provider.id, provider.label]),
   ))
   try {
     const healthy = path.join(sandbox, 'healthy')
-    fs.mkdirSync(path.join(healthy, 'skills', 'autoprompt'), { recursive: true })
-    fs.cpSync(
-      path.join(ROOT, 'agents', 'omp', 'SKILL.md'),
-      path.join(healthy, 'skills', 'autoprompt', 'SKILL.md'),
-    )
-    fs.cpSync(
-      path.join(ROOT, 'agents', 'omp', 'agents'),
-      path.join(healthy, 'agents'),
-      { recursive: true },
-    )
+    writeStrongCustomRoot(healthy, 'omp')
 
     assert.equal(fs.existsSync(path.join(healthy, 'skills', 'autoprompt', 'README.md')), false)
     assert.deepEqual(compat.inspect(healthy, 'omp'), { status: 'accept' })
@@ -899,13 +915,13 @@ test('OMP custom-root evidence is the real invocable skill plus native agents, w
 test('interactive prompts reject invalid choices and closed input without mutating', () => {
   const retried = invoke([], {
     answers: ['0', 'codex', '5', 'maybe', 'Y'],
-    env: { HOME: path.join('test home', 'person') },
+    env: { HOME: path.resolve('test home', 'person') },
     interactive: true,
     platform: 'win32',
     responses: [{ status: 0 }],
   })
   assert.equal(retried.status, 0)
-  assert.match(retried.stdout, /Enter a number from 1 to 10\./)
+  assert.ok(retried.stdout.includes(`Enter a number from 1 to ${PROVIDERS.length + 1}.`))
   assert.match(retried.stdout, /Please answer Y or N\./)
   assert.equal(retried.calls[0].args.at(-1), 'vscode')
 
@@ -935,184 +951,72 @@ test('interactive prompts reject invalid choices and closed input without mutati
   )
 })
 
-test('provider install locations match default config roots and external VS Code settings', () => {
-  const home = path.join('sandbox', 'home')
-  const env = {
-    HOME: home,
-    CODEX_HOME: path.join('sandbox', 'codex state'),
-    PRIME_AGENT_CODING_AGENT_DIR: path.join('sandbox', 'prime state'),
-    XDG_CONFIG_HOME: path.join('sandbox', 'xdg state'),
+test('provider install locations use private v2 roots and never require external editor settings', () => {
+  const home = path.resolve('sandbox', 'home')
+  const workspace = path.join(home, 'project')
+  const env = { HOME: home, CODEX_HOME: path.join(home, 'codex state'),
+    PRIME_AGENT_CODING_AGENT_DIR: path.join(home, 'prime state'),
+    XDG_CONFIG_HOME: path.join(home, 'xdg state'), AUTOPROMPT_WORKSPACE_ROOT: workspace }
+  const expected = {
+    claude: path.join(home, '.claude'), codex: env.CODEX_HOME,
+    opencode: path.join(env.XDG_CONFIG_HOME, 'opencode'), kilo: path.join(env.XDG_CONFIG_HOME, 'kilo'),
+    vscode: path.join(home, '.copilot'), prime: env.PRIME_AGENT_CODING_AGENT_DIR, omp: path.join(home, '.omp', 'agent'),
+    deepseek: path.join(home, '.dsh'), hermes: path.join(home, '.hermes'), grok: path.join(home, '.grok'), reasonix: path.join(home, 'AppData', 'Roaming', 'reasonix'),
   }
-  assert.deepEqual(
-    Object.fromEntries(PROVIDERS.map(provider => [provider.id, providerInstallLocations(
-      provider.id,
-      { env, platform: 'win32' },
-    )])),
-    {
-      claude: { roots: [{ label: 'Install directory', path: path.join(home, '.claude') }] },
-      codex: { roots: [{ label: 'Install directory', path: env.CODEX_HOME }] },
-      opencode: {
-        roots: [{ label: 'Install directory', path: path.join(env.XDG_CONFIG_HOME, 'opencode') }],
-      },
-      kilo: {
-        roots: [
-          { label: 'Skill root', path: path.join(home, '.kilo') },
-          { label: 'Native root', path: path.join(env.XDG_CONFIG_HOME, 'kilo') },
-        ],
-      },
-      vscode: {
-        roots: [{ label: 'Install directory', path: path.join(home, '.copilot') }],
-        settings: path.join(home, 'AppData', 'Roaming', 'Code', 'User', 'settings.json'),
-      },
-      prime: {
-        roots: [{ label: 'Install directory', path: env.PRIME_AGENT_CODING_AGENT_DIR }],
-      },
-      omp: {
-        roots: [{ label: 'Install directory', path: path.join(home, '.omp', 'agent') }],
-      },
-      deepseek: {
-        roots: [{ label: 'Install directory', path: path.join(home, '.dsh') }],
-      },
-      reasonix: {
-        roots: [{
-          label: 'Install directory',
-          path: path.join(home, 'AppData', 'Roaming', 'reasonix'),
-        }],
-      },
-    },
-  )
-  assert.throws(
-    () => providerInstallLocations('unknown', { env, platform: 'win32' }),
-    /Unknown provider/,
-  )
-
-  const userProfile = path.join('fallback', 'profile')
-  assert.deepEqual(
-    providerInstallLocations('vscode', { env: { USERPROFILE: userProfile }, platform: 'darwin' }),
-    {
-      roots: [{ label: 'Install directory', path: path.join(userProfile, '.copilot') }],
-      settings: path.join(userProfile, 'Library', 'Application Support', 'Code', 'User', 'settings.json'),
-    },
-  )
-  assert.equal(
-    providerInstallLocations('vscode', {
-      env: { HOME: home, AUTOPROMPT_VSCODE_SETTINGS_PATH: path.join('custom', 'settings.json') },
-      platform: 'linux',
-    }).settings,
-    path.join('custom', 'settings.json'),
-  )
-  assert.equal(
-    providerInstallLocations('vscode', { env: { HOME: home }, platform: 'linux' }).settings,
-    path.join(home, '.config', 'Code', 'User', 'settings.json'),
-  )
-  assert.equal(
-    providerInstallLocations('claude', { env: {}, homeDirectory: home }).roots[0].path,
-    path.join(home, '.claude'),
-  )
-  assert.equal(
-    providerInstallLocations('prime', { env: { HOME: home }, platform: 'linux' }).roots[0].path,
-    path.join(home, '.prime', 'agent'),
-  )
-  for (const [provider, variable] of [
-    ['omp', 'PI_CODING_AGENT_DIR'],
-    ['deepseek', 'DSH_HOME'],
-    ['reasonix', 'REASONIX_HOME'],
-  ]) {
-    const override = path.join('custom', provider)
-    assert.equal(
-      providerInstallLocations(provider, {
-        env: { HOME: home, [variable]: override },
-        platform: 'linux',
-      }).roots[0].path,
-      override,
-      provider,
-    )
+  for (const provider of PROVIDERS) {
+    assert.deepEqual(providerInstallLocations(provider.id, { env, platform: 'win32' }),
+      { roots: [{ label: 'Install directory', path: expected[provider.id] }] }, provider.id)
   }
-  const ompOverride = path.join('custom', 'omp')
-  assert.deepEqual(
-    providerInstallLocations('omp', {
-      env: {
-        HOME: home,
-        PI_CODING_AGENT_DIR: ompOverride,
-        PI_CONFIG_DIR: '.omp-audit',
-      },
-      platform: 'linux',
-    }),
-    {
-      roots: [
-        { label: 'Install directory', path: ompOverride },
-        {
-          label: 'Native task-agent root',
-          path: path.join(home, '.omp-audit', 'agent'),
-        },
-      ],
-    },
-  )
-  assert.deepEqual(
-    providerInstallLocations('omp', {
-      env: {
-        HOME: home,
-        OMP_PROFILE: 'work',
-        PI_CODING_AGENT_DIR: ompOverride,
-        PI_CONFIG_DIR: '.omp-audit',
-        PI_PROFILE: 'legacy',
-      },
-      platform: 'linux',
-    }),
-    {
-      roots: [{
-        label: 'Install directory',
-        path: path.join(home, '.omp-audit', 'profiles', 'work', 'agent'),
-      }],
-    },
-  )
+  assert.throws(() => providerInstallLocations('unknown', { env }), /Unknown provider/)
+  for (const platform of ['linux', 'darwin', 'win32']) {
+    const location = providerInstallLocations('vscode', {
+      env: { HOME: home, AUTOPROMPT_VSCODE_SETTINGS_PATH: path.join(home, 'personal-settings.json') },
+      cwd: workspace, platform,
+    })
+    assert.deepEqual(location, { roots: [{ label: 'Install directory', path: path.join(home, '.copilot') }] })
+    assert.equal(location.settings, undefined)
+  }
+  assert.equal(providerInstallLocations('vscode', { env: { HOME: home }, cwd: 'relative-workspace' }).roots[0].path,
+    path.join(home, '.copilot'))
+  assert.equal(providerInstallLocations('claude', { env: {}, homeDirectory: home }).roots[0].path, path.join(home, '.claude'))
+  assert.equal(providerInstallLocations('claude', { env: { HOME: home, CLAUDE_CONFIG_DIR: workspace } }).roots[0].path, workspace)
+  for (const [provider, variable] of [['omp', 'PI_CODING_AGENT_DIR'], ['deepseek', 'DSH_HOME'], ['reasonix', 'REASONIX_HOME']]) {
+    const override = path.join(home, 'custom', provider)
+    assert.equal(providerInstallLocations(provider, { env: { HOME: home, [variable]: override } }).roots[0].path, override)
+  }
+  // Private v2 dispatch no longer exports OMP roles to a second native root.
+  const ompOverride = path.join(home, 'custom', 'omp')
+  assert.deepEqual(providerInstallLocations('omp', { env: { HOME: home, PI_CODING_AGENT_DIR: ompOverride, PI_CONFIG_DIR: '.omp-audit' } }),
+    { roots: [{ label: 'Install directory', path: ompOverride }] })
+  assert.deepEqual(providerInstallLocations('omp', { env: { HOME: home, OMP_PROFILE: 'work', PI_CODING_AGENT_DIR: ompOverride,
+    PI_CONFIG_DIR: '.omp-audit', PI_PROFILE: 'legacy' } }),
+    { roots: [{ label: 'Install directory', path: path.join(home, '.omp-audit', 'profiles', 'work', 'agent') }] })
   for (const invalidProfile of ['..', '../escape', 'UPPER', 'con', 'name.']) {
-    assert.throws(
-      () => providerInstallLocations('omp', {
-        env: { HOME: home, OMP_PROFILE: invalidProfile },
-        platform: 'linux',
-      }),
-      /Invalid OMP profile/,
-      invalidProfile,
-    )
+    assert.throws(() => providerInstallLocations('omp', { env: { HOME: home, OMP_PROFILE: invalidProfile } }), /Invalid OMP profile/)
   }
-  assert.equal(
-    providerInstallLocations('reasonix', { env: { HOME: home }, platform: 'linux' })
-      .roots[0].path,
-    path.join(home, '.reasonix'),
-  )
+  assert.equal(providerInstallLocations('reasonix', { env: { HOME: home }, platform: 'linux' }).roots[0].path, path.join(home, '.reasonix'))
 })
 
-test('interactive chooser explains Kilo split roots and external VS Code settings', () => {
-  const home = path.join('test home', 'person')
-  const xdg = path.join('test home', 'xdg')
-  const kilo = invoke([], {
-    answers: ['4', 'y'],
-    env: { HOME: home, XDG_CONFIG_HOME: xdg },
-    interactive: true,
-    platform: 'win32',
-    responses: [{ status: 0 }],
-  })
-  assert.match(kilo.stdout, /Detected paths:/)
-  assert.match(kilo.stdout, new RegExp(`Skill root: ${path.join(home, '.kilo').replaceAll('\\', '\\\\')}`))
-  assert.match(kilo.stdout, new RegExp(`Native root: ${path.join(xdg, 'kilo').replaceAll('\\', '\\\\')}`))
-
-  const vscode = invoke([], {
-    answers: ['5', 'y'],
-    env: { HOME: home, APPDATA: path.join(home, 'roaming') },
-    interactive: true,
-    platform: 'win32',
-    responses: [{ status: 0 }],
-  })
-  const settings = path.join(home, 'roaming', 'Code', 'User', 'settings.json')
-  assert.ok(vscode.stdout.includes(`VS Code settings: ${settings}`))
+test('interactive chooser displays the actual Kilo config root and VS Code personal skill root', () => {
+  const home = path.resolve('test home', 'person'), xdg = path.resolve('test home', 'xdg')
+  const kilo = invoke([], { answers: ['4', 'y'], env: { HOME: home, XDG_CONFIG_HOME: xdg },
+    interactive: true, platform: 'win32', responses: [{ status: 0 }] })
+  assert.equal(kilo.status, 0, kilo.stderr)
+  assert.ok(kilo.stdout.includes(`Detected path: ${path.join(xdg, 'kilo')}`))
+  assert.doesNotMatch(kilo.stdout, /Skill root:|Native root:/)
+  const workspace = path.join(home, 'workspace')
+  const vscode = invoke([], { answers: ['5', 'y'], env: { HOME: home, APPDATA: path.join(home, 'roaming') },
+    cwd: workspace, interactive: true, platform: 'win32', responses: [{ status: 0 }] })
+  assert.equal(vscode.status, 0, vscode.stderr)
+  assert.ok(vscode.stdout.includes(`Detected path: ${path.join(home, '.copilot')}`))
+  assert.doesNotMatch(vscode.stdout, /VS Code settings:/)
 })
 
 test('interactive chooser installs Prime through its detected native config root', () => {
-  const primeRoot = path.join('test home', 'prime agent root')
+  const primeRoot = path.resolve('test home', 'prime agent root')
   const result = invoke([], {
     answers: ['6', 'y'],
-    env: { HOME: path.join('test home', 'person'), PRIME_AGENT_CODING_AGENT_DIR: primeRoot },
+    env: { HOME: path.resolve('test home', 'person'), PRIME_AGENT_CODING_AGENT_DIR: primeRoot },
     interactive: true,
     platform: 'win32',
     responses: [{ status: 0 }],
@@ -1315,10 +1219,10 @@ test('interactive custom root warns on mismatched strong markers, re-prompts on 
   }
 })
 
-test('help stays lean and names only the nine public providers', () => {
+test('help stays lean and names only the eleven public providers', () => {
   assert.match(
     HELP_TEXT,
-    /Interactive providers: claude, codex, opencode, kilo, vscode, prime, omp, deepseek, reasonix\./,
+    /Interactive providers: claude, codex, opencode, kilo, vscode, prime, omp, deepseek, hermes, grok, reasonix\./,
   )
   assert.doesNotMatch(HELP_TEXT, /\b(?:vibe|cursor|dcode|roo|gemini|cline|goose)\b/i)
   assert.match(HELP_TEXT, /^  autoprompt update$/m)
@@ -1687,7 +1591,7 @@ test('Bash 4.3 is enforced with clear macOS guidance', () => {
     responses: [{ status: 0, stdout: '3.2' }],
   })
   assert.equal(old.status, 1)
-  assert.equal(old.calls.length, 1)
+  assert.deepEqual(old.calls.map(call => call.command), ['bash', '/opt/homebrew/bin/bash', '/usr/local/bin/bash'])
   assert.match(old.stderr, /Bash 4\.3 or newer/)
   assert.match(old.stderr, /macOS ships Bash 3\.2/)
   assert.match(old.stderr, /brew install bash/)
@@ -1700,6 +1604,25 @@ test('Bash 4.3 is enforced with clear macOS guidance', () => {
   assert.equal(absent.status, 1)
   assert.match(absent.stderr, /Bash 4\.3 or newer/)
 })
+
+for (const executable of ['/opt/homebrew/bin/bash', '/usr/local/bin/bash']) {
+  test(`macOS installer uses verified Homebrew Bash at ${executable} without changing PATH`, () => {
+    const responses = [{ status: 0, stdout: '3.2' }]
+    if (executable.startsWith('/usr/local/')) responses.push({ error: { code: 'ENOENT' }, status: null })
+    responses.push({ status: 0, stdout: '5.3' }, { status: 0 })
+    const result = invoke(['install', 'opencode', '--root', '/Users/example/provider root'], {
+      platform: 'darwin', responses,
+    })
+    assert.equal(result.status, 0, result.stderr)
+    const launch = result.calls.at(-1)
+    assert.equal(launch.command, executable)
+    assert.equal(launch.options.shell, false)
+    assert.equal(launch.options.env.PATH, result.env.PATH)
+    assert.equal(launch.options.env.AUTOPROMPT_INSTALL_ROOT, '/Users/example/provider root')
+    assert.ok(launch.args[0].endsWith('install.sh'))
+    assert.equal(launch.args[1], 'opencode')
+  })
+}
 
 test('numeric child exits are forwarded and CLI-owned failures use 1 or 2', () => {
   for (const status of [0, 1, 2, 3, 77]) {
@@ -1975,4 +1898,65 @@ test('Escape returns to provider selection, then exits the interactive uninstall
   assert.match(result.stdout, /Back to provider selection\./)
   assert.match(result.stdout, /Autoprompt uninstaller closed\./)
   assert.deepEqual(result.calls, [])
+})
+
+test('runtime setup requires one provider and explicit unambiguous physical-path arguments', () => {
+  const root = path.resolve(os.tmpdir(), 'runtime setup root')
+  const python = path.resolve(os.tmpdir(), 'python runtime', 'python3')
+  for (const provider of ['codex', 'claude', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek', 'reasonix', 'hermes', 'grok']) {
+    assert.deepEqual(parseArgs(['runtime', 'setup', provider, '--root', root, '--python', python]),
+      { command: 'runtime-setup', provider, root, python })
+    assert.deepEqual(parseArgs(['runtime', 'setup', provider, '--refresh', '--root', root, '--python', python]),
+      { command: 'runtime-setup', provider, root, python, refresh: true })
+  }
+  for (const args of [
+    ['runtime'], ['runtime', 'setup', 'all', '--root', root, '--python', python],
+    ['runtime', 'setup', 'codex', '--root', root],
+    ['runtime', 'setup', 'codex', '--root', root, '--python', 'relative'],
+    ['runtime', 'setup', 'codex', '--root', root, '--python', python, '--python', python],
+    ['runtime', 'setup', 'codex', '--root', root, '--python', python, '--unsafe', 'yes'],
+    ['runtime', 'setup', 'codex', '--root', root, '--python', python, '--refresh', '--refresh'],
+  ]) assert.throws(() => parseArgs(args), { code: 'AUTOPROMPT_USAGE' })
+})
+
+test('runtime VM commands bind explicit toolchains and preserve command argument boundaries', () => {
+  const root = path.resolve(os.tmpdir(), 'vm private state')
+  const target = path.resolve(os.tmpdir(), 'project with spaces')
+  const limactl = path.resolve(os.tmpdir(), 'lima', 'bin', 'limactl')
+  const archive = path.resolve(os.tmpdir(), 'current package.tgz')
+  const connection = path.resolve(os.tmpdir(), 'private', 'codex-connection.json')
+  const credential = path.resolve(os.tmpdir(), 'private', 'credential.json')
+  const toolchain = path.resolve(os.tmpdir(), 'pinned', 'node-v22.23.2-linux-x64')
+  const native = path.resolve(os.tmpdir(), 'native', 'codex')
+  const qemuRoot = path.resolve(os.tmpdir(), 'qemu')
+  const endpoint = 'https://gateway.example.invalid/v1'
+  const setup = ['runtime', 'vm', 'setup', '--root', root, '--target', target,
+    '--provider', 'codex', '--endpoint', endpoint, '--connection', connection, '--credential', credential,
+    '--toolchain', toolchain, '--native', native, '--lima', limactl, '--archive', archive,
+    '--vm-type', 'qemu', '--qemu-root', qemuRoot, '--arch', 'x86_64']
+  assert.deepEqual(parseArgs(setup), { command: 'runtime-vm', action: 'setup', root, target,
+    provider: 'codex', endpoint, connection, credential, toolchain, native, limactl, archive,
+    vmType: 'qemu', qemuRoot, arch: 'x86_64' })
+  assert.deepEqual(parseArgs([...setup, '--resume']), { ...parseArgs(setup), resume: true })
+  assert.deepEqual(parseArgs(['runtime', 'vm', 'status', '--root', root]), { command: 'runtime-vm', action: 'status', root })
+  const argv = ['configure', 'codex', '--model-map', 'literal ; $(no-shell)']
+  assert.deepEqual(parseArgs(['runtime', 'vm', 'exec', '--root', root, '--', ...argv]), { command: 'runtime-vm', action: 'exec', root, argv })
+  const requestId = '1234567890abcdef'.repeat(2)
+  assert.deepEqual(parseArgs(['runtime', 'vm', 'exec', '--root', root, '--request-id', requestId, '--', ...argv]), { command: 'runtime-vm', action: 'exec', root, requestId, argv })
+  assert.deepEqual(parseArgs(['runtime', 'vm', 'status', '--request-id', requestId, '--root', root]), { command: 'runtime-vm', action: 'status', root, requestId })
+  for (const args of [
+    ['runtime', 'vm'], ['runtime', 'vm', 'status'],
+    ['runtime', 'vm', 'exec', '--root', root],
+    ['runtime', 'vm', 'exec', '--root', root, '--'],
+    ['runtime', 'vm', 'status', '--root', root, '--target', target],
+    ['runtime', 'vm', 'status', '--root', root, '--request-id', 'unknown'],
+    ['runtime', 'vm', 'status', '--root', root, '--request-id', requestId, '--request-id', requestId],
+    [...setup, '--request-id', requestId],
+    [...setup, '--root', root],
+    [...setup, '--resume', '--resume'],
+    setup.filter(argument => argument !== '--qemu-root' && argument !== qemuRoot),
+    setup.filter(argument => argument !== '--provider' && argument !== 'codex'),
+    setup.map(arg => arg === 'qemu' ? 'vz' : arg),
+    setup.map(arg => arg === target ? '../relative' : arg),
+  ]) assert.throws(() => parseArgs(args), { code: 'AUTOPROMPT_USAGE' })
 })

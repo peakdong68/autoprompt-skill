@@ -1,0 +1,208 @@
+'use strict'
+// Executes only receipt-bound, named actual-native cases.  Cases sharing a
+// source run once as an anchored TAP selection, then each exact named result
+// is checked and committed to its own immutable observation artifact.  A TAP
+// aggregate therefore cannot stand in for a capability result.
+const cp = require('node:child_process'), crypto = require('node:crypto'), fs = require('node:fs'), path = require('node:path')
+const { ProcessOwner, createPlatformProcessAdapter, prepareProcessLaunchEnvironment } = require('../agents/codex/workflow/process-owner.js')
+const hash = value => crypto.createHash('sha256').update(value).digest('hex')
+const escape = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const keys = Object.freeze({ claude:'AUTOPROMPT_CLAUDE_TEST_CLI',opencode:'AUTOPROMPT_OPENCODE_TEST_CLI',kilo:'AUTOPROMPT_KILO_TEST_CLI',prime:'AUTOPROMPT_PRIME_TEST_CLI',omp:'AUTOPROMPT_OMP_TEST_CLI',deepseek:'AUTOPROMPT_DEEPSEEK_TEST_CLI',vscode:'AUTOPROMPT_VSCODE_TEST_CLI',hermes:'AUTOPROMPT_HERMES_TEST_CLI',grok:'AUTOPROMPT_GROK_TEST_CLI',reasonix:'AUTOPROMPT_REASONIX_TEST_CLI' })
+function fail(code, message) { const error = new Error(message); error.code = code; throw error }
+function regular(file) { const stat = fs.lstatSync(file); if (!stat.isFile() || stat.isSymbolicLink()) fail('LOCAL_CANARY_INVALID', 'canary artifact is not regular'); return fs.readFileSync(file) }
+function closedEnvironment(input = {}, provider, root) {
+  const env = {}
+  for (const key of ['PATH','SystemRoot','WINDIR','COMSPEC','PATHEXT','LANG','LC_ALL','TZ','TERM','SSL_CERT_FILE','SSL_CERT_DIR','NODE_EXTRA_CA_CERTS']) {
+    if (typeof input[key] === 'string') env[key] = input[key]
+  }
+  if (typeof root === 'string') {
+    const home = path.join(root, 'outer-home'), tmp = path.join(root, 'outer-tmp')
+    for (const directory of [home, tmp, path.join(home, 'config'), path.join(home, 'data'), path.join(home, 'state'), path.join(home, 'cache')]) fs.mkdirSync(directory, { recursive: true, mode: 0o700 })
+    Object.assign(env, { HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: path.join(home, 'config'), XDG_DATA_HOME: path.join(home, 'data'), XDG_STATE_HOME: path.join(home, 'state'), XDG_CACHE_HOME: path.join(home, 'cache'), TMPDIR: tmp, TMP: tmp, TEMP: tmp })
+  }
+  if (provider === 'vscode') {
+    if (typeof input.DISPLAY === 'string' && /^:[0-9]+(?:\.[0-9]+)?$/.test(input.DISPLAY)) env.DISPLAY = input.DISPLAY
+    if (typeof input.WAYLAND_DISPLAY === 'string' && /^[A-Za-z0-9_.-]{1,128}$/.test(input.WAYLAND_DISPLAY)) env.WAYLAND_DISPLAY = input.WAYLAND_DISPLAY
+    for (const key of ['XAUTHORITY', 'XDG_RUNTIME_DIR']) if (typeof input[key] === 'string' && path.isAbsolute(input[key])) {
+      try { const stat = fs.lstatSync(input[key]); if (!stat.isSymbolicLink() && (key === 'XAUTHORITY' ? stat.isFile() : stat.isDirectory())) env[key] = input[key] } catch {}
+    }
+  }
+  return env
+}
+function tapCases(output, cases) {
+  const expected = new Map(cases.map(item => [item.testName, { count: 0, failed: false, skipped: false }]))
+  for (const line of output.split(/\r?\n/)) {
+    const match = /^(not )?ok \d+ - (.*?)(?:\s+#\s*(SKIP|TODO)\b.*)?$/.exec(line)
+    if (!match || !expected.has(match[2])) continue
+    const current = expected.get(match[2]); current.count += 1
+    current.failed ||= Boolean(match[1]); current.skipped ||= Boolean(match[3])
+  }
+  for (const [name, result] of expected) {
+    if (result.count !== 1 || result.failed || result.skipped) fail('LOCAL_CANARY_FAILED', `native TAP result is incomplete for ${name}`)
+  }
+}
+function writeAtomic(file, value) { const temp = `${file}.${crypto.randomUUID()}`; fs.writeFileSync(temp, value, { flag: 'wx', mode: 0o600 }); fs.renameSync(temp, file) }
+function closedCanaryProcessAdapter(options = {}) {
+  const { platform = process.platform, controlRoot, providerPrivateOwnershipRoot, trustedOwnershipRoots, createPlatformAdapter } = options
+  if (!path.isAbsolute(controlRoot || '') || !path.isAbsolute(providerPrivateOwnershipRoot || '') ||
+      !Array.isArray(trustedOwnershipRoots) || trustedOwnershipRoots.length < 1 || trustedOwnershipRoots.some(root => !path.isAbsolute(root || ''))) {
+    fail('LOCAL_CANARY_INVALID', 'closed canary process ownership roots are invalid')
+  }
+  const factory = createPlatformAdapter || createPlatformProcessAdapter
+  if (typeof factory !== 'function') fail('LOCAL_CANARY_INVALID', 'closed canary process adapter factory is invalid')
+  return factory({ platform, windows: { controlRoot, providerPrivateOwnershipRoot, trustedOwnershipRoots } })
+}
+async function drainRegistered(root, binding, options = {}) {
+  if (!fs.existsSync(root)) return
+  let failure = null
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.isSymbolicLink()) continue
+    const directory = path.join(root, entry.name), metaPath = path.join(directory, 'registration.json'), registryPath = path.join(directory, 'processes.json')
+    let meta
+    try { meta = JSON.parse(regular(metaPath)) } catch { failure ||= Object.assign(new Error('nested ownership registration is invalid'), { code: 'LOCAL_CANARY_INVALID' }); continue }
+    if (!meta || meta.schemaVersion !== 1 || meta.provider !== binding.provider || meta.activationId !== binding.activationId ||
+        meta.generation !== binding.generation || meta.challenge !== binding.challenge || meta.registryPath !== registryPath ||
+        !path.resolve(registryPath).startsWith(`${path.resolve(root)}${path.sep}`)) { failure ||= Object.assign(new Error('nested ownership registration differs from this canary'), { code: 'LOCAL_CANARY_INVALID' }); continue }
+    if (!fs.existsSync(registryPath)) continue
+    try {
+      const adapter = closedCanaryProcessAdapter({ platform: options.platform || process.platform,
+        controlRoot: path.join(directory, 'process-control'), providerPrivateOwnershipRoot: options.providerPrivateOwnershipRoot || root,
+        trustedOwnershipRoots: options.trustedOwnershipRoots || [options.providerPrivateOwnershipRoot || root], createPlatformAdapter: options.createPlatformAdapter })
+      const owner = new ProcessOwner({ adapter, registryPath, pollMs: 20 })
+      await owner.cancelAll({ reason: 'closed canary nested recovery', graceMs: 500, killMs: 2000, waitForPending: true })
+      if (owner.ownershipIdentities().length) throw Object.assign(new Error('nested canary ownership did not drain'), { code: 'PROCESS_DRAIN_TIMEOUT' })
+    } catch (error) { failure ||= error }
+  }
+  if (failure) throw failure
+}
+async function ownedTest(owner, root, env, argv, timeoutMs = 300000, signal, options = {}) {
+  const postStatusDelayMs = options.postStatusDelayMs === undefined ? 0 : options.postStatusDelayMs
+  if (!Number.isSafeInteger(postStatusDelayMs) || postStatusDelayMs < 0 || postStatusDelayMs > 5000) {
+    fail('LOCAL_CANARY_INVALID', 'closed owned-test post-status delay is invalid')
+  }
+  const id = crypto.randomUUID(), request = path.join(root, `outer-${id}.json`), status = path.join(root, `outer-${id}.status.json`)
+  writeAtomic(request, JSON.stringify({ argv, cwd: root, env, status, postStatusDelayMs }))
+  const reservationId = `closed-canary-${id}`
+  const launchEnv = prepareProcessLaunchEnvironment(owner.adapter, reservationId, env)
+  const owned = await owner.launch({ executable: process.execPath, argv: [__filename, '--closed-owned-test', request], cwd: root, env: launchEnv,
+    sessionId: `closed-canary-${id}`, reservationId, targetKey: `closed-canary:${path.basename(root)}`, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore', forWork: false })
+  const deadline = Date.now() + timeoutMs
+  let value = null
+  while (Date.now() < deadline && !value) {
+    if (signal?.aborted) {
+      await owner.cancelAll({ reason: 'closed native canary cancelled', graceMs: 500, killMs: 2000, waitForPending: true })
+      fail('CHILD_CANCELLED', 'closed native canary was cancelled')
+    }
+    try { value = JSON.parse(regular(status)) } catch {}
+    if (!value) await new Promise(resolve => setTimeout(resolve, 20))
+  }
+  if (!value) {
+    await owner.cancelAll({ reason: 'closed native canary timed out', graceMs: 500, killMs: 2000, waitForPending: true })
+    await drainRegistered(env.AUTOPROMPT_CLOSED_CANARY_OWNERSHIP_ROOT, { provider: env.AUTOPROMPT_CLOSED_CANARY_PROVIDER, activationId: env.AUTOPROMPT_CLOSED_CANARY_ACTIVATION_ID, generation: Number(env.AUTOPROMPT_CLOSED_CANARY_GENERATION), challenge: env.AUTOPROMPT_CLOSED_CANARY_CHALLENGE }, {
+      platform: options.platform, providerPrivateOwnershipRoot: options.providerPrivateOwnershipRoot,
+      trustedOwnershipRoots: options.trustedOwnershipRoots, createPlatformAdapter: options.createPlatformAdapter,
+    })
+    fail('LOCAL_CANARY_TIMEOUT', 'owned native test exceeded its deadline')
+  }
+  // The child status is written by the owned launcher.  It is not root-exit
+  // evidence by itself: the launcher can still be flushing its callback after
+  // publishing the payload result.  Await the actual owned root's absence
+  // before persisting rootExit, then let ProcessOwner's normal group drain
+  // reconcile any real descendants.
+  try {
+    await owner.awaitRootExit(owned.ownershipId, Math.min(5000, Math.max(0, deadline - Date.now())))
+    await owner.observeRootExit(owned.ownershipId, { code: value.code, signal: value.signal, terminalEnvelope: { status: value.code === 0 && !value.signal ? 'DONE' : 'FAILED' } })
+  } catch (error) {
+    await owner.cancelAll({ reason: 'closed native canary root completion did not drain', graceMs: 500, killMs: 2000, waitForPending: true }).catch(() => {})
+    throw error
+  }
+  return value
+}
+async function run(options = {}) {
+  const { activation, pending, executable, provider } = options
+  if (!activation?.installed?.bundle || !activation?.activationRoot || !pending || !keys[provider] || executable?.path !== activation.executable?.path) fail('LOCAL_CANARY_INVALID', 'closed canary binding is incomplete')
+  if (Date.parse(pending.expiresAt) <= Date.now()) fail('LOCAL_CANARY_EXPIRED', 'reviewed-local approval expired before execution')
+  const generation = activation.record?.capability?.generation
+  if (!Number.isSafeInteger(generation) || generation < 1) fail('LOCAL_CANARY_INVALID', 'canary generation is invalid')
+  const activationDeadline = Date.parse(activation.record?.capability?.expiresAt)
+  if (!Number.isFinite(activationDeadline)) fail('LOCAL_CANARY_INVALID', 'canary activation deadline is invalid')
+  if (activationDeadline <= Date.now()) fail('LOCAL_CANARY_EXPIRED', 'activation expired before native canary')
+  const root = path.join(activation.activationRoot, 'reviewed-local-canary', `generation-${generation}`)
+  fs.mkdirSync(root, { recursive: true, mode: 0o700 })
+  const challenge = crypto.randomBytes(32).toString('base64url')
+  const env = { ...closedEnvironment(options.environment || process.env, provider, root), [keys[provider]]: executable.path,
+    AUTOPROMPT_NATIVE_TEST_EVIDENCE_ROOT: path.join(root, 'native-wire'), AUTOPROMPT_CLOSED_CANARY_CHALLENGE: challenge,
+    AUTOPROMPT_CLOSED_CANARY_OWNERSHIP_ROOT: path.join(root, 'nested-owners'), AUTOPROMPT_CLOSED_CANARY_PROVIDER: provider,
+    AUTOPROMPT_CLOSED_CANARY_ACTIVATION_ID: activation.activationId, AUTOPROMPT_CLOSED_CANARY_GENERATION: String(generation) }
+  fs.mkdirSync(env.AUTOPROMPT_CLOSED_CANARY_OWNERSHIP_ROOT, { mode: 0o700 })
+  const platform = options.platform || process.platform
+  const adapter = closedCanaryProcessAdapter({ platform, controlRoot: path.join(root, 'outer-process-control'),
+    providerPrivateOwnershipRoot: activation.activationRoot, trustedOwnershipRoots: [activation.activationRoot], createPlatformAdapter: options.createPlatformAdapter })
+  const owner = new ProcessOwner({ adapter, registryPath: path.join(root, 'outer-processes.json'), pollMs: 20 })
+  const signal = options.signal
+  const cancel = () => { owner.cancelAll({ reason: 'closed native canary cancelled', graceMs: 500, killMs: 2000, waitForPending: true }).catch(() => {}) }
+  signal?.addEventListener('abort', cancel, { once: true })
+  const results = [], artifacts = []
+  const groups = new Map()
+  for (const capability of Object.keys(pending.capabilityCases).sort()) {
+    const item = pending.capabilityCases[capability], group = groups.get(item.source) || []
+    group.push({ capability, ...item }); groups.set(item.source, group)
+  }
+  try {
+  for (const [relativeSource, cases] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
+    if (signal?.aborted) fail('CHILD_CANCELLED', 'closed native canary was cancelled')
+    const source = path.join(activation.installed.bundle, relativeSource)
+    if (!path.resolve(source).startsWith(`${path.resolve(activation.installed.bundle)}${path.sep}`)) fail('LOCAL_CANARY_INVALID', `case source escaped bundle: ${relativeSource}`)
+    if (cases.some(item => item.sha256 !== hash(regular(source)))) fail('LOCAL_CANARY_INVALID', `case source drifted: ${relativeSource}`)
+    const pattern = `^(?:${cases.map(item => escape(item.testName)).join('|')})$`
+    // Some native CLIs need several seconds per startup; the complete owned
+    // suite includes real recovery and cancellation, not just one model call.
+    // Keep one finite batch ceiling and never run past the release approval.
+    const timeoutMs = Math.min(720000, Date.parse(pending.expiresAt) - Date.now(), activationDeadline - Date.now())
+    if (timeoutMs <= 0) fail('LOCAL_CANARY_EXPIRED', 'review approval expired before native batch')
+    const result = await ownedTest(owner, root, env, ['--test','--test-concurrency=1','--test-reporter=tap','--test-name-pattern',pattern,source], timeoutMs, signal, {
+      platform, providerPrivateOwnershipRoot: activation.activationRoot, trustedOwnershipRoots: [activation.activationRoot], createPlatformAdapter: options.createPlatformAdapter,
+    })
+    const output = `${result.stdout || ''}\n${result.stderr || ''}`
+    if (result.error || result.code !== 0 || result.signal || /^not ok /m.test(output)) fail('LOCAL_CANARY_FAILED', `native case batch did not pass: ${relativeSource}`)
+    tapCases(output, cases)
+    for (const { capability, ...item } of cases) {
+    if (Date.now() >= Math.min(activationDeadline, Date.parse(pending.expiresAt))) fail('LOCAL_CANARY_EXPIRED', 'canary authority expired before observation persistence')
+    const artifact = { schemaVersion:'harness-v2-closed-canary-observation.v1', capability, caseSha256:item.sha256, testName:item.testName,
+      activationId:activation.activationId, generation, challenge, requestSha256:activation.record.request.sha256,
+      target:activation.record.target.realpath, executableSha256:executable.sha256, executableRuntimeIdentity:executable.runtimeIdentity || null,
+      connectionSha256:activation.record.connectionSha256, payloadDigest:activation.installed.payloadDigest,
+      enforcementProofSha256:activation.enforcementProof.sha256, reviewDigest:pending.reviewDigest, outputSha256:hash(output) }
+    const bytes = Buffer.from(JSON.stringify(artifact)); const file = path.join(root, `${capability}.json`); fs.writeFileSync(file, bytes, { flag:'wx', mode:0o600 }); const reopened = regular(file)
+    const observationSha256 = hash(reopened)
+    results.push({ capability, status:'passed', caseSha256:item.sha256, observationSha256 })
+    artifacts.push({ capability, path:file, sha256:observationSha256 })
+    }
+  }
+  return { challenge, observations:results, artifacts }
+  } finally {
+    signal?.removeEventListener('abort', cancel)
+    let outerDrainFailure
+    try { await owner.cancelAll({ reason: 'closed canary finished', graceMs: 500, killMs: 2000, waitForPending: true }) }
+    catch (error) { outerDrainFailure = error }
+    try { await drainRegistered(env.AUTOPROMPT_CLOSED_CANARY_OWNERSHIP_ROOT, { provider, activationId: activation.activationId, generation, challenge }, { platform, providerPrivateOwnershipRoot: activation.activationRoot, trustedOwnershipRoots: [activation.activationRoot], createPlatformAdapter: options.createPlatformAdapter }) }
+    catch (error) { if (outerDrainFailure) outerDrainFailure.nestedDrainFailure = error; else throw error }
+    if (outerDrainFailure) throw outerDrainFailure
+  }
+}
+async function closedOwnedTest(requestPath) {
+  const request = JSON.parse(regular(requestPath)); const child = cp.spawn(process.execPath, request.argv, { cwd: request.cwd, env: request.env, stdio: ['ignore', 'pipe', 'pipe'], shell: false })
+  let stdout = '', stderr = ''
+  child.stdout.on('data', chunk => { stdout += chunk; if (Buffer.byteLength(stdout) > 4 * 1024 * 1024) child.kill('SIGKILL') })
+  child.stderr.on('data', chunk => { stderr += chunk; if (Buffer.byteLength(stderr) > 4 * 1024 * 1024) child.kill('SIGKILL') })
+  child.once('error', async error => {
+    writeAtomic(request.status, JSON.stringify({ code: null, signal: null, error: error.message, stdout, stderr }))
+    if (request.postStatusDelayMs) await new Promise(resolve => setTimeout(resolve, request.postStatusDelayMs))
+  })
+  child.once('close', async (code, signal) => {
+    writeAtomic(request.status, JSON.stringify({ code, signal, stdout, stderr }))
+    if (request.postStatusDelayMs) await new Promise(resolve => setTimeout(resolve, request.postStatusDelayMs))
+  })
+}
+if (require.main === module && process.argv[2] === '--closed-owned-test') closedOwnedTest(process.argv[3]).catch(error => { process.stderr.write(`${error.stack || error}\n`); process.exitCode = 1 })
+module.exports = { run, closedEnvironment, tapCases, ownedTest, drainRegistered, closedCanaryProcessAdapter }

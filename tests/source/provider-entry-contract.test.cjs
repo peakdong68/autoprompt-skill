@@ -5,11 +5,15 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const test = require('node:test')
+const { parseArgs } = require('../../bin/autoprompt.cjs')
+const codexConfigure = require('../../scripts/codex-configure.cjs')
+const codexCasting = require('../../agents/codex/workflow/codex-agent-casting.js')
 
 const ROOT = path.resolve(__dirname, '..', '..')
 const PROVIDERS = [
-  'claude', 'codex', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek', 'reasonix',
+  'claude', 'codex', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek', 'hermes', 'grok', 'reasonix',
 ]
+const TEXT_CONTRACT_PROVIDERS = PROVIDERS.filter(provider => !['codex', 'reasonix'].includes(provider))
 const SKILLS = new Map(PROVIDERS.map(provider => [
   provider,
   provider === 'prime'
@@ -21,90 +25,93 @@ function read(relativePath) {
   return fs.readFileSync(path.join(ROOT, relativePath), 'utf8').replace(/\r\n/g, '\n')
 }
 
-function chooserBlock(source) {
-  const match = /(?:Before spawning, resolve only undefined operator knobs:|## Useful-first start)([\s\S]*?)(?:After the chooser|## Adaptive roadmap)/.exec(source)
-  assert.ok(match, 'skill must expose a bounded startup chooser block')
-  return match[1]
+for (const provider of TEXT_CONTRACT_PROVIDERS) {
+  test(`${provider}: private v2 entry requires explicit controller activation, never a v1 chooser`, () => {
+    const source = read(SKILLS.get(provider))
+    assert.match(source, new RegExp(`autoprompt activate ${provider} --target`))
+    assert.match(source, /loading a skill never creates or resumes a run/)
+    assert.match(source, /DIRECT and LIGHT do not require a coordinator or manager/)
+    assert.match(source, /There is no default route/)
+    assert.match(source, /Refuse any required capability without current provider conformance evidence/)
+    assert.doesNotMatch(source, /In an attended session, ask all undefined knobs|Before spawning, resolve only undefined operator knobs/)
+    assert.throws(() => parseArgs(['activate', provider]))
+    assert.throws(() => parseArgs(['activate', provider, '--']))
+    const argv = ['exact request', '--literal', '']
+    assert.deepEqual(parseArgs(['activate', provider, '--', ...argv]).missionArgs, argv)
+  })
+  test(`${provider}: public launcher is manual and model routing never changes the task route`, () => {
+    const packaging = require('../../scripts/harness-v2-package.cjs')
+    const source = packaging.launcher(provider)
+    assert.match(source, /Loading this launcher never starts or resumes work/)
+    assert.match(source, new RegExp(`autoprompt activate ${provider} --target`))
+    const configure = require('../../scripts/harness-v2-configure.cjs')
+    const inherited = { mode: 'provider-default', selector: 'off', models: [] }
+    assert.equal(configure.resolveAssignment(inherited, {}, provider).model, null)
+    const selection = { mode: 'explicit', selector: 'fixture/model', models: ['fixture/model'] }
+    assert.deepEqual(configure.resolveAssignment(selection, { logicalRole: 'worker' }, provider),
+      configure.resolveAssignment(selection, { logicalRole: 'route-analyst' }, provider))
+    if (['claude', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek', 'hermes', 'grok'].includes(provider)) {
+      assert.equal(configure.resolveAssignment({ ...selection, effort: 'high' },
+        { logicalRole: 'worker' }, provider).effort, 'high')
+    } else {
+      assert.throws(() => configure.validateSelection({ ...selection, effort: 'high' }, provider), { code: 'INVALID_EFFORT' })
+    }
+    assert.throws(() => configure.validateSelection({ ...selection, effort: 'invented-effort' }, provider), { code: 'INVALID_EFFORT' })
+    assert.throws(() => configure.validateSelection({ mode: 'automatic', selector: 'auto', models: [] }, provider),
+      { code: 'MODEL_REGISTRY_RECEIPT_INVALID' })
+  })
 }
 
-test('all nine public skills are explicit-only and a bare invocation always stops', () => {
-  for (const [provider, relativePath] of SKILLS) {
-    const source = read(relativePath)
-    assert.match(source, /explicit(?:-only| invocation|ly invokes)|Use only when the user explicitly/i, `${provider} explicit trigger`)
-    assert.match(source, /bare invocation[^.]*stops?(?:[;.]|\s)/i, `${provider} bare stop`)
-    assert.match(source, /frontier/i, `${provider} bare frontier report`)
-    assert.doesNotMatch(source, /bare invocation may resume/i, `${provider} must not resume implicitly`)
+test('native manual metadata matches the actual public launcher format', () => {
+  const packaging = require('../../scripts/harness-v2-package.cjs')
+  for (const provider of ['claude', 'prime', 'deepseek']) {
+    assert.match(packaging.launcher(provider), /^user-invocable: true$/m)
+    assert.match(packaging.launcher(provider), /^disable-model-invocation: true$/m)
   }
-})
-
-test('Claude top-level skill is user-only and cannot be selected by the model', () => {
-  const source = read(SKILLS.get('claude'))
-  assert.match(source, /^user-invocable: true$/m)
-  assert.match(source, /^disable-model-invocation: true$/m)
-})
-
-test('OMP and DeepSeek expose the top-level skill only to explicit user invocation', () => {
-  for (const provider of ['omp', 'deepseek']) {
-    const source = read(SKILLS.get(provider))
-    assert.match(source, /^user-invocable: true$/m, provider)
-    assert.match(source, /^disable-model-invocation: true$/m, provider)
-  }
-  assert.match(read(SKILLS.get('omp')), /Invoke \/skill:autoprompt to turn a mission/)
+  assert.equal(packaging.launcherRelative('omp'), 'prompts/autoprompt.md')
+  assert.equal(packaging.launcherRelative('vscode'), 'skills/autoprompt/SKILL.md')
   assert.match(read(SKILLS.get('reasonix')), /^invocation: manual$/m)
 })
 
-test('every attended provider resolves missing knobs once before repository work', () => {
-  for (const provider of PROVIDERS) {
-    const relativePath = SKILLS.get(provider)
-    const source = read(relativePath)
-    const occurrences = source.match(/In an attended session, ask all undefined knobs in one (?:`AskUserQuestion` call|question) before (?:any )?repository(?:\/tool)? work\./g) || []
-    assert.equal(occurrences.length, 1, `${provider} must have one pre-work chooser`)
-  }
+test('Codex entry behavior requires an explicit activation mission and never resumes from a bare invocation', () => {
+  assert.deepEqual(parseArgs([]), { command: 'help' })
+  assert.throws(() => parseArgs(['activate', 'codex']))
+  assert.throws(() => parseArgs(['activate', 'codex', '--']))
+  assert.deepEqual(parseArgs(['activate', 'codex', '--', 'fix', 'the', 'bug']), {
+    command: 'activate', provider: 'codex', missionArgs: ['fix', 'the', 'bug'], compatibilityAlias: false,
+  })
 })
 
-test('chooser model options match each provider capability', () => {
-  for (const provider of ['claude', 'codex']) {
-    const block = chooserBlock(read(SKILLS.get(provider)))
-    assert.match(block, /Agent selection:[^\n]*`off`\/inherit[^\n]*`auto`[^\n]*explicit model list/i, provider)
-  }
+test('Codex chooser and casting behavior enforce real selector, model, and effort capabilities', () => {
+  assert.throws(() => codexConfigure.resolveSelector('', ''), /invalid model identifier/i)
+  assert.deepEqual(codexConfigure.resolveSelector('off', ''), { selector: 'off', models: [], registry: '' })
+  assert.deepEqual(codexConfigure.resolveSelector('gpt-5.6-sol,gpt-5.6-terra', ''), {
+    selector: 'gpt-5.6-sol,gpt-5.6-terra', models: ['gpt-5.6-sol', 'gpt-5.6-terra'], registry: '',
+  })
+  assert.deepEqual(codexConfigure.resolveSelector('z-ai/glm-5.3-flash', ''), {
+    selector: 'z-ai/glm-5.3-flash', models: ['z-ai/glm-5.3-flash'], registry: '',
+  })
+  assert.throws(() => codexConfigure.resolveSelector('auto', ''), /absolute readable --model-map/i)
 
-  for (const provider of ['opencode', 'kilo', 'vscode', 'omp', 'deepseek', 'reasonix']) {
-    const block = chooserBlock(read(SKILLS.get(provider)))
-    assert.match(block, /Agent selection:[^\n]*`off`\/inherit/i, `${provider} inherit choice`)
-    assert.match(block, /inherited-only/i, `${provider} truthful capability`)
-    assert.doesNotMatch(block, /Auto-tier|Custom (?:model )?(?:set|models)/i, `${provider} false chooser choices`)
-  }
-
-  const prime = chooserBlock(read(SKILLS.get('prime')))
-  assert.match(prime, /Agent selection:[^\n]*`off`\/inherit only/i)
-  assert.match(prime, /inherits the already-selected parent model/i)
-  assert.match(prime, /no per-child model routing selector is available/i)
-  assert.doesNotMatch(prime, /`agents=auto`|Auto-tier|Custom (?:model )?(?:set|models)/i)
-
-  for (const provider of ['opencode', 'kilo', 'vscode', 'omp', 'deepseek', 'reasonix']) {
-    const modes = read(`agents/${provider}/MODES.md`)
-    const chooser = /### Chooser and attendance([\s\S]*?)### [^\n]+ agent selection and effort/.exec(modes)
-    assert.ok(chooser, `${provider} modes chooser`)
-    assert.match(chooser[1], /agent selection: Inherit only/i, `${provider} modes inherit choice`)
-    assert.match(chooser[1], /effort capability: report exactly `inherited-only`/i, `${provider} modes truthful effort`)
-    assert.doesNotMatch(chooser[1], /Auto-tier|Custom (?:model )?set/i, `${provider} modes false choices are absent`)
-  }
+  assert.deepEqual(codexCasting.validateAgentCast([
+    { file: 'ap-worker.toml', model: null, effort: null },
+  ], 'off', ''), {
+    enabled: false, models: [], effort: { status: 'inherited-only', source: 'session-inheritance' },
+  })
+  assert.deepEqual(codexCasting.validateAgentCast([
+    { file: 'ap-worker.toml', model: 'gpt-5.6-sol', effort: 'xhigh' },
+    { file: 'ap-reviewer.toml', model: 'gpt-5.6-terra', effort: 'high' },
+  ], 'gpt-5.6-sol,gpt-5.6-terra', ''), {
+    enabled: true,
+    models: ['gpt-5.6-sol', 'gpt-5.6-terra'],
+    effort: { status: 'selectable', source: 'codex-custom-agent-toml' },
+  })
+  assert.throws(() => codexCasting.validateAgentCast([
+    { file: 'ap-worker.toml', model: 'gpt-5.6-sol', effort: null },
+  ], 'gpt-5.6-sol', ''), /requires model_reasoning_effort/i)
 })
 
-test('provider routing statements match the real adapters', () => {
-  assert.match(read(SKILLS.get('claude')), /Claude Code routing uses `opus`, `sonnet`, and `haiku`/)
-  assert.match(read(SKILLS.get('codex')), /actual custom-agent TOML `model` and `model_reasoning_effort` capabilities/)
-  for (const provider of ['opencode', 'kilo', 'vscode', 'omp', 'deepseek', 'reasonix']) {
-    const source = read(SKILLS.get(provider))
-    assert.match(source, /inherit(?:s|ed)[^\n]*model/i, provider)
-    assert.match(source, /inherited-only/i, provider)
-    assert.match(source, /explicit model list is not routable|agent selection changes nothing|never claim a selectable effort/i, provider)
-  }
-  const prime = read(SKILLS.get('prime'))
-  assert.match(prime, /never passes `model`[^.]*inherits the selected parent model/i)
-})
-
-test('an attended conductor cannot dispatch Agent or Task before the chooser', () => {
+test('retained v1 migration validator does not allow unattended early dispatch', () => {
   const { startupHandshakeFindings } = require('../../agents/claude/workflow/autoprompt-ledger-check.js')
   const transcript = firstToolUseName => ({
     path: '00-conductor-root.jsonl',
@@ -123,4 +130,15 @@ test('an attended conductor cannot dispatch Agent or Task before the chooser', (
     transcripts: [{ ...transcript('AskUserQuestion'), hasUserInterrupt: true }],
   }), [])
   assert.deepEqual(startupHandshakeFindings({ attended: false, transcripts: [transcript('Agent')] }), [])
+})
+
+// Both v2 entries bind exact mission arguments through explicit launchers.
+test('Reasonix entry requires an explicit mission and private activation', () => {
+  assert.throws(() => parseArgs(['activate', 'reasonix']))
+  assert.throws(() => parseArgs(['activate', 'reasonix', '--']))
+  assert.deepEqual(parseArgs(['activate', 'reasonix', '--', 'fix', 'the bug']), {
+    command: 'activate', provider: 'reasonix', missionArgs: ['fix', 'the bug'], compatibilityAlias: false,
+  })
+  assert.match(read(SKILLS.get('reasonix')), /autoprompt activate reasonix/)
+  assert.match(read(SKILLS.get('reasonix')), /loading a skill alone never creates or resumes a run/)
 })

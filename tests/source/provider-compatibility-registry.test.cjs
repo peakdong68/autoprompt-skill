@@ -14,7 +14,7 @@ const POWERSHELL = process.platform === 'win32' ? 'powershell.exe' : 'pwsh'
 const INSTALL_DIR = path.join(ROOT, 'scripts', 'install')
 const PUBLIC = [
   'claude', 'codex', 'opencode', 'kilo', 'vscode', 'prime',
-  'omp', 'deepseek', 'reasonix',
+  'omp', 'deepseek', 'hermes', 'grok', 'reasonix',
 ]
 const LEGACY = ['vibe', 'cursor', 'dcode', 'roo', 'gemini', 'cline', 'goose']
 const BINARIES = Object.freeze({
@@ -35,19 +35,7 @@ function run(command, args, options = {}) {
   })
 }
 
-function findBash() {
-  const candidates = process.platform === 'win32'
-    ? [
-        path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Git', 'bin', 'bash.exe'),
-        path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Git', 'bin', 'bash.exe'),
-        'bash',
-      ]
-    : ['bash']
-  for (const candidate of candidates) {
-    if (run(candidate, ['--version']).status === 0) return candidate
-  }
-  return null
-}
+const { resolveBash: findBash } = require('../helpers/resolve-bash.cjs')
 
 function powershellLiteral(value) {
   return `'${value.replaceAll("'", "''")}'`
@@ -161,7 +149,7 @@ function writeLegacySharedReceipt(home, flavor) {
   return { claude, cursor, receiptPath }
 }
 
-test('both ports declare exactly nine public install providers and no generic payload fallback', () => {
+test('both ports declare the public install provider registry and no generic payload fallback', () => {
   const shellLib = fs.readFileSync(path.join(INSTALL_DIR, 'lib', 'install-lib.sh'), 'utf8')
   const psLib = fs.readFileSync(path.join(INSTALL_DIR, 'lib', 'install-lib.ps1'), 'utf8')
   const shellInstall = fs.readFileSync(path.join(INSTALL_DIR, 'install.sh'), 'utf8')
@@ -211,11 +199,11 @@ test('DeepSeek prerelease detection and its rc.7 floor agree in both installer p
       `export PATH='${toBash(context.bin)}:/usr/bin:/bin'`,
       `. '${shellLibrary}'`,
       `test "$(detect_client deepseek)" = 'client=deepseek present=true version=${version}'`,
-      `test "${'${AUTOPROMPT_VERSION_FLOOR[deepseek]}'}" = '0.1.0-rc.7'`,
+      `test "${'${AUTOPROMPT_VERSION_FLOOR[deepseek]}'}" = '0.1.2-rc.1'`,
       `! _precheck_version_ge '${version}' "${'${AUTOPROMPT_VERSION_FLOOR[deepseek]}'}"`,
-      `_precheck_version_ge '0.1.0-rc.7' "${'${AUTOPROMPT_VERSION_FLOOR[deepseek]}'}"`,
-      `_precheck_version_ge '0.1.0-rc.8' "${'${AUTOPROMPT_VERSION_FLOOR[deepseek]}'}"`,
-      `_precheck_version_ge '0.1.0' "${'${AUTOPROMPT_VERSION_FLOOR[deepseek]}'}"`,
+      `_precheck_version_ge '0.1.2-rc.1' "${'${AUTOPROMPT_VERSION_FLOOR[deepseek]}'}"`,
+      `_precheck_version_ge '0.1.2-rc.2' "${'${AUTOPROMPT_VERSION_FLOOR[deepseek]}'}"`,
+      `_precheck_version_ge '0.1.2' "${'${AUTOPROMPT_VERSION_FLOOR[deepseek]}'}"`,
       `! _precheck_version_ge '0.1.0-alpha' "${'${AUTOPROMPT_VERSION_FLOOR[deepseek]}'}"`,
     ].join('; ')])
     assert.equal(shell.status, 0, combined(shell))
@@ -229,11 +217,11 @@ test('DeepSeek prerelease detection and its rc.7 floor agree in both installer p
       'try { [Console]::SetOut($writer); $code = Detect-Client -Name deepseek } finally { [Console]::SetOut($prior) }',
       'if ($code -ne 0) { exit 10 }',
       `if ($writer.ToString().Trim() -cne 'client=deepseek present=true version=${version}') { exit 11 }`,
-      "if ($AutopromptVersionFloor.deepseek -cne '0.1.0-rc.7') { exit 12 }",
+      "if ($AutopromptVersionFloor.deepseek -cne '0.1.2-rc.1') { exit 12 }",
       `if (Test-PrecheckVersionGe -Found '${version}' -Floor $AutopromptVersionFloor.deepseek) { exit 13 }`,
-      "if (-not (Test-PrecheckVersionGe -Found '0.1.0-rc.7' -Floor $AutopromptVersionFloor.deepseek)) { exit 14 }",
-      "if (-not (Test-PrecheckVersionGe -Found '0.1.0-rc.8' -Floor $AutopromptVersionFloor.deepseek)) { exit 15 }",
-      "if (-not (Test-PrecheckVersionGe -Found '0.1.0' -Floor $AutopromptVersionFloor.deepseek)) { exit 16 }",
+      "if (-not (Test-PrecheckVersionGe -Found '0.1.2-rc.1' -Floor $AutopromptVersionFloor.deepseek)) { exit 14 }",
+      "if (-not (Test-PrecheckVersionGe -Found '0.1.2-rc.2' -Floor $AutopromptVersionFloor.deepseek)) { exit 15 }",
+      "if (-not (Test-PrecheckVersionGe -Found '0.1.2' -Floor $AutopromptVersionFloor.deepseek)) { exit 16 }",
       "if (Test-PrecheckVersionGe -Found '0.1.0-alpha' -Floor $AutopromptVersionFloor.deepseek) { exit 17 }",
       'exit 0',
     ].join('; ')
@@ -309,7 +297,7 @@ test('legacy providers fail as unknown before install writes in both ports', {
   }
 })
 
-test('install all reports only the nine public providers in both ports', {
+test('install all reports only the eleven public providers in both ports', {
   skip: process.platform !== 'win32',
 }, () => {
   const bash = findBash()
@@ -331,7 +319,7 @@ test('install all reports only the nine public providers in both ports', {
   }
 })
 
-test('default doctor reports only the nine public providers', {
+test('default doctor reports only the eleven public providers', {
   skip: process.platform !== 'win32',
 }, () => {
   const bash = findBash()

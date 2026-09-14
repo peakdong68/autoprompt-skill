@@ -12,7 +12,7 @@ const PACKAGE_VERSION = JSON.parse(fs.readFileSync(
   'utf8',
 )).version
 const PUBLIC_PROVIDERS = [
-  'claude', 'codex', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek', 'reasonix',
+  'claude', 'codex', 'opencode', 'kilo', 'vscode', 'prime', 'omp', 'deepseek', 'hermes', 'grok', 'reasonix',
 ]
 const LEGACY_PROVIDERS = ['vibe', 'cursor', 'dcode', 'roo', 'gemini', 'cline', 'goose']
 const LEGACY_PROVIDER_PATTERN = new RegExp(`\\b(?:${LEGACY_PROVIDERS.join('|')})\\b`, 'i')
@@ -49,7 +49,7 @@ function listFiles(relativePath) {
   return files.sort()
 }
 
-test('the public CLI exposes exactly nine providers and rejects legacy provider commands', () => {
+test('the public CLI exposes exactly eleven providers and rejects legacy provider commands', () => {
   assert.deepEqual(PROVIDERS.map(provider => provider.id), PUBLIC_PROVIDERS)
   assert.doesNotMatch(HELP_TEXT, LEGACY_PROVIDER_PATTERN)
 
@@ -64,7 +64,7 @@ test('the public CLI exposes exactly nine providers and rejects legacy provider 
   }
 })
 
-test('public lifecycle entry points advertise only the nine supported providers', () => {
+test('public lifecycle entry points advertise only the eleven supported providers', () => {
   for (const relativePath of [
     'scripts/install/install.ps1',
     'scripts/install/install.sh',
@@ -96,7 +96,7 @@ test('runtime manifests and npm allowlist contain only public provider packages'
   assert.doesNotMatch(packageJson.scripts['test:lifecycle'], /vibe|cursor/i)
 })
 
-test('public agent source contains only the nine supported provider packages', () => {
+test('public agent source contains only the eleven declared provider packages', () => {
   const index = read('agents/README.md')
   assert.match(index, /\[Prime Agent\]\(prime\/\)/)
   assert.match(index, /\[Oh My Pi\]\(omp\/\)/)
@@ -112,34 +112,14 @@ test('public agent source contains only the nine supported provider packages', (
   assert.doesNotMatch(JSON.stringify(contract), /vibe|agents\/other/i)
 })
 
-test('README is npm-first and public-release ready', () => {
-  const readme = read('README.md')
-  const install = readme.match(/## Install\n([\s\S]*?)\n## Examples/)?.[1] ?? ''
-  assert.ok(install.indexOf('npm install -g autoprompt-skill') >= 0)
-  assert.ok(install.indexOf('npm install -g autoprompt-skill') < install.indexOf('git clone https://github.com/Spielewoy/autoprompt-skill'))
-  assert.doesNotMatch(install, /not published|after npm publication/i)
-  assert.match(
-    readme,
-    new RegExp(
-      'href="https:\\/\\/github\\.com\\/Spielewoy\\/autoprompt-skill\\/releases\\/latest"' +
-      '[^>]*>\\s*<img[^>]+img\\.shields\\.io\\/github\\/v\\/release\\/' +
-      `Spielewoy\\/autoprompt-skill[^>]+alt="Version ${PACKAGE_VERSION.replaceAll('.', '\\.')}"`,
-    ),
-  )
-
-  for (const relativePath of [
-    'docs/translations/zh.md',
-    'docs/translations/ko.md',
-    'docs/translations/es.md',
-    'docs/translations/ar.md',
-  ]) {
-    const translated = read(relativePath)
-    assert.ok(translated.indexOf('npm install -g autoprompt-skill') >= 0)
-    assert.ok(
-      translated.indexOf('npm install -g autoprompt-skill') <
-      translated.indexOf('git clone https://github.com/Spielewoy/autoprompt-skill'),
-      relativePath,
-    )
+test('all READMEs install the exact released archive before source installation', () => {
+  const command = `npm install -g https://github.com/Spielewoy/autoprompt-skill/releases/download/v${PACKAGE_VERSION}/autoprompt-skill-${PACKAGE_VERSION}.tgz`
+  for (const relativePath of ['README.md', ...['zh', 'ko', 'es', 'ar'].map(language => `docs/translations/${language}.md`)]) {
+    const source = read(relativePath)
+    assert.ok(source.includes(command), relativePath)
+    assert.ok(source.indexOf(command) < source.indexOf('git clone https://github.com/Spielewoy/autoprompt-skill'), relativePath)
+    assert.doesNotMatch(source, /git clone --branch codex\/v2-final-merge/, relativePath)
+    assert.match(source, /https:\/\/github\.com\/Spielewoy\/autoprompt-skill\/releases\/latest/, relativePath)
   }
 })
 
@@ -189,18 +169,16 @@ test('public documentation contains no em dashes or provenance boilerplate', () 
   )
 })
 
-test('unsupported model routing is stated plainly in every language', () => {
-  const expectations = new Map([
-    ['README.md', 'Not available - inherits'],
-    ['docs/translations/zh.md', '不支持 - 沿用'],
-    ['docs/translations/ko.md', '미지원 -'],
-    ['docs/translations/es.md', 'No disponible - hereda'],
-    ['docs/translations/ar.md', 'غير متاح - يرث'],
-  ])
-  for (const [relativePath, wording] of expectations) {
+test('translated READMEs preserve current provider versions and executable examples', () => {
+  const current = read('README.md')
+  const examples = source => [...source.matchAll(/```bash\n([\s\S]*?)```/g)].map(match => match[1])
+  const providers = source => source.split('\n').filter(line => /^\|/.test(line)).map(line => line.split('|').map(cell => cell.trim())).filter(cells => /^\d+\.\d+\.\d+(?:-[\w.]+)?$/.test(cells[3] ?? '')).map(cells => [cells[3], cells[4]])
+  assert.equal(providers(current).length, 11)
+  for (const language of ['zh', 'ko', 'es', 'ar']) {
+    const relativePath = `docs/translations/${language}.md`
     const source = read(relativePath)
-    const row = source.split('\n').find(line => line.includes('|') && line.includes('`agents=`')) ?? ''
-    assert.equal((row.match(/✕/g) ?? []).length, 7, relativePath)
-    assert.equal(row.split(wording).length - 1, 7, relativePath)
+    assert.deepEqual(examples(source), examples(current), relativePath)
+    assert.deepEqual(providers(source), providers(current), relativePath)
+    assert.doesNotMatch(source, /v2-verification\.md|Not available - inherits/, relativePath)
   }
 })

@@ -1,5 +1,8 @@
 本项目在当前 `agents/deepseek/**` 工作，基于DeepSeek Harness 下使用。其他工程文件可忽略，不含文档/docs。
 
+本项目不使用任何安装器。scripts，tests，仅为DeepSeek Harness 测试服务使用；
+如有脚本疑问基于DeepSeek Harness 最新版本修正，而不是Harness基于脚本
+
 ### Discuss
 
 使用 Discuss 理解请求、探索备选方案，并消除足够的歧义，以判断下一阶段。

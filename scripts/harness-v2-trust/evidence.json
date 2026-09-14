@@ -1,0 +1,1059 @@
+{
+  "schemaVersion": "harness-v2-live-conformance.v1",
+  "records": [],
+  "reviewedLocalRecords": [
+    {
+      "schemaVersion": "harness-v2-reviewed-local-canary.v1",
+      "policy": "reviewed-local-release-v1",
+      "provider": "claude",
+      "status": "reviewed",
+      "releaseScope": {
+        "provider": "claude",
+        "reviewedRuntimeDigest": "dddc1a88a5a0f39ee304332aedb6b99b82935bde0183bd4ebd34aedce95a8671",
+        "platform": "linux",
+        "architecture": "x64",
+        "executableReviewSha256": "26d020351e8112f4006790f3cfce43b4c9df0c1bb1d0e542364d64151b81d5ba",
+        "executableVersion": "2.1.263",
+        "nativeRuntime": {
+          "sha256": "1d1799b3331897ce404e9a0b8bcddb57bfbac93fbe2ad05eebb648c66077a4bd",
+          "fileCount": 11,
+          "packageCount": 2
+        }
+      },
+      "releaseIdentityHash": "edc02b753ad46fa6c68b621376950f0adcd9dc289d71fbff83f7efde5e2cce93",
+      "protocol": {
+        "source": "scripts/harness-v2-transport.cjs",
+        "sha256": "40b47c16e0dec3c48c7dfacb690e0aa26d588d529ffb4a522d522cd1a184e034"
+      },
+      "canaryImplementation": {
+        "source": "scripts/harness-v2-canary.cjs",
+        "sha256": "f1c72e6fd232d6c07e5cad6874d2fc59bcb75737a603bc544dbea32c94b5bf3c"
+      },
+      "capabilityCases": {
+        "isolation": {
+          "source": "tests/source/harness-v2-claude-capability-native.test.cjs",
+          "sha256": "332ec2c8dca562800e29c9ea0c361d785901c53a7e0c13cb0b5a0fd5d55d1fee",
+          "testName": "claude closed native capability: isolation denies candidate/private/network while allowing scratch"
+        },
+        "topologyEnforcement": {
+          "source": "tests/source/harness-v2-claude-capability-native.test.cjs",
+          "sha256": "332ec2c8dca562800e29c9ea0c361d785901c53a7e0c13cb0b5a0fd5d55d1fee",
+          "testName": "claude closed native capability: topology rejects injected nested dispatch and permits only its controller edge"
+        },
+        "privateSkillRoot": {
+          "source": "tests/source/harness-v2-claude-capability-native.test.cjs",
+          "sha256": "332ec2c8dca562800e29c9ea0c361d785901c53a7e0c13cb0b5a0fd5d55d1fee",
+          "testName": "claude closed native capability: private skill root and ambient project configuration stay outside the model"
+        },
+        "eventStreaming": {
+          "source": "tests/source/harness-v2-claude-capability-native.test.cjs",
+          "sha256": "332ec2c8dca562800e29c9ea0c361d785901c53a7e0c13cb0b5a0fd5d55d1fee",
+          "testName": "claude closed native capability: intermediate stream events remain correlated to the native session"
+        },
+        "toolOutputCapture": {
+          "source": "tests/source/harness-v2-claude-capability-native.test.cjs",
+          "sha256": "332ec2c8dca562800e29c9ea0c361d785901c53a7e0c13cb0b5a0fd5d55d1fee",
+          "testName": "claude closed native capability: exact controller tool receipt binds the real command output"
+        },
+        "stableChildIdentity": {
+          "source": "tests/source/harness-v2-claude-capability-native.test.cjs",
+          "sha256": "332ec2c8dca562800e29c9ea0c361d785901c53a7e0c13cb0b5a0fd5d55d1fee",
+          "testName": "claude closed native capability: concurrently owned siblings receive separate native identities"
+        },
+        "sameContextContinuation": {
+          "source": "tests/source/harness-v2-claude-capability-native.test.cjs",
+          "sha256": "332ec2c8dca562800e29c9ea0c361d785901c53a7e0c13cb0b5a0fd5d55d1fee",
+          "testName": "claude closed native capability: same-context continuation succeeds while foreign target reuse is refused"
+        },
+        "cancellation": {
+          "source": "tests/source/harness-v2-claude-capability-native.test.cjs",
+          "sha256": "332ec2c8dca562800e29c9ea0c361d785901c53a7e0c13cb0b5a0fd5d55d1fee",
+          "testName": "claude closed native capability: cancellation drains the held child and a sibling remains operational"
+        },
+        "isolatedChecking": {
+          "source": "tests/source/harness-v2-claude-capability-native.test.cjs",
+          "sha256": "332ec2c8dca562800e29c9ea0c361d785901c53a7e0c13cb0b5a0fd5d55d1fee",
+          "testName": "claude closed native capability: isolated checker receives read-only candidate and private scratch"
+        },
+        "processOwnership": {
+          "source": "tests/source/harness-v2-claude-capability-native.test.cjs",
+          "sha256": "332ec2c8dca562800e29c9ea0c361d785901c53a7e0c13cb0b5a0fd5d55d1fee",
+          "testName": "claude closed native capability: process ownership records completion and recovers a fresh session"
+        },
+        "modelRouting": {
+          "source": "tests/source/harness-v2-claude-capability-native.test.cjs",
+          "sha256": "332ec2c8dca562800e29c9ea0c361d785901c53a7e0c13cb0b5a0fd5d55d1fee",
+          "testName": "claude closed native capability: exact model effort is wired and unsupported assignment is refused"
+        }
+      },
+      "liveEvidence": [
+        {
+          "id": "maintainer-native-claude-deepseek-suite-28-pass",
+          "sha256": "36d012e47cee4802c76a80630fac68c1966fc04c165dc682659c7d8ff008f52c"
+        },
+        {
+          "id": "maintainer-claude-implied-object-schema-review-3-pass",
+          "sha256": "e17600bda6f6d7845a53b885d2f453839358caa839812f14f711d4c5ce2237a8"
+        },
+        {
+          "id": "maintainer-r10-claude-closed-canary-11-and-mission-failed",
+          "sha256": "198856723afdf048f943e62d7d298c6537768c9b9fa417f746dac46790c77d77"
+        }
+      ],
+      "reviewer": {
+        "issuer": "autoprompt-maintainer-release-review",
+        "reviewId": "claude-v2.0.0-beta.1-maintainer-review-20260909"
+      },
+      "issuedAt": "2026-09-09T21:00:07.718Z",
+      "expiresAt": "2027-03-09T23:59:59.000Z",
+      "reviewDigest": "56e8875b54dc25960bbb075621af864e05823707825d9faf19309184902e9b04"
+    },
+    {
+      "schemaVersion": "harness-v2-reviewed-local-canary.v1",
+      "policy": "reviewed-local-release-v1",
+      "provider": "deepseek",
+      "status": "reviewed",
+      "releaseScope": {
+        "provider": "deepseek",
+        "reviewedRuntimeDigest": "544487de902613c919dcb828fbacedd3e0a233c8a68981a3d920305611d3134f",
+        "platform": "linux",
+        "architecture": "x64",
+        "executableReviewSha256": "dc23f6c5dd7df8834e3e38bdb9609d77b459834681ae9b7133b417b0c35f3166",
+        "executableVersion": "0.1.2-rc.1",
+        "nativeRuntime": {
+          "sha256": "4e1acaf85817379da6a75085f2555bd7301e7ee81c6c5714927272c2c47e4cb1",
+          "fileCount": 24901,
+          "packageCount": 522
+        }
+      },
+      "releaseIdentityHash": "8ee72976446e0e0f830c9bbf19f5b471b1fe73dde849dac489830900fcfccc1a",
+      "protocol": {
+        "source": "scripts/harness-v2-transport.cjs",
+        "sha256": "40b47c16e0dec3c48c7dfacb690e0aa26d588d529ffb4a522d522cd1a184e034"
+      },
+      "canaryImplementation": {
+        "source": "scripts/harness-v2-canary.cjs",
+        "sha256": "f1c72e6fd232d6c07e5cad6874d2fc59bcb75737a603bc544dbea32c94b5bf3c"
+      },
+      "capabilityCases": {
+        "isolation": {
+          "source": "tests/source/harness-v2-deepseek-capability-native.test.cjs",
+          "sha256": "dc18a5cdd1b8792723e39984c540aaef8825463c3f45c456dbfcbb431cb1e659",
+          "testName": "deepseek closed native capability: isolation"
+        },
+        "topologyEnforcement": {
+          "source": "tests/source/harness-v2-deepseek-capability-native.test.cjs",
+          "sha256": "dc18a5cdd1b8792723e39984c540aaef8825463c3f45c456dbfcbb431cb1e659",
+          "testName": "deepseek closed native capability: topologyEnforcement"
+        },
+        "privateSkillRoot": {
+          "source": "tests/source/harness-v2-deepseek-capability-native.test.cjs",
+          "sha256": "dc18a5cdd1b8792723e39984c540aaef8825463c3f45c456dbfcbb431cb1e659",
+          "testName": "deepseek closed native capability: privateSkillRoot"
+        },
+        "eventStreaming": {
+          "source": "tests/source/harness-v2-deepseek-capability-native.test.cjs",
+          "sha256": "dc18a5cdd1b8792723e39984c540aaef8825463c3f45c456dbfcbb431cb1e659",
+          "testName": "deepseek closed native capability: eventStreaming"
+        },
+        "toolOutputCapture": {
+          "source": "tests/source/harness-v2-deepseek-capability-native.test.cjs",
+          "sha256": "dc18a5cdd1b8792723e39984c540aaef8825463c3f45c456dbfcbb431cb1e659",
+          "testName": "deepseek closed native capability: toolOutputCapture"
+        },
+        "stableChildIdentity": {
+          "source": "tests/source/harness-v2-deepseek-capability-native.test.cjs",
+          "sha256": "dc18a5cdd1b8792723e39984c540aaef8825463c3f45c456dbfcbb431cb1e659",
+          "testName": "deepseek closed native capability: stableChildIdentity"
+        },
+        "sameContextContinuation": {
+          "source": "tests/source/harness-v2-deepseek-capability-native.test.cjs",
+          "sha256": "dc18a5cdd1b8792723e39984c540aaef8825463c3f45c456dbfcbb431cb1e659",
+          "testName": "deepseek closed native capability: sameContextContinuation"
+        },
+        "cancellation": {
+          "source": "tests/source/harness-v2-deepseek-capability-native.test.cjs",
+          "sha256": "dc18a5cdd1b8792723e39984c540aaef8825463c3f45c456dbfcbb431cb1e659",
+          "testName": "deepseek closed native capability: cancellation"
+        },
+        "isolatedChecking": {
+          "source": "tests/source/harness-v2-deepseek-capability-native.test.cjs",
+          "sha256": "dc18a5cdd1b8792723e39984c540aaef8825463c3f45c456dbfcbb431cb1e659",
+          "testName": "deepseek closed native capability: isolatedChecking"
+        },
+        "processOwnership": {
+          "source": "tests/source/harness-v2-deepseek-capability-native.test.cjs",
+          "sha256": "dc18a5cdd1b8792723e39984c540aaef8825463c3f45c456dbfcbb431cb1e659",
+          "testName": "deepseek closed native capability: processOwnership"
+        },
+        "modelRouting": {
+          "source": "tests/source/harness-v2-deepseek-capability-native.test.cjs",
+          "sha256": "dc18a5cdd1b8792723e39984c540aaef8825463c3f45c456dbfcbb431cb1e659",
+          "testName": "deepseek closed native capability: modelRouting"
+        }
+      },
+      "liveEvidence": [
+        {
+          "id": "maintainer-native-claude-deepseek-suite-28-pass",
+          "sha256": "36d012e47cee4802c76a80630fac68c1966fc04c165dc682659c7d8ff008f52c"
+        },
+        {
+          "id": "maintainer-deepseek-capability-suite-11-pass",
+          "sha256": "7bece17c7bd45b2051118a5182a783b061bb43e21c5c7f2a341042ff87bed190"
+        },
+        {
+          "id": "maintainer-r10-deepseek-closed-canary-11-and-mission-done",
+          "sha256": "368ecca7700573c6f1bf0168e9012227ed03beecb4619d0df7e93d6548305cf0"
+        }
+      ],
+      "reviewer": {
+        "issuer": "autoprompt-maintainer-release-review",
+        "reviewId": "deepseek-v2.0.0-beta.1-maintainer-review-20260909"
+      },
+      "issuedAt": "2026-09-09T21:00:07.718Z",
+      "expiresAt": "2027-03-09T23:59:59.000Z",
+      "reviewDigest": "d429cbff47150aa9a228207824638c3ea39f8e91cb18a17fb982d6ba581ad7d4"
+    },
+    {
+      "schemaVersion": "harness-v2-reviewed-local-canary.v1",
+      "policy": "reviewed-local-release-v1",
+      "provider": "grok",
+      "status": "reviewed",
+      "releaseScope": {
+        "provider": "grok",
+        "reviewedRuntimeDigest": "1ea32da605b6c83517dd716c2ba2c3209ddf9e871780c033d02c4f1def88bfe7",
+        "platform": "linux",
+        "architecture": "x64",
+        "executableReviewSha256": "edf79521581bb5e6b95abef848491a6a742e860da3e237ebe86a280d30dce4c1",
+        "executableVersion": "1.0.13",
+        "nativeRuntime": {
+          "sha256": "e1e353da4255e35606e5f7ae6ed4b514a8db736b3be80042c5cd73fbecb3fade",
+          "fileCount": 1,
+          "packageCount": 0
+        }
+      },
+      "releaseIdentityHash": "25366ff528785be095bbeeef0731a61d27ac836061384586d612beecb53b733d",
+      "protocol": {
+        "source": "scripts/harness-v2-transport.cjs",
+        "sha256": "40b47c16e0dec3c48c7dfacb690e0aa26d588d529ffb4a522d522cd1a184e034"
+      },
+      "canaryImplementation": {
+        "source": "scripts/harness-v2-canary.cjs",
+        "sha256": "f1c72e6fd232d6c07e5cad6874d2fc59bcb75737a603bc544dbea32c94b5bf3c"
+      },
+      "capabilityCases": {
+        "isolation": {
+          "source": "tests/source/harness-v2-grok-capability-native.test.cjs",
+          "sha256": "83f25dd428fca69368c32b8f9f54d1d76255748eedbb17deb46520a75509904f",
+          "testName": "grok closed native capability: all six owned tools enforce write/private/network isolation and scratch witness"
+        },
+        "topologyEnforcement": {
+          "source": "tests/source/harness-v2-grok-capability-native.test.cjs",
+          "sha256": "83f25dd428fca69368c32b8f9f54d1d76255748eedbb17deb46520a75509904f",
+          "testName": "grok closed native capability: hostile native tool topology is denied before an owned controller call"
+        },
+        "privateSkillRoot": {
+          "source": "tests/source/harness-v2-grok-capability-native.test.cjs",
+          "sha256": "83f25dd428fca69368c32b8f9f54d1d76255748eedbb17deb46520a75509904f",
+          "testName": "grok closed native capability: private and ambient configuration are absent from actual model requests"
+        },
+        "eventStreaming": {
+          "source": "tests/source/harness-v2-grok-capability-native.test.cjs",
+          "sha256": "83f25dd428fca69368c32b8f9f54d1d76255748eedbb17deb46520a75509904f",
+          "testName": "grok closed native capability: native event stream stays correlated to one context"
+        },
+        "toolOutputCapture": {
+          "source": "tests/source/harness-v2-grok-capability-native.test.cjs",
+          "sha256": "83f25dd428fca69368c32b8f9f54d1d76255748eedbb17deb46520a75509904f",
+          "testName": "grok closed native capability: exact output bytes are committed in the controller receipt"
+        },
+        "stableChildIdentity": {
+          "source": "tests/source/harness-v2-grok-capability-native.test.cjs",
+          "sha256": "83f25dd428fca69368c32b8f9f54d1d76255748eedbb17deb46520a75509904f",
+          "testName": "grok closed native capability: overlapping siblings retain unique contexts and drain"
+        },
+        "sameContextContinuation": {
+          "source": "tests/source/harness-v2-grok-capability-native.test.cjs",
+          "sha256": "83f25dd428fca69368c32b8f9f54d1d76255748eedbb17deb46520a75509904f",
+          "testName": "grok closed native capability: resume reuses only its bound target context"
+        },
+        "cancellation": {
+          "source": "tests/source/harness-v2-grok-capability-native.test.cjs",
+          "sha256": "83f25dd428fca69368c32b8f9f54d1d76255748eedbb17deb46520a75509904f",
+          "testName": "grok closed native capability: held child cancels while a fast sibling remains alive and drained"
+        },
+        "isolatedChecking": {
+          "source": "tests/source/harness-v2-grok-capability-native.test.cjs",
+          "sha256": "83f25dd428fca69368c32b8f9f54d1d76255748eedbb17deb46520a75509904f",
+          "testName": "grok closed native capability: checker sees frozen candidate but writes only authenticated scratch"
+        },
+        "processOwnership": {
+          "source": "tests/source/harness-v2-grok-capability-native.test.cjs",
+          "sha256": "83f25dd428fca69368c32b8f9f54d1d76255748eedbb17deb46520a75509904f",
+          "testName": "grok closed native capability: crash recovery drains the durable owned child"
+        },
+        "modelRouting": {
+          "source": "tests/source/harness-v2-grok-capability-native.test.cjs",
+          "sha256": "83f25dd428fca69368c32b8f9f54d1d76255748eedbb17deb46520a75509904f",
+          "testName": "grok closed native capability: model and effort reach native wire while unsupported assignment is refused"
+        }
+      },
+      "liveEvidence": [
+        {
+          "id": "maintainer-grok-structured-capability-suite-11-pass",
+          "sha256": "3a93d7760dd9683e8332c49960d419b92d2fe0ec9cb24067fd420ea008a31dc6"
+        },
+        {
+          "id": "maintainer-r10-grok-closed-canary-11-and-mission-failed",
+          "sha256": "f8572fa1a2847bec6725806e32294f2f29d34bed055d616d831a8452301823a2"
+        }
+      ],
+      "reviewer": {
+        "issuer": "autoprompt-maintainer-release-review",
+        "reviewId": "grok-v2.0.0-beta.1-maintainer-review-20260909"
+      },
+      "issuedAt": "2026-09-09T21:00:07.718Z",
+      "expiresAt": "2027-03-09T23:59:59.000Z",
+      "reviewDigest": "09569cb4d2d91fe6435e016dba4b9c5f2dd08d9f5df1a88672392b1a0f3c8a01"
+    },
+    {
+      "schemaVersion": "harness-v2-reviewed-local-canary.v1",
+      "policy": "reviewed-local-release-v1",
+      "provider": "hermes",
+      "status": "reviewed",
+      "releaseScope": {
+        "provider": "hermes",
+        "reviewedRuntimeDigest": "d1c72123de7dee08ad6df6056201a30a713828d1aed58b466f23437a91688f7e",
+        "platform": "linux",
+        "architecture": "x64",
+        "executableReviewSha256": "c214aa576f019bc82754571152b1eef908b785aa059c0a79ec6a1ce7df157601",
+        "executableVersion": "0.21.1",
+        "nativeRuntime": {
+          "sha256": "15749813e7936e2c00e4f1eec0bace60466bbd96fd2f24ec2e2436065bac8865",
+          "fileCount": 19692,
+          "packageCount": 79
+        }
+      },
+      "releaseIdentityHash": "378862bd4e42cb88e9ef2becfd85af871b303326149f0e786ee2d3d2123014bf",
+      "protocol": {
+        "source": "scripts/harness-v2-transport.cjs",
+        "sha256": "40b47c16e0dec3c48c7dfacb690e0aa26d588d529ffb4a522d522cd1a184e034"
+      },
+      "canaryImplementation": {
+        "source": "scripts/harness-v2-canary.cjs",
+        "sha256": "f1c72e6fd232d6c07e5cad6874d2fc59bcb75737a603bc544dbea32c94b5bf3c"
+      },
+      "capabilityCases": {
+        "isolation": {
+          "source": "tests/source/harness-v2-hermes-capability-native.test.cjs",
+          "sha256": "23a2d083e839baa2788f6aafc3152a425f00cb935b557c35586d8b403e647fa8",
+          "testName": "hermes closed native capability: isolation denies candidate/private/network while allowing scratch"
+        },
+        "topologyEnforcement": {
+          "source": "tests/source/harness-v2-hermes-capability-native.test.cjs",
+          "sha256": "23a2d083e839baa2788f6aafc3152a425f00cb935b557c35586d8b403e647fa8",
+          "testName": "hermes closed native capability: topology rejects injected nested tool and admits controller edge"
+        },
+        "privateSkillRoot": {
+          "source": "tests/source/harness-v2-hermes-capability-native.test.cjs",
+          "sha256": "23a2d083e839baa2788f6aafc3152a425f00cb935b557c35586d8b403e647fa8",
+          "testName": "hermes closed native capability: ambient configuration skills and hooks stay absent"
+        },
+        "eventStreaming": {
+          "source": "tests/source/harness-v2-hermes-capability-native.test.cjs",
+          "sha256": "23a2d083e839baa2788f6aafc3152a425f00cb935b557c35586d8b403e647fa8",
+          "testName": "hermes closed native capability: real intermediate tool journal event is correlated before final response"
+        },
+        "toolOutputCapture": {
+          "source": "tests/source/harness-v2-hermes-capability-native.test.cjs",
+          "sha256": "23a2d083e839baa2788f6aafc3152a425f00cb935b557c35586d8b403e647fa8",
+          "testName": "hermes closed native capability: exact controller output bytes bind to receipt"
+        },
+        "stableChildIdentity": {
+          "source": "tests/source/harness-v2-hermes-capability-native.test.cjs",
+          "sha256": "23a2d083e839baa2788f6aafc3152a425f00cb935b557c35586d8b403e647fa8",
+          "testName": "hermes closed native capability: concurrent siblings keep separate identities"
+        },
+        "sameContextContinuation": {
+          "source": "tests/source/harness-v2-hermes-capability-native.test.cjs",
+          "sha256": "23a2d083e839baa2788f6aafc3152a425f00cb935b557c35586d8b403e647fa8",
+          "testName": "hermes closed native capability: continuation resumes and foreign target is denied"
+        },
+        "cancellation": {
+          "source": "tests/source/harness-v2-hermes-capability-native.test.cjs",
+          "sha256": "23a2d083e839baa2788f6aafc3152a425f00cb935b557c35586d8b403e647fa8",
+          "testName": "hermes closed native capability: cancellation drains held child while sibling succeeds"
+        },
+        "isolatedChecking": {
+          "source": "tests/source/harness-v2-hermes-capability-native.test.cjs",
+          "sha256": "23a2d083e839baa2788f6aafc3152a425f00cb935b557c35586d8b403e647fa8",
+          "testName": "hermes closed native capability: independent checker freezes candidate and writes scratch"
+        },
+        "processOwnership": {
+          "source": "tests/source/harness-v2-hermes-capability-native.test.cjs",
+          "sha256": "23a2d083e839baa2788f6aafc3152a425f00cb935b557c35586d8b403e647fa8",
+          "testName": "hermes closed native capability: durable owner recovery drains live crashed controller child"
+        },
+        "modelRouting": {
+          "source": "tests/source/harness-v2-hermes-capability-native.test.cjs",
+          "sha256": "23a2d083e839baa2788f6aafc3152a425f00cb935b557c35586d8b403e647fa8",
+          "testName": "hermes closed native capability: model effort is wired and unsupported effort is denied"
+        }
+      },
+      "liveEvidence": [
+        {
+          "id": "maintainer-hermes-final-closure-topology-review-pass",
+          "sha256": "13f2d37973151e4d3e3b2175427e8eb13ffcdd1f845a94954ae972080071da6d"
+        },
+        {
+          "id": "maintainer-hermes-final-closure-topology-source-run-pass",
+          "sha256": "943d3fd199ebc15e437660e8318f2ffa4f74320374a70eafc2e32b255366d858"
+        },
+        {
+          "id": "maintainer-hermes-final-portable-closure-capability-suite-13-pass",
+          "sha256": "7697e1b48d7d3b2c0575acb4360feb7b799e561bb3ade2f5a447ee11eab407de"
+        }
+      ],
+      "reviewer": {
+        "issuer": "autoprompt-maintainer-release-review",
+        "reviewId": "hermes-v2.0.0-beta.1-maintainer-review-20260909"
+      },
+      "issuedAt": "2026-09-09T21:00:07.718Z",
+      "expiresAt": "2027-03-09T23:59:59.000Z",
+      "reviewDigest": "facd058410612e0dc1a5cb53b02eaffc08f77536252650f5d83e37f4a82af745"
+    },
+    {
+      "schemaVersion": "harness-v2-reviewed-local-canary.v1",
+      "policy": "reviewed-local-release-v1",
+      "provider": "kilo",
+      "status": "reviewed",
+      "releaseScope": {
+        "provider": "kilo",
+        "reviewedRuntimeDigest": "9394a5457f3cd6326831fcf42aa6089a269a4efaa7a19c3690cf9759a2e9c048",
+        "platform": "linux",
+        "architecture": "x64",
+        "executableReviewSha256": "2dd7a1ec0a5a56fc925f30c3a107a0e52dce6c6b18216a86a3ebaffe1643d594",
+        "executableVersion": "7.5.15",
+        "nativeRuntime": {
+          "sha256": "ec7c1c0332d288666adfdaddea83677977563cb3c9ff88b9706cdca2d8754256",
+          "fileCount": 1296,
+          "packageCount": 3
+        }
+      },
+      "releaseIdentityHash": "e6703fd53297d3787f1e68158b2ef58a7e2bbe5dec1b6021718987237a71929a",
+      "protocol": {
+        "source": "scripts/harness-v2-transport.cjs",
+        "sha256": "40b47c16e0dec3c48c7dfacb690e0aa26d588d529ffb4a522d522cd1a184e034"
+      },
+      "canaryImplementation": {
+        "source": "scripts/harness-v2-canary.cjs",
+        "sha256": "f1c72e6fd232d6c07e5cad6874d2fc59bcb75737a603bc544dbea32c94b5bf3c"
+      },
+      "capabilityCases": {
+        "isolation": {
+          "source": "tests/source/harness-v2-opencode-capability-native.test.cjs",
+          "sha256": "43f50674c5bbfb0681cf9094cad1e432061c688f4fdf1985ecaf05420d98bc06",
+          "testName": "kilo closed native capability: isolation"
+        },
+        "topologyEnforcement": {
+          "source": "tests/source/harness-v2-opencode-capability-native.test.cjs",
+          "sha256": "43f50674c5bbfb0681cf9094cad1e432061c688f4fdf1985ecaf05420d98bc06",
+          "testName": "kilo closed native capability: topologyEnforcement"
+        },
+        "privateSkillRoot": {
+          "source": "tests/source/harness-v2-opencode-capability-native.test.cjs",
+          "sha256": "43f50674c5bbfb0681cf9094cad1e432061c688f4fdf1985ecaf05420d98bc06",
+          "testName": "kilo closed native capability: privateSkillRoot"
+        },
+        "eventStreaming": {
+          "source": "tests/source/harness-v2-opencode-capability-native.test.cjs",
+          "sha256": "43f50674c5bbfb0681cf9094cad1e432061c688f4fdf1985ecaf05420d98bc06",
+          "testName": "kilo closed native capability: eventStreaming"
+        },
+        "toolOutputCapture": {
+          "source": "tests/source/harness-v2-opencode-capability-native.test.cjs",
+          "sha256": "43f50674c5bbfb0681cf9094cad1e432061c688f4fdf1985ecaf05420d98bc06",
+          "testName": "kilo closed native capability: toolOutputCapture"
+        },
+        "stableChildIdentity": {
+          "source": "tests/source/harness-v2-opencode-capability-native.test.cjs",
+          "sha256": "43f50674c5bbfb0681cf9094cad1e432061c688f4fdf1985ecaf05420d98bc06",
+          "testName": "kilo closed native capability: stableChildIdentity"
+        },
+        "sameContextContinuation": {
+          "source": "tests/source/harness-v2-opencode-capability-native.test.cjs",
+          "sha256": "43f50674c5bbfb0681cf9094cad1e432061c688f4fdf1985ecaf05420d98bc06",
+          "testName": "kilo closed native capability: sameContextContinuation"
+        },
+        "cancellation": {
+          "source": "tests/source/harness-v2-opencode-capability-native.test.cjs",
+          "sha256": "43f50674c5bbfb0681cf9094cad1e432061c688f4fdf1985ecaf05420d98bc06",
+          "testName": "kilo closed native capability: cancellation"
+        },
+        "isolatedChecking": {
+          "source": "tests/source/harness-v2-opencode-capability-native.test.cjs",
+          "sha256": "43f50674c5bbfb0681cf9094cad1e432061c688f4fdf1985ecaf05420d98bc06",
+          "testName": "kilo closed native capability: isolatedChecking"
+        },
+        "processOwnership": {
+          "source": "tests/source/harness-v2-opencode-capability-native.test.cjs",
+          "sha256": "43f50674c5bbfb0681cf9094cad1e432061c688f4fdf1985ecaf05420d98bc06",
+          "testName": "kilo closed native capability: processOwnership"
+        },
+        "modelRouting": {
+          "source": "tests/source/harness-v2-opencode-capability-native.test.cjs",
+          "sha256": "43f50674c5bbfb0681cf9094cad1e432061c688f4fdf1985ecaf05420d98bc06",
+          "testName": "kilo closed native capability: modelRouting"
+        }
+      },
+      "liveEvidence": [
+        {
+          "id": "maintainer-opencode-kilo-capability-suite-22-pass",
+          "sha256": "668e75e45e5d05ee6b11a3df21e8ca6f5d3f52ab5288608e7a84cc383b87422b"
+        },
+        {
+          "id": "maintainer-r10-kilo-closed-canary-11-and-mission-failed",
+          "sha256": "4670fcf6e874511ff2ee9c22816f1789ec60dda872b4bd6b0e644f831ced74f9"
+        }
+      ],
+      "reviewer": {
+        "issuer": "autoprompt-maintainer-release-review",
+        "reviewId": "kilo-v2.0.0-beta.1-maintainer-review-20260909"
+      },
+      "issuedAt": "2026-09-09T21:00:07.718Z",
+      "expiresAt": "2027-03-09T23:59:59.000Z",
+      "reviewDigest": "53c4c18b6c33f714bb5d99a1452a28af07fc323a0e29e95923f4a2e5af6e906f"
+    },
+    {
+      "schemaVersion": "harness-v2-reviewed-local-canary.v1",
+      "policy": "reviewed-local-release-v1",
+      "provider": "omp",
+      "status": "reviewed",
+      "releaseScope": {
+        "provider": "omp",
+        "reviewedRuntimeDigest": "3c897358c65f38e03bcbdcf628055533de9ae7e7a118ee1488c536df4b98d392",
+        "platform": "linux",
+        "architecture": "x64",
+        "executableReviewSha256": "3952b49e821e7f7d28925a9fdbd68b40051225a1468e4c0b55bee65a152288e0",
+        "executableVersion": "18.1.14",
+        "nativeRuntime": {
+          "sha256": "65a6bb52c111b20664110ccb286e7fbfc0d3ebbe30383db15de27cc86afaba44",
+          "fileCount": 24747,
+          "packageCount": 155
+        }
+      },
+      "releaseIdentityHash": "80fd99bb019a3ebb44186040a38536ee2a725e0f1b61627fe009ecaf3957df53",
+      "protocol": {
+        "source": "scripts/harness-v2-transport.cjs",
+        "sha256": "40b47c16e0dec3c48c7dfacb690e0aa26d588d529ffb4a522d522cd1a184e034"
+      },
+      "canaryImplementation": {
+        "source": "scripts/harness-v2-canary.cjs",
+        "sha256": "f1c72e6fd232d6c07e5cad6874d2fc59bcb75737a603bc544dbea32c94b5bf3c"
+      },
+      "capabilityCases": {
+        "isolation": {
+          "source": "tests/source/harness-v2-pi-capability-native.test.cjs",
+          "sha256": "a109e39b2ab02d821894c0db8a4300eaec5f19f663805c0b671dab6b28d0519a",
+          "testName": "omp closed native capability: all six owned tools enforce write/private/network isolation and scratch witness"
+        },
+        "topologyEnforcement": {
+          "source": "tests/source/harness-v2-pi-capability-native.test.cjs",
+          "sha256": "a109e39b2ab02d821894c0db8a4300eaec5f19f663805c0b671dab6b28d0519a",
+          "testName": "omp closed native capability: hostile nested dispatch is denied and only the fixed controller topology is advertised"
+        },
+        "privateSkillRoot": {
+          "source": "tests/source/harness-v2-pi-capability-native.test.cjs",
+          "sha256": "a109e39b2ab02d821894c0db8a4300eaec5f19f663805c0b671dab6b28d0519a",
+          "testName": "omp closed native capability: private and ambient configuration are absent from actual model requests"
+        },
+        "eventStreaming": {
+          "source": "tests/source/harness-v2-pi-capability-native.test.cjs",
+          "sha256": "a109e39b2ab02d821894c0db8a4300eaec5f19f663805c0b671dab6b28d0519a",
+          "testName": "omp closed native capability: native event stream stays correlated to one context"
+        },
+        "toolOutputCapture": {
+          "source": "tests/source/harness-v2-pi-capability-native.test.cjs",
+          "sha256": "a109e39b2ab02d821894c0db8a4300eaec5f19f663805c0b671dab6b28d0519a",
+          "testName": "omp closed native capability: exact output bytes are committed in the controller receipt"
+        },
+        "stableChildIdentity": {
+          "source": "tests/source/harness-v2-pi-capability-native.test.cjs",
+          "sha256": "a109e39b2ab02d821894c0db8a4300eaec5f19f663805c0b671dab6b28d0519a",
+          "testName": "omp closed native capability: overlapping siblings retain unique contexts and drain"
+        },
+        "sameContextContinuation": {
+          "source": "tests/source/harness-v2-pi-capability-native.test.cjs",
+          "sha256": "a109e39b2ab02d821894c0db8a4300eaec5f19f663805c0b671dab6b28d0519a",
+          "testName": "omp closed native capability: resume reuses only its bound target context"
+        },
+        "cancellation": {
+          "source": "tests/source/harness-v2-pi-capability-native.test.cjs",
+          "sha256": "a109e39b2ab02d821894c0db8a4300eaec5f19f663805c0b671dab6b28d0519a",
+          "testName": "omp closed native capability: held child cancels while a fast sibling remains alive and drained"
+        },
+        "isolatedChecking": {
+          "source": "tests/source/harness-v2-pi-capability-native.test.cjs",
+          "sha256": "a109e39b2ab02d821894c0db8a4300eaec5f19f663805c0b671dab6b28d0519a",
+          "testName": "omp closed native capability: checker sees frozen candidate but writes only authenticated scratch"
+        },
+        "processOwnership": {
+          "source": "tests/source/harness-v2-pi-capability-native.test.cjs",
+          "sha256": "a109e39b2ab02d821894c0db8a4300eaec5f19f663805c0b671dab6b28d0519a",
+          "testName": "omp closed native capability: crash recovery drains the durable owned child"
+        },
+        "modelRouting": {
+          "source": "tests/source/harness-v2-pi-capability-native.test.cjs",
+          "sha256": "a109e39b2ab02d821894c0db8a4300eaec5f19f663805c0b671dab6b28d0519a",
+          "testName": "omp closed native capability: model and effort reach native wire while unsupported assignment is refused"
+        }
+      },
+      "liveEvidence": [
+        {
+          "id": "maintainer-omp-relocated-capability-suite-11-pass",
+          "sha256": "a03f9dc4974bc01ebbf0f9c1b39531999e35c41e4b47b1485ce737163320cb65"
+        },
+        {
+          "id": "maintainer-omp-clearenv-relocation-review",
+          "sha256": "6a1a3e4d397e35d119585ff63128e1d9dad47b1a5b5f5e19a4e2969652eecdf3"
+        },
+        {
+          "id": "maintainer-r10-omp-closed-canary-11-and-mission-failed",
+          "sha256": "4e7974d8b63bb3afda15173bbaf8a00e651ff86d3efd5c07cc65b693c75e1b04"
+        }
+      ],
+      "reviewer": {
+        "issuer": "autoprompt-maintainer-release-review",
+        "reviewId": "omp-v2.0.0-beta.1-maintainer-review-20260909"
+      },
+      "issuedAt": "2026-09-09T21:00:07.718Z",
+      "expiresAt": "2027-03-09T23:59:59.000Z",
+      "reviewDigest": "8abe225e2c6c1cdf2914096c570769f647138e3a39565776d3bbedb18e36ab49"
+    },
+    {
+      "schemaVersion": "harness-v2-reviewed-local-canary.v1",
+      "policy": "reviewed-local-release-v1",
+      "provider": "opencode",
+      "status": "reviewed",
+      "releaseScope": {
+        "provider": "opencode",
+        "reviewedRuntimeDigest": "d76a49a017a3121a3de51775a6edd7fb3ce58a21043ec819d3caeadeb81a8863",
+        "platform": "linux",
+        "architecture": "x64",
+        "executableReviewSha256": "ca6c0e1f42be3120595bf6848937e7586ec862c87fa7aa111e89c7cc6e9a4650",
+        "executableVersion": "1.18.29",
+        "nativeRuntime": {
+          "sha256": "740e19abf0f63e4955c6ff57a089c5cb05acc52473e63615edadb66802c663ea",
+          "fileCount": 8,
+          "packageCount": 3
+        }
+      },
+      "releaseIdentityHash": "737ef53430bb94d857b154cdf51d5408a015bffc835f06330be25361ccc52c1d",
+      "protocol": {
+        "source": "scripts/harness-v2-transport.cjs",
+        "sha256": "40b47c16e0dec3c48c7dfacb690e0aa26d588d529ffb4a522d522cd1a184e034"
+      },
+      "canaryImplementation": {
+        "source": "scripts/harness-v2-canary.cjs",
+        "sha256": "f1c72e6fd232d6c07e5cad6874d2fc59bcb75737a603bc544dbea32c94b5bf3c"
+      },
+      "capabilityCases": {
+        "isolation": {
+          "source": "tests/source/harness-v2-opencode-capability-native.test.cjs",
+          "sha256": "43f50674c5bbfb0681cf9094cad1e432061c688f4fdf1985ecaf05420d98bc06",
+          "testName": "opencode closed native capability: isolation"
+        },
+        "topologyEnforcement": {
+          "source": "tests/source/harness-v2-opencode-capability-native.test.cjs",
+          "sha256": "43f50674c5bbfb0681cf9094cad1e432061c688f4fdf1985ecaf05420d98bc06",
+          "testName": "opencode closed native capability: topologyEnforcement"
+        },
+        "privateSkillRoot": {
+          "source": "tests/source/harness-v2-opencode-capability-native.test.cjs",
+          "sha256": "43f50674c5bbfb0681cf9094cad1e432061c688f4fdf1985ecaf05420d98bc06",
+          "testName": "opencode closed native capability: privateSkillRoot"
+        },
+        "eventStreaming": {
+          "source": "tests/source/harness-v2-opencode-capability-native.test.cjs",
+          "sha256": "43f50674c5bbfb0681cf9094cad1e432061c688f4fdf1985ecaf05420d98bc06",
+          "testName": "opencode closed native capability: eventStreaming"
+        },
+        "toolOutputCapture": {
+          "source": "tests/source/harness-v2-opencode-capability-native.test.cjs",
+          "sha256": "43f50674c5bbfb0681cf9094cad1e432061c688f4fdf1985ecaf05420d98bc06",
+          "testName": "opencode closed native capability: toolOutputCapture"
+        },
+        "stableChildIdentity": {
+          "source": "tests/source/harness-v2-opencode-capability-native.test.cjs",
+          "sha256": "43f50674c5bbfb0681cf9094cad1e432061c688f4fdf1985ecaf05420d98bc06",
+          "testName": "opencode closed native capability: stableChildIdentity"
+        },
+        "sameContextContinuation": {
+          "source": "tests/source/harness-v2-opencode-capability-native.test.cjs",
+          "sha256": "43f50674c5bbfb0681cf9094cad1e432061c688f4fdf1985ecaf05420d98bc06",
+          "testName": "opencode closed native capability: sameContextContinuation"
+        },
+        "cancellation": {
+          "source": "tests/source/harness-v2-opencode-capability-native.test.cjs",
+          "sha256": "43f50674c5bbfb0681cf9094cad1e432061c688f4fdf1985ecaf05420d98bc06",
+          "testName": "opencode closed native capability: cancellation"
+        },
+        "isolatedChecking": {
+          "source": "tests/source/harness-v2-opencode-capability-native.test.cjs",
+          "sha256": "43f50674c5bbfb0681cf9094cad1e432061c688f4fdf1985ecaf05420d98bc06",
+          "testName": "opencode closed native capability: isolatedChecking"
+        },
+        "processOwnership": {
+          "source": "tests/source/harness-v2-opencode-capability-native.test.cjs",
+          "sha256": "43f50674c5bbfb0681cf9094cad1e432061c688f4fdf1985ecaf05420d98bc06",
+          "testName": "opencode closed native capability: processOwnership"
+        },
+        "modelRouting": {
+          "source": "tests/source/harness-v2-opencode-capability-native.test.cjs",
+          "sha256": "43f50674c5bbfb0681cf9094cad1e432061c688f4fdf1985ecaf05420d98bc06",
+          "testName": "opencode closed native capability: modelRouting"
+        }
+      },
+      "liveEvidence": [
+        {
+          "id": "maintainer-opencode-kilo-capability-suite-22-pass",
+          "sha256": "668e75e45e5d05ee6b11a3df21e8ca6f5d3f52ab5288608e7a84cc383b87422b"
+        },
+        {
+          "id": "maintainer-r10-opencode-closed-canary-11-and-mission-failed",
+          "sha256": "3493d6b5f7f8b4c886b017d758de11799671f2683547e87388b8dfabc4e1fcc3"
+        }
+      ],
+      "reviewer": {
+        "issuer": "autoprompt-maintainer-release-review",
+        "reviewId": "opencode-v2.0.0-beta.1-maintainer-review-20260909"
+      },
+      "issuedAt": "2026-09-09T21:00:07.718Z",
+      "expiresAt": "2027-03-09T23:59:59.000Z",
+      "reviewDigest": "5eff8f11bcbf521cd0295c8b84be0e9fa126f2e91c77d1f185e0233a55e867d1"
+    },
+    {
+      "schemaVersion": "harness-v2-reviewed-local-canary.v1",
+      "policy": "reviewed-local-release-v1",
+      "provider": "prime",
+      "status": "reviewed",
+      "releaseScope": {
+        "provider": "prime",
+        "reviewedRuntimeDigest": "f3e62d934815c37d3804920742440c4f5e7e313545c556e3eab5f1c709437c75",
+        "platform": "linux",
+        "architecture": "x64",
+        "executableReviewSha256": "a6144570af2554b537530372cb3080b4f7713875e8d9d4677e453bb1040f1ec5",
+        "executableVersion": "0.7.2",
+        "nativeRuntime": {
+          "sha256": "d40eea979a82e98cb285252b2fc3a2b580957cd63fee20065989a8ea5544ccf8",
+          "fileCount": 21241,
+          "packageCount": 192
+        }
+      },
+      "releaseIdentityHash": "0f8cb1ac0c862b11f757fa6cfc6c4e77f8c7169a5c4f9257f46818aaf73d55be",
+      "protocol": {
+        "source": "scripts/harness-v2-transport.cjs",
+        "sha256": "40b47c16e0dec3c48c7dfacb690e0aa26d588d529ffb4a522d522cd1a184e034"
+      },
+      "canaryImplementation": {
+        "source": "scripts/harness-v2-canary.cjs",
+        "sha256": "f1c72e6fd232d6c07e5cad6874d2fc59bcb75737a603bc544dbea32c94b5bf3c"
+      },
+      "capabilityCases": {
+        "isolation": {
+          "source": "tests/source/harness-v2-pi-capability-native.test.cjs",
+          "sha256": "a109e39b2ab02d821894c0db8a4300eaec5f19f663805c0b671dab6b28d0519a",
+          "testName": "prime closed native capability: all six owned tools enforce write/private/network isolation and scratch witness"
+        },
+        "topologyEnforcement": {
+          "source": "tests/source/harness-v2-pi-capability-native.test.cjs",
+          "sha256": "a109e39b2ab02d821894c0db8a4300eaec5f19f663805c0b671dab6b28d0519a",
+          "testName": "prime closed native capability: hostile nested dispatch is denied and only the fixed controller topology is advertised"
+        },
+        "privateSkillRoot": {
+          "source": "tests/source/harness-v2-pi-capability-native.test.cjs",
+          "sha256": "a109e39b2ab02d821894c0db8a4300eaec5f19f663805c0b671dab6b28d0519a",
+          "testName": "prime closed native capability: private and ambient configuration are absent from actual model requests"
+        },
+        "eventStreaming": {
+          "source": "tests/source/harness-v2-pi-capability-native.test.cjs",
+          "sha256": "a109e39b2ab02d821894c0db8a4300eaec5f19f663805c0b671dab6b28d0519a",
+          "testName": "prime closed native capability: native event stream stays correlated to one context"
+        },
+        "toolOutputCapture": {
+          "source": "tests/source/harness-v2-pi-capability-native.test.cjs",
+          "sha256": "a109e39b2ab02d821894c0db8a4300eaec5f19f663805c0b671dab6b28d0519a",
+          "testName": "prime closed native capability: exact output bytes are committed in the controller receipt"
+        },
+        "stableChildIdentity": {
+          "source": "tests/source/harness-v2-pi-capability-native.test.cjs",
+          "sha256": "a109e39b2ab02d821894c0db8a4300eaec5f19f663805c0b671dab6b28d0519a",
+          "testName": "prime closed native capability: overlapping siblings retain unique contexts and drain"
+        },
+        "sameContextContinuation": {
+          "source": "tests/source/harness-v2-pi-capability-native.test.cjs",
+          "sha256": "a109e39b2ab02d821894c0db8a4300eaec5f19f663805c0b671dab6b28d0519a",
+          "testName": "prime closed native capability: resume reuses only its bound target context"
+        },
+        "cancellation": {
+          "source": "tests/source/harness-v2-pi-capability-native.test.cjs",
+          "sha256": "a109e39b2ab02d821894c0db8a4300eaec5f19f663805c0b671dab6b28d0519a",
+          "testName": "prime closed native capability: held child cancels while a fast sibling remains alive and drained"
+        },
+        "isolatedChecking": {
+          "source": "tests/source/harness-v2-pi-capability-native.test.cjs",
+          "sha256": "a109e39b2ab02d821894c0db8a4300eaec5f19f663805c0b671dab6b28d0519a",
+          "testName": "prime closed native capability: checker sees frozen candidate but writes only authenticated scratch"
+        },
+        "processOwnership": {
+          "source": "tests/source/harness-v2-pi-capability-native.test.cjs",
+          "sha256": "a109e39b2ab02d821894c0db8a4300eaec5f19f663805c0b671dab6b28d0519a",
+          "testName": "prime closed native capability: crash recovery drains the durable owned child"
+        },
+        "modelRouting": {
+          "source": "tests/source/harness-v2-pi-capability-native.test.cjs",
+          "sha256": "a109e39b2ab02d821894c0db8a4300eaec5f19f663805c0b671dab6b28d0519a",
+          "testName": "prime closed native capability: model and effort reach native wire while unsupported assignment is refused"
+        }
+      },
+      "liveEvidence": [
+        {
+          "id": "maintainer-prime-capability-suite-11-pass",
+          "sha256": "53e7b4a88d5fee8f659f84881faf4945c10e0e065e85872ada24633df10c6dea"
+        },
+        {
+          "id": "maintainer-r10-prime-closed-canary-11-and-mission-failed",
+          "sha256": "21af1a73b57d99f01a1eddc351ddc84f05fa5abaefc5bd76f99370a8f6db3f8b"
+        }
+      ],
+      "reviewer": {
+        "issuer": "autoprompt-maintainer-release-review",
+        "reviewId": "prime-v2.0.0-beta.1-maintainer-review-20260909"
+      },
+      "issuedAt": "2026-09-09T21:00:07.718Z",
+      "expiresAt": "2027-03-09T23:59:59.000Z",
+      "reviewDigest": "e8c2c79b3b8b6d6bb1ec299780a6bce569e1c3ef12c2dec9070bb77ecd0a6cdf"
+    },
+    {
+      "schemaVersion": "harness-v2-reviewed-local-canary.v1",
+      "policy": "reviewed-local-release-v1",
+      "provider": "reasonix",
+      "status": "reviewed",
+      "releaseScope": {
+        "provider": "reasonix",
+        "reviewedRuntimeDigest": "6beb4c2d1b0d93146ed0df1de33227d938605627aca7807dc31ae512054a9c3c",
+        "platform": "linux",
+        "architecture": "x64",
+        "executableReviewSha256": "d0864586ef4808a6645bbab6018db19279629573e46e01b3fd0d8aa6b71c0508",
+        "executableVersion": "1.30.0",
+        "nativeRuntime": {
+          "sha256": "39f781a3d3ba44d25b0226f158e1a47e4351054290a3c06e7b844fb533a8af9f",
+          "fileCount": 1,
+          "packageCount": 0
+        }
+      },
+      "releaseIdentityHash": "f4cbdce63878f5befd15110de3c52e873f28f7bca4aeff5102a29768e0810aba",
+      "protocol": {
+        "source": "agents/reasonix/workflow/transport.js",
+        "sha256": "0a1886d2abd2ec0c4b7d555211067b3ae52b05e503231ecba912e7d591dc3fca"
+      },
+      "canaryImplementation": {
+        "source": "scripts/harness-v2-canary.cjs",
+        "sha256": "f1c72e6fd232d6c07e5cad6874d2fc59bcb75737a603bc544dbea32c94b5bf3c"
+      },
+      "capabilityCases": {
+        "isolation": {
+          "source": "tests/source/harness-v2-reasonix-capability-native.test.cjs",
+          "sha256": "f0f2cded367627b13af8acd164f4984b2ff48646f6f9296fc95d82892d864f01",
+          "testName": "reasonix closed native capability: isolation"
+        },
+        "topologyEnforcement": {
+          "source": "tests/source/harness-v2-reasonix-capability-native.test.cjs",
+          "sha256": "f0f2cded367627b13af8acd164f4984b2ff48646f6f9296fc95d82892d864f01",
+          "testName": "reasonix closed native capability: topology"
+        },
+        "privateSkillRoot": {
+          "source": "tests/source/harness-v2-reasonix-capability-native.test.cjs",
+          "sha256": "f0f2cded367627b13af8acd164f4984b2ff48646f6f9296fc95d82892d864f01",
+          "testName": "reasonix closed native capability: privateConfiguration"
+        },
+        "eventStreaming": {
+          "source": "tests/source/harness-v2-reasonix-capability-native.test.cjs",
+          "sha256": "f0f2cded367627b13af8acd164f4984b2ff48646f6f9296fc95d82892d864f01",
+          "testName": "reasonix closed native capability: intermediateEvents"
+        },
+        "toolOutputCapture": {
+          "source": "tests/source/harness-v2-reasonix-capability-native.test.cjs",
+          "sha256": "f0f2cded367627b13af8acd164f4984b2ff48646f6f9296fc95d82892d864f01",
+          "testName": "reasonix closed native capability: exactToolOutput"
+        },
+        "stableChildIdentity": {
+          "source": "tests/source/harness-v2-reasonix-capability-native.test.cjs",
+          "sha256": "f0f2cded367627b13af8acd164f4984b2ff48646f6f9296fc95d82892d864f01",
+          "testName": "reasonix closed native capability: concurrency"
+        },
+        "sameContextContinuation": {
+          "source": "tests/source/harness-v2-reasonix-capability-native.test.cjs",
+          "sha256": "f0f2cded367627b13af8acd164f4984b2ff48646f6f9296fc95d82892d864f01",
+          "testName": "reasonix closed native capability: resume"
+        },
+        "cancellation": {
+          "source": "tests/source/harness-v2-reasonix-capability-native.test.cjs",
+          "sha256": "f0f2cded367627b13af8acd164f4984b2ff48646f6f9296fc95d82892d864f01",
+          "testName": "reasonix closed native capability: cancellation"
+        },
+        "isolatedChecking": {
+          "source": "tests/source/harness-v2-reasonix-capability-native.test.cjs",
+          "sha256": "f0f2cded367627b13af8acd164f4984b2ff48646f6f9296fc95d82892d864f01",
+          "testName": "reasonix closed native capability: checker"
+        },
+        "processOwnership": {
+          "source": "tests/source/harness-v2-reasonix-capability-native.test.cjs",
+          "sha256": "f0f2cded367627b13af8acd164f4984b2ff48646f6f9296fc95d82892d864f01",
+          "testName": "reasonix closed native capability: processOwnership"
+        },
+        "modelRouting": {
+          "source": "tests/source/harness-v2-reasonix-capability-native.test.cjs",
+          "sha256": "f0f2cded367627b13af8acd164f4984b2ff48646f6f9296fc95d82892d864f01",
+          "testName": "reasonix closed native capability: modelEffort"
+        }
+      },
+      "liveEvidence": [
+        {
+          "id": "maintainer-reasonix-capability-suite-11-pass",
+          "sha256": "b4bfd605b49a5d2573d60d7d4ddb6d1a670bf19c39f3db9fefc05e63dfd6a739"
+        },
+        {
+          "id": "maintainer-reasonix-held-signal-cancellation-proof",
+          "sha256": "561dbe8321cd1fb1d48eadc6fb78d264483a4fe807012f2c6bc5abafb0546b0c"
+        },
+        {
+          "id": "maintainer-reasonix-held-expiry-cancellation-proof",
+          "sha256": "65eb64785b321c46a9251dff7404c2da7a49fe071dbe566afcfcb22a55cdbb76"
+        },
+        {
+          "id": "maintainer-r10-reasonix-closed-canary-11-and-mission-failed",
+          "sha256": "3d531f1dada5031a25f6b19323e192990cfa2320c535fe30d1c7ede7082bbad4"
+        }
+      ],
+      "reviewer": {
+        "issuer": "autoprompt-maintainer-release-review",
+        "reviewId": "reasonix-v2.0.0-beta.1-maintainer-review-20260909"
+      },
+      "issuedAt": "2026-09-09T21:00:07.718Z",
+      "expiresAt": "2027-03-09T23:59:59.000Z",
+      "reviewDigest": "79a713bcce3a6e34ba9dfb1094988e0e291ec0df2f93e7e4e3992543acf41568"
+    },
+    {
+      "schemaVersion": "harness-v2-reviewed-local-canary.v1",
+      "policy": "reviewed-local-release-v1",
+      "provider": "vscode",
+      "status": "reviewed",
+      "releaseScope": {
+        "provider": "vscode",
+        "reviewedRuntimeDigest": "ea966795d5cfc8f1b3f49ff8c944005a6a813fd9545cc9962ed9b2f63ea7c835",
+        "platform": "linux",
+        "architecture": "x64",
+        "executableReviewSha256": "34912494509486296a3bd9aecb512694c98523d0f6f23cfceb5a95b5088c721b",
+        "executableVersion": "1.136.1",
+        "nativeRuntime": {
+          "sha256": "8a0f5b7cf0cbe18c365b70fdb037a7486f6d38aea8a2f0ded2902e68b190aa9e",
+          "fileCount": 2423,
+          "packageCount": 1
+        }
+      },
+      "releaseIdentityHash": "4f6a69aed45ff44b3aa80f7673d660e47eb4a1d62a530f156197a5b8c567620b",
+      "protocol": {
+        "source": "scripts/harness-v2-transport.cjs",
+        "sha256": "40b47c16e0dec3c48c7dfacb690e0aa26d588d529ffb4a522d522cd1a184e034"
+      },
+      "canaryImplementation": {
+        "source": "scripts/harness-v2-canary.cjs",
+        "sha256": "f1c72e6fd232d6c07e5cad6874d2fc59bcb75737a603bc544dbea32c94b5bf3c"
+      },
+      "capabilityCases": {
+        "isolation": {
+          "source": "tests/source/harness-v2-vscode-capability-native.test.cjs",
+          "sha256": "221e1360c5e89b98dccdcefce6e181f75dbc4007585d55aa61dced7a18e1bc04",
+          "testName": "vscode native capability isolation"
+        },
+        "topologyEnforcement": {
+          "source": "tests/source/harness-v2-vscode-capability-native.test.cjs",
+          "sha256": "221e1360c5e89b98dccdcefce6e181f75dbc4007585d55aa61dced7a18e1bc04",
+          "testName": "vscode native capability topologyEnforcement"
+        },
+        "privateSkillRoot": {
+          "source": "tests/source/harness-v2-vscode-capability-native.test.cjs",
+          "sha256": "221e1360c5e89b98dccdcefce6e181f75dbc4007585d55aa61dced7a18e1bc04",
+          "testName": "vscode native capability privateSkillRoot"
+        },
+        "eventStreaming": {
+          "source": "tests/source/harness-v2-vscode-capability-native.test.cjs",
+          "sha256": "221e1360c5e89b98dccdcefce6e181f75dbc4007585d55aa61dced7a18e1bc04",
+          "testName": "vscode native capability eventStreaming"
+        },
+        "toolOutputCapture": {
+          "source": "tests/source/harness-v2-vscode-capability-native.test.cjs",
+          "sha256": "221e1360c5e89b98dccdcefce6e181f75dbc4007585d55aa61dced7a18e1bc04",
+          "testName": "vscode native capability toolOutputCapture"
+        },
+        "stableChildIdentity": {
+          "source": "tests/source/harness-v2-vscode-capability-native.test.cjs",
+          "sha256": "221e1360c5e89b98dccdcefce6e181f75dbc4007585d55aa61dced7a18e1bc04",
+          "testName": "vscode native capability stableChildIdentity"
+        },
+        "sameContextContinuation": {
+          "source": "tests/source/harness-v2-vscode-capability-native.test.cjs",
+          "sha256": "221e1360c5e89b98dccdcefce6e181f75dbc4007585d55aa61dced7a18e1bc04",
+          "testName": "vscode native capability sameContextContinuation"
+        },
+        "cancellation": {
+          "source": "tests/source/harness-v2-vscode-capability-native.test.cjs",
+          "sha256": "221e1360c5e89b98dccdcefce6e181f75dbc4007585d55aa61dced7a18e1bc04",
+          "testName": "vscode native capability cancellation"
+        },
+        "isolatedChecking": {
+          "source": "tests/source/harness-v2-vscode-capability-native.test.cjs",
+          "sha256": "221e1360c5e89b98dccdcefce6e181f75dbc4007585d55aa61dced7a18e1bc04",
+          "testName": "vscode native capability isolatedChecking"
+        },
+        "processOwnership": {
+          "source": "tests/source/harness-v2-vscode-capability-native.test.cjs",
+          "sha256": "221e1360c5e89b98dccdcefce6e181f75dbc4007585d55aa61dced7a18e1bc04",
+          "testName": "vscode native capability processOwnership"
+        },
+        "modelRouting": {
+          "source": "tests/source/harness-v2-vscode-capability-native.test.cjs",
+          "sha256": "221e1360c5e89b98dccdcefce6e181f75dbc4007585d55aa61dced7a18e1bc04",
+          "testName": "vscode native capability modelRouting"
+        }
+      },
+      "liveEvidence": [
+        {
+          "id": "maintainer-vscode-capability-suite-11-pass",
+          "sha256": "7bda42f1d38b79dfa67622577d6196414a7e17f778f2e5d67f99340d6681b649"
+        },
+        {
+          "id": "maintainer-vscode-structured-native-review-5-pass-1-live-skip",
+          "sha256": "6819dc3eab98bf4d8faf979960c3b9d094a73604c08e17be3ad1e2c4a9247c9c"
+        },
+        {
+          "id": "maintainer-vscode-owned-display-review-5-pass-1-live-skip",
+          "sha256": "0294f0f1775761627725722f9b1835d6a6ed0fae5a1c5fe2f17c26d4f465b868"
+        },
+        {
+          "id": "maintainer-r10-vscode-closed-canary-11-and-mission-failed",
+          "sha256": "a5bd7211bec447596ce7cd8a5450e25ccf41d0791bc62949aa7dcfd74c9c85e8"
+        }
+      ],
+      "reviewer": {
+        "issuer": "autoprompt-maintainer-release-review",
+        "reviewId": "vscode-v2.0.0-beta.1-maintainer-review-20260909"
+      },
+      "issuedAt": "2026-09-09T21:00:07.718Z",
+      "expiresAt": "2027-03-09T23:59:59.000Z",
+      "reviewDigest": "d722f94b8f461d29e9f3e46f9003807ae6913d257c3060f915f4aea276810b48"
+    }
+  ],
+  "note": "Maintainer-authenticated exact-release reviews under reviewed-local-release-v1; each activation still requires a fresh closed native canary. No independent signature claim."
+}

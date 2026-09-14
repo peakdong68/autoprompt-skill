@@ -10,21 +10,33 @@ const test = require('node:test')
 
 const ROOT = path.resolve(__dirname, '..', '..')
 
-function findBash() {
-  const candidates = process.platform === 'win32'
-    ? [
-        path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Git', 'bin', 'bash.exe'),
-        path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Git', 'bin', 'bash.exe'),
-        'bash',
-      ]
-    : ['bash']
+const { resolveBash: findBash } = require('../helpers/resolve-bash.cjs')
 
-  for (const candidate of candidates) {
-    const result = childProcess.spawnSync(candidate, ['--version'], { encoding: 'utf8' })
-    if (result.status === 0) return candidate
-  }
-  return null
-}
+test('POSIX payload staging returns a private physical directory with an aliased TMPDIR', {
+  skip: process.platform === 'win32',
+}, t => {
+  const sandbox = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-stage-path-')))
+  t.after(() => fs.rmSync(sandbox, { recursive: true, force: true }))
+  const physical = path.join(sandbox, 'physical')
+  const alias = path.join(sandbox, 'alias')
+  fs.mkdirSync(physical, { mode: 0o700 })
+  fs.symlinkSync(physical, alias)
+  const completed = childProcess.spawnSync(findBash(), ['-c',
+    '. scripts/install/lib/install-lib.sh; _autoprompt_physical_temp_directory'], {
+    cwd: ROOT, encoding: 'utf8', env: { ...process.env, TMPDIR: alias },
+  })
+  assert.equal(completed.status, 0, completed.stderr)
+  const stage = completed.stdout
+  // BSD mktemp may select Darwin's per-user temporary directory instead of
+  // TMPDIR. The created directory must be physical and private in either case.
+  t.after(() => {
+    try { fs.rmdirSync(stage) } catch (error) { if (error.code !== 'ENOENT') throw error }
+  })
+  assert.equal(fs.realpathSync(stage), stage)
+  assert.equal(fs.lstatSync(stage).isDirectory(), true)
+  assert.equal(fs.statSync(stage).mode & 0o777, 0o700)
+  assert.equal(fs.lstatSync(alias).isSymbolicLink(), true)
+})
 
 test('POSIX extras preparation resolves the runtime helper from the repository root', () => {
   const bash = findBash()
@@ -56,12 +68,15 @@ printf '%s\\n' "$tool"
   assert.match(completed.stdout.replace(/\\/g, '/'), /\/scripts\/runtime-payload\.cjs\s*$/)
 })
 
-test('PowerShell extras preparation resolves the runtime helper from the repository root', () => {
+test('PowerShell extras preparation resolves the runtime helper from the repository root', t => {
   const shell = process.platform === 'win32' ? 'powershell.exe' : 'pwsh'
   const probe = childProcess.spawnSync(shell, ['-NoProfile', '-Command', '$PSVersionTable.PSVersion'], {
     encoding: 'utf8',
   })
-  assert.equal(probe.status, 0, `${shell} is required to test install-lib.ps1`)
+  if (probe.status !== 0) {
+    t.skip(`${shell} is not available`)
+    return
+  }
 
   const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'autoprompt-extras-path-'))
   try {

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": "2.0.0",
+  "evidenceClass": "schema-conformance-not-real-provider-canary",
+  "providerIds": [
+    "claude",
+    "codex",
+    "deepseek",
+    "grok",
+    "hermes",
+    "kilo",
+    "omp",
+    "opencode",
+    "prime",
+    "reasonix",
+    "vscode"
+  ],
+  "requiredCapabilityAxes": [
+    "isolation",
+    "topologyEnforcement",
+    "privateSkillRoot",
+    "eventStreaming",
+    "toolOutputCapture",
+    "stableChildIdentity",
+    "sameContextContinuation",
+    "cancellation",
+    "isolatedChecking",
+    "processOwnership",
+    "modelRouting"
+  ],
+  "behavioralCases": [
+    "route",
+    "edge",
+    "permission",
+    "resume",
+    "terminal"
+  ],
+  "admissionRule": "fail-closed-unless-current-signed-attestation-proves-every-required-capability",
+  "realProviderCanaryRequiredForSupportedClaim": true
+}
