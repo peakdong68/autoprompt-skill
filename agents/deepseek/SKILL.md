@@ -77,6 +77,19 @@ path=<PROMPTS.txt> version=<N> bytes=<UTF-8 prefix byte count> hash=sha256:<64 h
 
 Workers verify path, version, bound-prefix hash, prefix byte length, and nonce before acting. Send the activation envelope plus role, objective, boundary, dependencies, acceptance criteria, roadmap/evidence pointers with hashes, output schema/path, and model/effort status. Do not paste the mission, transcript, full roadmap, doctrine, or prior adversarial reasoning. Preserve blind review.
 
+### Ingested task source (frozen format)
+
+When the mission references a task-source document, the first roadmap author ingests it into the ledger. The author writes this block; `ap-goal-checker`, `ap-scribe`, and `ap-re-anchor` parse it:
+
+```text
+=== PROMPT N ===
+<the operator's mission text, verbatim>
+SOURCE path=<path as referenced> root=<repo|cwd|governance> form=<designated|implicit-single|directive|dir-marker> bytes=<UTF-8 byte count> hash=sha256:<64 hex>
+<the source file's bytes, byte-identical>
+```
+
+Fixed order, five fields, one header per ingested source, in mission order. `bytes` delimits the ingested text, so no end marker is written; the copy is byte-identical to the source and line endings are never re-encoded. The operator never writes these lines. Changing this format increments the ledger `version` boundary. A directory reference resolves to exactly one document carrying frontmatter `autoprompt-source: true` or, only when that yields none, the single file named `HANDOFF.md` (case-insensitive), one level deep; zero or several matches is an ambiguity to escalate, never a guess.
+
 ## 7. Hierarchy and dispatch
 
 Every worker is an installed, registered `ap-*` persona. Its custom-agent definition plus the dispatched task brief are its complete operating context. A worker must never load, invoke, or re-invoke the Autoprompt skill or start a nested Autoprompt run; it executes only its persona instructions and assigned brief. Every dispatch binds the intended persona's registered name as the agent type: an anonymous, `general-purpose`, or dynamically invented agent is an invalid dispatch, and any child dispatch must name another registered `ap-*` persona.
